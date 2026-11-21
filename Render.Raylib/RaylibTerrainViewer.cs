@@ -11,6 +11,14 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 public static class RaylibTerrainViewer
 {
+    private enum VoxelEditMode : byte
+    {
+        Off,
+        CarveSphere,
+        AddSphere,
+        PaintSphere
+    }
+
     public static void Run(WorldMap worldMap)
     {
         ArgumentNullException.ThrowIfNull(worldMap);
@@ -80,6 +88,9 @@ public static class RaylibTerrainViewer
             maximumCutHeight);
         bool cutHeightKeyWasHeld = false;
         string focusName = cutawayMode ? "LOWER TUNNEL" : "SURFACE";
+        VoxelEditMode voxelEditMode = VoxelEditMode.Off;
+        float voxelBrushRadiusMeters = 1.5f;
+        ushort voxelBrushMaterial = 1;
 
         if (cutawayMode)
             FocusLowerTunnel(camera, terrain);
@@ -333,6 +344,63 @@ public static class RaylibTerrainViewer
                         deltaTime,
                         cameraWheel,
                         mouseInputEnabled: !layerPanel.IsPointerOverPanel(GetMousePosition()));
+
+                    if (menu.Settings.TerrainMode == TerrainRenderMode.Voxel)
+                    {
+                        if (IsKeyPressed(KeyboardKey.F3))
+                        {
+                            voxelEditMode = (VoxelEditMode)(
+                                ((int)voxelEditMode + 1) % 4);
+                        }
+
+                        if (IsKeyPressed(KeyboardKey.F4))
+                            voxelBrushMaterial = (ushort)(voxelBrushMaterial % 3 + 1);
+
+                        if (IsKeyPressed(KeyboardKey.F5))
+                            voxelBrushRadiusMeters = Math.Max(
+                                0.1f, voxelBrushRadiusMeters - 0.25f);
+
+                        if (IsKeyPressed(KeyboardKey.F6))
+                            voxelBrushRadiusMeters = Math.Min(
+                                12f, voxelBrushRadiusMeters + 0.25f);
+
+                        if (voxelEditMode != VoxelEditMode.Off &&
+                            IsMouseButtonPressed(MouseButton.Left) &&
+                            !layerPanel.IsPointerOverPanel(GetMousePosition()))
+                        {
+                            Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
+                            if (worldMap.Voxels.TryRaycast(
+                                editRay.Position,
+                                editRay.Direction,
+                                menu.Settings.RenderDistanceMeters,
+                                out Vector3 hitPosition,
+                                out Vector3 hitNormal))
+                            {
+                                switch (voxelEditMode)
+                                {
+                                    case VoxelEditMode.CarveSphere:
+                                        worldMap.CarveVoxelSphere(
+                                            hitPosition - hitNormal * voxelBrushRadiusMeters * 0.2f,
+                                            voxelBrushRadiusMeters);
+                                        break;
+
+                                    case VoxelEditMode.AddSphere:
+                                        worldMap.AddVoxelSphere(
+                                            hitPosition + hitNormal * voxelBrushRadiusMeters * 0.25f,
+                                            voxelBrushRadiusMeters,
+                                            voxelBrushMaterial);
+                                        break;
+
+                                    case VoxelEditMode.PaintSphere:
+                                        worldMap.PaintVoxelSphere(
+                                            hitPosition - hitNormal * voxelBrushRadiusMeters * 0.2f,
+                                            voxelBrushRadiusMeters,
+                                            voxelBrushMaterial);
+                                        break;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
@@ -380,7 +448,11 @@ public static class RaylibTerrainViewer
                         focusName,
                         menu.Settings,
                         menu.HudFont,
-                        camera);
+                        camera,
+                        GetVoxelToolStatus(
+                            voxelEditMode,
+                            voxelBrushRadiusMeters,
+                            voxelBrushMaterial));
 
                 if (!menu.IsOpen)
                     layerPanel.Draw(menu.Settings, maximumCutHeight, menu.HudFont);
@@ -396,6 +468,22 @@ public static class RaylibTerrainViewer
             renderer?.Dispose();
             CloseWindow();
         }
+    }
+
+    private static string GetVoxelToolStatus(
+        VoxelEditMode mode,
+        float radiusMeters,
+        ushort materialId)
+    {
+        string name = mode switch
+        {
+            VoxelEditMode.CarveSphere => "CARVE SPHERE",
+            VoxelEditMode.AddSphere => "ADD SPHERE",
+            VoxelEditMode.PaintSphere => "PAINT SPHERE",
+            _ => "EDIT OFF"
+        };
+
+        return $"VOXEL TOOL {name} | RADIUS {radiusMeters:0.00}m | MATERIAL {materialId}";
     }
 
     private static void FocusLowerTunnel(
@@ -431,7 +519,8 @@ public static class RaylibTerrainViewer
         string focusName,
         RaylibViewerSettings settings,
         Font font,
-        OrbitCameraController camera)
+        OrbitCameraController camera,
+        string voxelToolStatus)
     {
         int screenWidth = Math.Max(1, GetScreenWidth());
         int screenHeight = Math.Max(1, GetScreenHeight());
@@ -515,6 +604,15 @@ public static class RaylibTerrainViewer
                 "Wheel zoom | Q/E faster slice | PgUp/PgDn 0.1m | Shift+Wheel 0.1m",
                 16f,
                 Color.RayWhite));
+
+            if (settings.TerrainMode == TerrainRenderMode.Voxel)
+            {
+                lines.Add((voxelToolStatus, 15f, Color.LightGray));
+                lines.Add((
+                    "F3 tool | LMB apply | F4 material | F5/F6 brush radius",
+                    15f,
+                    Color.LightGray));
+            }
         }
 
         float panelHeight = padding * 2f + lines.Count * lineGap;
