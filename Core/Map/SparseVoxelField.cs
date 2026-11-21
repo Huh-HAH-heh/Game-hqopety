@@ -1018,6 +1018,140 @@ public sealed class SparseVoxelField
     /// normal points toward air; points below it become solid and points
     /// above it become air. A smooth radial falloff avoids a hard brush rim.
     /// </summary>
+
+    /// <summary>
+    /// Adds or carves a ramp-shaped triangular prism. The horizontal direction
+    /// is taken from the two drag endpoints; vertical change uses the endpoint
+    /// height when present, otherwise the brush radius supplies the ramp rise.
+    /// </summary>
+    public void AddRamp(
+        Vector3 startMeters,
+        Vector3 endMeters,
+        float widthMeters,
+        float thicknessMeters,
+        ushort materialId) =>
+        EditRamp(startMeters, endMeters, widthMeters, thicknessMeters, true, materialId);
+
+    public void CarveRamp(
+        Vector3 startMeters,
+        Vector3 endMeters,
+        float widthMeters,
+        float thicknessMeters) =>
+        EditRamp(startMeters, endMeters, widthMeters, thicknessMeters, false, 0);
+
+    private void EditRamp(
+        Vector3 startMeters,
+        Vector3 endMeters,
+        float widthMeters,
+        float thicknessMeters,
+        bool add,
+        ushort materialId)
+    {
+        if (!IsFinite(startMeters) || !IsFinite(endMeters))
+            throw new ArgumentOutOfRangeException(nameof(endMeters));
+        if (!float.IsFinite(widthMeters) || widthMeters <= 0f || widthMeters > 8f)
+            throw new ArgumentOutOfRangeException(nameof(widthMeters));
+        if (!float.IsFinite(thicknessMeters) ||
+            thicknessMeters <= 0f || thicknessMeters > 8f)
+            throw new ArgumentOutOfRangeException(nameof(thicknessMeters));
+        if (add && materialId == 0)
+            throw new ArgumentOutOfRangeException(nameof(materialId));
+
+        Vector2 horizontal = new(
+            endMeters.X - startMeters.X,
+            endMeters.Z - startMeters.Z);
+        float length = horizontal.Length();
+        if (length < 0.2f)
+            throw new ArgumentOutOfRangeException(nameof(endMeters));
+
+        Vector2 direction = horizontal / length;
+        Vector2 side = new(-direction.Y, direction.X);
+        float halfWidth = widthMeters * 0.5f;
+        float verticalDelta = endMeters.Y - startMeters.Y;
+        float topEnd = MathF.Abs(verticalDelta) >= 0.1f
+            ? endMeters.Y
+            : startMeters.Y + MathF.Max(0.2f, thicknessMeters);
+
+        float baseY = MathF.Min(startMeters.Y, topEnd) - thicknessMeters;
+        float maximumTop = MathF.Max(startMeters.Y, topEnd);
+        float slope = (topEnd - startMeters.Y) / length;
+        float slopeScale = MathF.Sqrt(1f + slope * slope);
+
+        float extentX = MathF.Abs(direction.X) * length +
+            MathF.Abs(side.X) * halfWidth;
+        float extentZ = MathF.Abs(direction.Y) * length +
+            MathF.Abs(side.Y) * halfWidth;
+        float minWorldX = MathF.Min(startMeters.X, endMeters.X) -
+            MathF.Abs(side.X) * halfWidth - VoxelSizeMeters;
+        float maxWorldX = MathF.Max(startMeters.X, endMeters.X) +
+            MathF.Abs(side.X) * halfWidth + VoxelSizeMeters;
+        float minWorldZ = MathF.Min(startMeters.Z, endMeters.Z) -
+            MathF.Abs(side.Y) * halfWidth - VoxelSizeMeters;
+        float maxWorldZ = MathF.Max(startMeters.Z, endMeters.Z) +
+            MathF.Abs(side.Y) * halfWidth + VoxelSizeMeters;
+        float minWorldY = baseY - VoxelSizeMeters;
+        float maxWorldY = maximumTop + VoxelSizeMeters;
+
+        int minX = Math.Clamp(
+            (int)MathF.Floor(minWorldX / VoxelSizeMeters - 0.5f), 0, Width);
+        int maxX = Math.Clamp(
+            (int)MathF.Ceiling(maxWorldX / VoxelSizeMeters - 0.5f), 0, Width);
+        int minY = Math.Clamp(
+            (int)MathF.Floor(minWorldY / VoxelSizeMeters - 0.5f), 0, Height);
+        int maxY = Math.Clamp(
+            (int)MathF.Ceiling(maxWorldY / VoxelSizeMeters - 0.5f), 0, Height);
+        int minZ = Math.Clamp(
+            (int)MathF.Floor(minWorldZ / VoxelSizeMeters - 0.5f), 0, Depth);
+        int maxZ = Math.Clamp(
+            (int)MathF.Ceiling(maxWorldZ / VoxelSizeMeters - 0.5f), 0, Depth);
+        VoxelBounds bounds = new(minX, minY, minZ, maxX, maxY, maxZ);
+        if (minX >= maxX || minY >= maxY || minZ >= maxZ)
+            return;
+
+        ValidateEditWork(bounds);
+        long revision = Version + 1;
+        HashSet<ChunkCoordinate> touched = new();
+
+        for (int z = minZ; z < maxZ; z++)
+        for (int y = minY; y < maxY; y++)
+        for (int x = minX; x < maxX; x++)
+        {
+            float pointX = (x + 0.5f) * VoxelSizeMeters;
+            float pointY = (y + 0.5f) * VoxelSizeMeters;
+            float pointZ = (z + 0.5f) * VoxelSizeMeters;
+            float relativeX = pointX - startMeters.X;
+            float relativeZ = pointZ - startMeters.Z;
+            float along = relativeX * direction.X + relativeZ * direction.Y;
+            float across = MathF.Abs(
+                relativeX * side.X + relativeZ * side.Y) - halfWidth;
+
+            float signedDistance = MathF.Max(
+                MathF.Max(-along, along - length),
+                MathF.Max(
+                    across,
+                    MathF.Max(
+                        baseY - pointY,
+                        (pointY - (startMeters.Y + slope * along)) / slopeScale)));
+
+            float oldDensity = GetDensity(x, y, z);
+            float nextDensity = add
+                ? MathF.Max(oldDensity, -signedDistance)
+                : MathF.Min(oldDensity, signedDistance);
+            if (Quantize(nextDensity) == Quantize(oldDensity))
+                continue;
+
+            SetDensityOverride(
+                x, y, z, nextDensity, oldDensity, revision, touched);
+
+            if (add && nextDensity > 0f)
+                SetMaterialOverride(x, y, z, materialId, revision, touched);
+            else if (!add && nextDensity <= 0f)
+                SetMaterialOverride(x, y, z, 0, revision, touched);
+        }
+
+        CompleteEdit(bounds, revision, touched);
+    }
+
     public void FlattenPlane(
         Vector3 centerMeters,
         Vector3 normal,

@@ -24,6 +24,8 @@ public static class RaylibTerrainViewer
         AddCapsule,
         CarveBox,
         AddBox,
+        CarveRamp,
+        AddRamp,
         FlattenPlane
     }
 
@@ -371,7 +373,7 @@ public static class RaylibTerrainViewer
                         if (IsKeyPressed(KeyboardKey.F3))
                         {
                             voxelEditMode = (VoxelEditMode)(
-                                ((int)voxelEditMode + 1) % 10);
+                                ((int)voxelEditMode + 1) % 12);
                         }
 
                         if (IsKeyPressed(KeyboardKey.F4))
@@ -415,7 +417,8 @@ public static class RaylibTerrainViewer
                                         hitNormal * voxelBrushRadiusMeters * 0.2f;
                                     voxelStrokeActive = true;
                                 }
-                                else if (voxelEditMode is VoxelEditMode.CarveBox or VoxelEditMode.AddBox)
+                                else if (voxelEditMode is VoxelEditMode.CarveBox or VoxelEditMode.AddBox or
+                                         VoxelEditMode.CarveRamp or VoxelEditMode.AddRamp)
                                 {
                                     voxelStrokeStart = hitPosition;
                                     voxelStrokeActive = true;
@@ -491,6 +494,25 @@ public static class RaylibTerrainViewer
                                         else
                                             worldMap.AddVoxelBox(
                                                 minimum, maximum, voxelBrushMaterial);
+                                    }
+                                }
+                                else if (voxelEditMode is VoxelEditMode.CarveRamp or VoxelEditMode.AddRamp)
+                                {
+                                    using (worldMap.Voxels.BeginUndoableEdit())
+                                    {
+                                        if (voxelEditMode == VoxelEditMode.CarveRamp)
+                                            worldMap.CarveVoxelRamp(
+                                                voxelStrokeStart,
+                                                hitPosition,
+                                                voxelBrushRadiusMeters * 2f,
+                                                voxelBrushRadiusMeters);
+                                        else
+                                            worldMap.AddVoxelRamp(
+                                                voxelStrokeStart,
+                                                hitPosition,
+                                                voxelBrushRadiusMeters * 2f,
+                                                voxelBrushRadiusMeters,
+                                                voxelBrushMaterial);
                                     }
                                 }
                             }
@@ -628,6 +650,8 @@ public static class RaylibTerrainViewer
             VoxelEditMode.AddCapsule => "ADD CAPSULE",
             VoxelEditMode.CarveBox => "CARVE BOX",
             VoxelEditMode.AddBox => "ADD BOX",
+            VoxelEditMode.CarveRamp => "CARVE RAMP",
+            VoxelEditMode.AddRamp => "ADD RAMP",
             VoxelEditMode.FlattenPlane => "FLATTEN PLANE",
             _ => "EDIT OFF"
         };

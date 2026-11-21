@@ -1548,6 +1548,21 @@ public sealed class WorldMap
         ushort materialId) =>
         Voxels.FillBox(minimumMeters, maximumMeters, materialId);
 
+    public void AddVoxelRamp(
+        Vector3 startMeters,
+        Vector3 endMeters,
+        float widthMeters,
+        float thicknessMeters,
+        ushort materialId) =>
+        Voxels.AddRamp(startMeters, endMeters, widthMeters, thicknessMeters, materialId);
+
+    public void CarveVoxelRamp(
+        Vector3 startMeters,
+        Vector3 endMeters,
+        float widthMeters,
+        float thicknessMeters) =>
+        Voxels.CarveRamp(startMeters, endMeters, widthMeters, thicknessMeters);
+
     public void FlattenVoxelPlane(
         Vector3 centerMeters,
         Vector3 normal,
