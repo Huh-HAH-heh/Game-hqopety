@@ -1934,7 +1934,7 @@ void main()
         DrawText(window, _testSceneTexts);
     }
 
-    public static int TestSceneCount => 6;
+    public static int TestSceneCount => 5;
 
     public static string GetTestSceneName(int index) =>
         Math.Clamp(index, 0, TestSceneCount - 1) switch
@@ -1943,8 +1943,7 @@ void main()
             1 => "Восприятие и укрытия",
             2 => "Дальний бой",
             3 => "Рельеф и генерация мира",
-            4 => "Ближний бой — разрушенный город",
-            _ => "Независимые воксельные террейны"
+            _ => "Ближний бой — разрушенный город"
         };
 
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>

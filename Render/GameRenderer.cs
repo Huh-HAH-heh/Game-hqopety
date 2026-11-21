@@ -54,6 +54,8 @@ public sealed class GameRenderer
     private readonly GameCamera _camera;
     private readonly GameInput _input;
     private readonly MapRenderSystem _mapRenderer;
+    private readonly GameControlBindings _controlBindings = GameControlBindings.Load();
+    private int _capturingControlIndex = -1;
     private readonly VoxelTerrainSystem _voxelTerrains = new();
     private readonly IndependentVoxelTerrainRenderer _voxelTerrainRenderer = new();
     private bool _independentVoxelTerrainMode;
@@ -183,8 +185,8 @@ public sealed class GameRenderer
 
     private bool _showDebugGrid;
     private int _visibleMaxLayer;
-    private bool _pageUpHeld;
-    private bool _pageDownHeld;
+    private bool _sliceUpHeld;
+    private bool _sliceDownHeld;
     private int GetTerrainSliceStepLayers() =>
         _worldMap.UsesDiscreteBlockTerrain
             ? WorldMap.HeightUnitsPerMeter
@@ -1361,7 +1363,7 @@ public sealed class GameRenderer
             $"Vision {debug} | " +
             $"Visible={visible} Blocked={blocked} " +
             $"FOV={outsideFov} Range={outOfRange} | " +
-            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  PgUp/PgDn или Shift+колесо=срез  Колесо=масштаб  СКМ=панорама  Камера={GetCameraModeLabel()}  Tab=проекция";
+            $"Срез Z={(_visibleMaxLayer + 1) * 0.1f:0.0}/{_worldMap.LayerCount * 0.1f:0.0} м  •  NumPad +/-=срез  Колесо=масштаб  СКМ=панорама  Камера={GetCameraModeLabel()}";
     }
 
     private void StartSimulationThread()
@@ -3520,19 +3522,6 @@ public sealed class GameRenderer
                     return;
                 }
 
-                bool shiftHeld =
-                    Keyboard.IsKeyPressed(Keyboard.Key.LShift) ||
-                    Keyboard.IsKeyPressed(Keyboard.Key.RShift);
-                if (shiftHeld && !_showBlockTerrainPreview)
-                {
-                    int layerSteps = Math.Max(
-                        1, (int)MathF.Round(MathF.Abs(e.Delta))) *
-                        GetTerrainSliceStepLayers();
-                    int direction = e.Delta > 0f ? 1 : -1;
-                    AdjustTerrainSlice(direction, layerSteps);
-                    return;
-                }
-
                 Vector2f zoomAnchorBefore = _window.MapPixelToCoords(
                     wheelPixels,
                     _camera.View);
@@ -4263,10 +4252,10 @@ public sealed class GameRenderer
         _window.KeyReleased +=
             (_, e) =>
             {
-                if (e.Code == Keyboard.Key.PageUp)
-                    _pageUpHeld = false;
-                else if (e.Code == Keyboard.Key.PageDown)
-                    _pageDownHeld = false;
+                if (e.Code == _controlBindings.Get(GameControlAction.RaiseTerrainSlice))
+                    _sliceUpHeld = false;
+                else if (e.Code == _controlBindings.Get(GameControlAction.LowerTerrainSlice))
+                    _sliceDownHeld = false;
 
                 if (_bodyRigEditorOverlay?.IsOpen == true)
                     _bodyRigEditorOverlay.HandleKeyReleased(e.Code);
@@ -4479,14 +4468,49 @@ public sealed class GameRenderer
 
     private void HandleKey(Keyboard.Key key)
     {
+        if (_menuPage == GameMenuPage.Controls)
+        {
+            if (_capturingControlIndex >= 0)
+            {
+                if (key == Keyboard.Key.Escape)
+                {
+                    _capturingControlIndex = -1;
+                    return;
+                }
+
+                if (!GameControlBindings.IsBindable(key))
+                    return;
+
+                GameControlAction action =
+                    GameControlBindings.GetActionAt(_capturingControlIndex);
+                if (_controlBindings.TrySet(action, key))
+                {
+                    _controlBindings.Save();
+                    _capturingControlIndex = -1;
+                }
+                else
+                {
+                    Console.WriteLine(
+                        $"[Controls] Клавиша {GameControlBindings.GetKeyName(key)} уже назначена другой команде.");
+                }
+
+                return;
+            }
+
+            if (key == Keyboard.Key.Escape)
+                _menuPage = GameMenuPage.Settings;
+            return;
+        }
+
         if (_showBlockTerrainPreview)
         {
-            if (key is Keyboard.Key.B or Keyboard.Key.Escape)
+            if (key == _controlBindings.Get(GameControlAction.ToggleBlockTerrainPreview) ||
+                key == Keyboard.Key.Escape)
                 ToggleBlockTerrainPreview();
             return;
         }
 
-        if (key == Keyboard.Key.B &&
+        if (key == _controlBindings.Get(GameControlAction.ToggleBlockTerrainPreview) &&
             _worldMap.UsesDiscreteBlockTerrain &&
             _menuPage == GameMenuPage.Closed &&
             _bodyRigEditorOverlay?.IsOpen != true &&
@@ -4499,7 +4523,7 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.Tab &&
+        if (key == _controlBindings.Get(GameControlAction.ToggleCameraProjection) &&
             _menuPage == GameMenuPage.Closed &&
             _bodyRigEditorOverlay?.IsOpen != true &&
             _debugLayersOverlay?.IsOpen != true &&
@@ -4512,20 +4536,21 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key is Keyboard.Key.PageUp or Keyboard.Key.PageDown)
+        bool raiseSlice = key == _controlBindings.Get(GameControlAction.RaiseTerrainSlice);
+        bool lowerSlice = key == _controlBindings.Get(GameControlAction.LowerTerrainSlice);
+        if (raiseSlice || lowerSlice)
         {
-            bool raiseSlice = key == Keyboard.Key.PageUp;
             if (raiseSlice)
             {
-                if (_pageUpHeld)
+                if (_sliceUpHeld)
                     return;
-                _pageUpHeld = true;
+                _sliceUpHeld = true;
             }
             else
             {
-                if (_pageDownHeld)
+                if (_sliceDownHeld)
                     return;
-                _pageDownHeld = true;
+                _sliceDownHeld = true;
             }
 
             bool gameplayInputAllowed =
@@ -4558,7 +4583,8 @@ public sealed class GameRenderer
         }
 
         if (_camera.IsometricProjectionEnabled &&
-            (key is Keyboard.Key.Q or Keyboard.Key.E) &&
+            (key == _controlBindings.Get(GameControlAction.RotateCameraCounterClockwise) ||
+             key == _controlBindings.Get(GameControlAction.RotateCameraClockwise)) &&
             _menuPage == GameMenuPage.Closed &&
             _debugLayersOverlay?.IsOpen != true &&
             _contextMenuOverlay?.IsOpen != true &&
@@ -4567,7 +4593,7 @@ public sealed class GameRenderer
             !_showUtilityAiDebug)
         {
             Vector2f orbitCenter = GetDynamicCameraOrbitCenter();
-            if (key == Keyboard.Key.Q)
+            if (key == _controlBindings.Get(GameControlAction.RotateCameraCounterClockwise))
                 _camera.RotateCounterClockwise(orbitCenter);
             else
                 _camera.RotateClockwise(orbitCenter);
@@ -4577,13 +4603,13 @@ public sealed class GameRenderer
             return;
         }
 
-        if (key == Keyboard.Key.V)
+        if (key == _controlBindings.Get(GameControlAction.ToggleInformationLayers))
         {
             _debugLayersOverlay?.Toggle();
             return;
         }
 
-        if (key == Keyboard.Key.F &&
+        if (key == _controlBindings.Get(GameControlAction.ToggleAutonomousMovement) &&
             _menuPage == GameMenuPage.Closed &&
             _contextMenuOverlay?.IsOpen != true &&
             _selectedUnits.Count > 0)
@@ -4665,7 +4691,9 @@ public sealed class GameRenderer
                 ? _massCombatTestScene.UnitsPerFaction
                 : _classicMassCombatMode
                     ? _classicMassCombatTestScene.UnitCount / 2
-                    : 0);
+                    : 0,
+            _controlBindings.GetBindingLabels(),
+            _capturingControlIndex);
     }
 
     private void ApplyGameMenuAction(GameMenuAction action)
@@ -4682,6 +4710,23 @@ public sealed class GameRenderer
             case GameMenuActionType.OpenTestScenes:
                 _menuPage = GameMenuPage.TestScenes;
                 _draggingMenuSlider = null;
+                break;
+
+            case GameMenuActionType.OpenControls:
+                _menuPage = GameMenuPage.Controls;
+                _draggingMenuSlider = null;
+                _capturingControlIndex = -1;
+                break;
+
+            case GameMenuActionType.RebindControl:
+                _capturingControlIndex = Math.Clamp(
+                    action.Index, 0, GameControlBindings.ActionCount - 1);
+                break;
+
+            case GameMenuActionType.ResetControls:
+                _controlBindings.ResetDefaults();
+                _controlBindings.Save();
+                _capturingControlIndex = -1;
                 break;
 
             case GameMenuActionType.BackToSettings:
