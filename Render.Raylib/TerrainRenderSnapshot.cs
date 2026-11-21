@@ -25,7 +25,8 @@ public sealed class TerrainRenderSnapshot
     public int RegionsX { get; }
     public int RegionsY { get; }
     public int RegionSize { get; }
-    public bool IsVoxelMode { get; }\n    public SparseVoxelField Voxels => _worldMap.Voxels;
+    public bool IsVoxelMode { get; }
+    public SparseVoxelField Voxels => _worldMap.Voxels;
     public bool UsesVoxelCells => RegionSize == VoxelRenderRegionSizeInTiles;
     public int RegionCount => _heightsMeters.Length;
 
