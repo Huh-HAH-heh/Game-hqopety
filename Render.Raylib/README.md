@@ -124,7 +124,7 @@ visible storage-region caps can be refreshed in one frame.
 ## Controls
 
 - WASD: move the camera focus across the terrain
-- Right mouse button + drag: orbit around the focus; dragging right rotates right
+- Shift + right mouse button + drag: orbit around the focus; dragging right rotates right
 - Middle mouse button + drag: grab-and-pan using screen-ray intersections with the focus plane
 - Mouse wheel: zoom toward the cursor when the ground anchor is visible
 - Left Shift / Right Shift: faster WASD movement
@@ -178,9 +178,9 @@ intervals. Press C again to restore the full terrain volume.
 
 The inspection camera has a 45-degree field of view and can tilt down to 28.6 degrees
 above the horizon, exposing vertical terrain and cave walls rather than forcing a
-near-top-down view. WASD speed scales with camera distance (slow and precise at close
-zoom, fast at overview distance) and is clamped to a useful range. Shift + middle-button
-vertical drag adjusts an additional live speed multiplier; ordinary MMB remains pan.
+near-top-down view. Shift + right-button drag orbits around the focus; WASD speed scales
+with camera distance (slow and precise at close zoom, fast at overview distance). Shift +
+middle-button vertical drag adjusts an additional live speed multiplier; ordinary MMB remains pan.
 Middle-button panning uses two screen-ray/plane intersections, avoiding the drift
 caused by a hand-estimated world-units-per-pixel scale. Zoom anchoring is rejected
 when a cursor ray hits the focus plane too far outside the visible area.
