@@ -807,7 +807,9 @@ public sealed class WorldMap
             int y = i / TileWidth;
             ushort height = HasVoxelEditsInColumn(x, y)
                 ? GetVoxelSurfaceHeightUnits(x, y, i)
-                : _surfaceHeights[i];
+                : _simpleFillColumns[i]
+                    ? _surfaceHeights[i]
+                    : GetSurfaceHeightUnits(x, y);
             if (height == 0)
                 continue;
 
