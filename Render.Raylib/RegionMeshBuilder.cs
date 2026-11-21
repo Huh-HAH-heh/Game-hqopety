@@ -433,13 +433,19 @@ internal static class RegionMeshBuilder
             if (visibleEnd <= visibleStart)
                 continue;
 
-            bool cutFace = generateCutFaces &&
+            bool slicePassesThroughRun =
                 terrain.CutawayEnabled &&
                 visibleStart < cutLayer &&
-                range.EndZ >= cutLayer;
+                range.EndZ > cutLayer;
+            bool cutFace = generateCutFaces && slicePassesThroughRun;
+
+            // The voxel renderer builds cut caps in a separate mesh. When the
+            // plane passes through this run, do not also emit a top face here:
+            // two coplanar surfaces cause unstable z-fighting at the section.
             bool airAbove = cutFace ||
-                rangeIndex == ranges.Length - 1 ||
-                ranges[rangeIndex + 1].State == WorldMap.StateEmpty;
+                (!slicePassesThroughRun &&
+                 (rangeIndex == ranges.Length - 1 ||
+                  ranges[rangeIndex + 1].State == WorldMap.StateEmpty));
             bool airBelow = rangeIndex > 0 &&
                 ranges[rangeIndex - 1].State == WorldMap.StateEmpty;
 
