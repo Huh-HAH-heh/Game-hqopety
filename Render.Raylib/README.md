@@ -57,6 +57,7 @@ These are CSG/density-field operations. They change the 3D volume rather than ed
 - **Left mouse**: apply a sphere/paint/smooth operation; for capsule tools, press to set the first endpoint and release to set the second.
 - **F4**: cycle material ID.
 - **F5 / F6**: decrease / increase brush radius.
+- **F7 / F8**: undo / redo the last voxel edit (in-session history, bounded to 16 operations / 64 MiB).
 - **Shift + right mouse drag**: orbit the camera.
 - **Middle mouse drag**: pan.
 - **Mouse wheel**: zoom.

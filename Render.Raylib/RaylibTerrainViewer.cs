@@ -382,6 +382,18 @@ public static class RaylibTerrainViewer
                             voxelBrushRadiusMeters = Math.Min(
                                 4f, voxelBrushRadiusMeters + 0.25f);
 
+                        if (IsKeyPressed(KeyboardKey.F7))
+                        {
+                            if (!worldMap.Voxels.Undo())
+                                Console.WriteLine("[Voxel] Nothing to undo.");
+                        }
+
+                        if (IsKeyPressed(KeyboardKey.F8))
+                        {
+                            if (!worldMap.Voxels.Redo())
+                                Console.WriteLine("[Voxel] Nothing to redo.");
+                        }
+
                         if (voxelEditMode != VoxelEditMode.Off &&
                             IsMouseButtonPressed(MouseButton.Left) &&
                             !layerPanel.IsPointerOverPanel(GetMousePosition()))
@@ -428,18 +440,24 @@ public static class RaylibTerrainViewer
                                     hitNormal * voxelBrushRadiusMeters * 0.2f;
                                 if (voxelEditMode == VoxelEditMode.CarveCapsule)
                                 {
-                                    worldMap.CarveVoxelCapsule(
-                                        voxelStrokeStart,
-                                        end,
-                                        voxelBrushRadiusMeters);
+                                    using (worldMap.Voxels.BeginUndoableEdit())
+                                    {
+                                        worldMap.CarveVoxelCapsule(
+                                            voxelStrokeStart,
+                                            end,
+                                            voxelBrushRadiusMeters);
+                                    }
                                 }
                                 else if (voxelEditMode == VoxelEditMode.AddCapsule)
                                 {
-                                    worldMap.AddVoxelCapsule(
-                                        voxelStrokeStart,
-                                        end,
-                                        voxelBrushRadiusMeters,
-                                        voxelBrushMaterial);
+                                    using (worldMap.Voxels.BeginUndoableEdit())
+                                    {
+                                        worldMap.AddVoxelCapsule(
+                                            voxelStrokeStart,
+                                            end,
+                                            voxelBrushRadiusMeters,
+                                            voxelBrushMaterial);
+                                    }
                                 }
                             }
                             voxelStrokeActive = false;
@@ -577,7 +595,7 @@ public static class RaylibTerrainViewer
             _ => "EDIT OFF"
         };
 
-        return $"VOXEL TOOL {name} | RADIUS {radiusMeters:0.00}m | MATERIAL {materialId}";
+        return $"VOXEL TOOL {name} | RADIUS {radiusMeters:0.00}m | MATERIAL {materialId} | F7 UNDO / F8 REDO";
     }
 
     private static void ApplyVoxelBrush(
@@ -588,6 +606,7 @@ public static class RaylibTerrainViewer
         float radiusMeters,
         ushort materialId)
     {
+        using IDisposable edit = worldMap.Voxels.BeginUndoableEdit();
         Vector3 carveCenter = hitPosition - hitNormal * radiusMeters * 0.2f;
         switch (mode)
         {

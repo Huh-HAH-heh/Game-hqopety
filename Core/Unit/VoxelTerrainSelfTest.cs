@@ -126,6 +126,31 @@ internal static class VoxelTerrainSelfTest
         return chunksMatch && densityMatches && materialMatches && surfacesMatch;
     }
 
+    public static bool UndoRedoRestoresSdf()
+    {
+        SparseVoxelField field = CreateField();
+        float original = field.GetDensity(30, 12, 30);
+
+        using (field.BeginUndoableEdit())
+        {
+            field.CarveBox(
+                new Vector3(1f, 0.5f, 1f),
+                new Vector3(5f, 1.8f, 5f));
+        }
+
+        float carved = field.GetDensity(30, 12, 30);
+        bool canUndo = field.CanUndo && field.UndoCount == 1;
+        bool undoRestored = canUndo &&
+            MathF.Abs(field.GetDensity(30, 12, 30) - original) < 0.001f &&
+            field.CanRedo;
+        bool redoRestored = field.Redo() &&
+            MathF.Abs(field.GetDensity(30, 12, 30) - carved) < 0.001f &&
+            field.CanUndo;
+
+        return original > 0f && carved < 0f &&
+               undoRestored && redoRestored;
+    }
+
     public static bool NavigationKeepsLowerFloor()
     {
         WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
