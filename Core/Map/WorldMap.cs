@@ -593,12 +593,17 @@ public sealed class WorldMap
         if (!IsInside(x, y) || z < 0 || z >= LayerCount)
             throw new IndexOutOfRangeException();
 
+        Blocks.Volumes.SetVoxel(x, y, z, materialId);
         Vector3 minimum = new(x, z * 0.1f, y);
         Vector3 maximum = new(x + 1f, (z + 1) * 0.1f, y + 1f);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
             Voxels.FillBox(minimum, maximum, materialId);
+        int index = GetColumnIndex(x, y);
+        _rangeCache[index] = null;
+        RecalculateSurfaceHeight(index);
+        MarkTerrainChanged(x, y);
     }
 
     public bool IsNavigationBlocked(int x, int y)
@@ -914,7 +919,9 @@ public sealed class WorldMap
     // No range data is stored in TerrainRegion.
     // ============================================================
 
-        public ReadOnlySpan<TileRange> GetTileRanges(int globalX, int globalY)
+        public ReadOnlySpan<TileRange> GetTileRanges(
+        int globalX,
+        int globalY)
     {
         if (!IsInside(globalX, globalY))
             return ReadOnlySpan<TileRange>.Empty;
@@ -924,29 +931,10 @@ public sealed class WorldMap
         if (cached != null)
             return cached;
 
-        List<TileRange> ranges = new();
-        ushort currentMaterial = GetMaterialId(globalX, globalY, 0);
-        int rangeStart = 0;
-        for (int z = 1; z <= LayerCount; z++)
-        {
-            ushort nextMaterial = z < LayerCount
-                ? GetMaterialId(globalX, globalY, z)
-                : (ushort)0;
-            if (nextMaterial == currentMaterial)
-                continue;
-
-            ranges.Add(new TileRange
-            {
-                StartZ = checked((ushort)rangeStart),
-                EndZ = checked((ushort)z),
-                MaterialId = currentMaterial,
-                State = currentMaterial == 0 ? StateEmpty : StateSolid
-            });
-            rangeStart = z;
-            currentMaterial = nextMaterial;
-        }
-
-        cached = ranges.ToArray();
+        Span<TileRange> ranges = stackalloc TileRange[LayerCount];
+        int count = Blocks.Volumes.CopyColumnRanges(globalX, globalY, ranges);
+        cached = new TileRange[count];
+        ranges[..count].CopyTo(cached);
         _rangeCache[index] = cached;
         return cached;
     }
@@ -959,28 +947,28 @@ public sealed class WorldMap
         if (!IsInside(globalX, globalY))
             throw new IndexOutOfRangeException();
 
-        Vector3 columnMin = new(globalX, 0f, globalY);
-        Voxels.CarveBox(columnMin,
-            new Vector3(globalX + 1f, LayerCount * 0.1f, globalY + 1f));
-        foreach (TileRange range in ranges)
-        {
-            if (range.State != StateSolid || range.MaterialId == 0 ||
-                range.EndZ <= range.StartZ)
-                continue;
-            Voxels.FillBox(
-                new Vector3(globalX, range.StartZ * 0.1f, globalY),
-                new Vector3(globalX + 1f, range.EndZ * 0.1f, globalY + 1f),
-                range.MaterialId);
-        }
+        GetOrCreateRegion(
+            globalX / TerrainRegion.TilesPerSide,
+            globalY / TerrainRegion.TilesPerSide);
+
+        int index = GetColumnIndex(globalX, globalY);
+        Blocks.Volumes.SetColumnRanges(globalX, globalY, ranges);
+        _rangeCache[index] = null;
+        RecalculateSurfaceHeight(index);
+        Voxels.ResetBaseColumn(globalX, globalY);
+        MarkTerrainChanged(globalX, globalY);
     }
 
-        public void ClearTileRanges(int globalX, int globalY)
+        public void ClearTileRanges(
+        int globalX,
+        int globalY)
     {
         if (!IsInside(globalX, globalY))
             return;
-        Voxels.CarveBox(
-            new Vector3(globalX, 0f, globalY),
-            new Vector3(globalX + 1f, LayerCount * 0.1f, globalY + 1f));
+
+        int columnIndex = GetColumnIndex(globalX, globalY);
+        ClearColumn(globalX, globalY);
+        MarkTerrainChanged(globalX, globalY);
     }
 
         public bool TryAddRange(
@@ -995,15 +983,30 @@ public sealed class WorldMap
             return false;
         if (startZ > endZ)
             throw new ArgumentException("StartZ не может быть больше EndZ.");
-        if (endZ <= startZ)
+
+        int startLayer = Math.Clamp(
+            startZ / LayerHeightUnits, 0, LayerCount);
+        int endLayer = Math.Clamp(
+            (endZ + LayerHeightUnits - 1) / LayerHeightUnits, 0, LayerCount);
+        if (endLayer <= startLayer)
             return true;
 
-        Vector3 minimum = new(globalX, startZ * 0.1f, globalY);
-        Vector3 maximum = new(globalX + 1f, endZ * 0.1f, globalY + 1f);
+        Blocks.Volumes.SetVolume(
+            globalX, globalY, startLayer,
+            1, 1, endLayer - startLayer,
+            state == StateSolid ? materialId : (ushort)0);
+
+        Vector3 minimum = new(globalX, startLayer * 0.1f, globalY);
+        Vector3 maximum = new(globalX + 1f, endLayer * 0.1f, globalY + 1f);
         if (state == StateSolid && materialId != 0)
             Voxels.FillBox(minimum, maximum, materialId);
         else
             Voxels.CarveBox(minimum, maximum);
+
+        int index = GetColumnIndex(globalX, globalY);
+        _rangeCache[index] = null;
+        RecalculateSurfaceHeight(index);
+        MarkTerrainChanged(globalX, globalY);
         return true;
     }
 
@@ -1023,9 +1026,17 @@ public sealed class WorldMap
         if (firstLayer >= lastLayer)
             return;
 
+        Blocks.Volumes.SetVolume(
+            globalX, globalY, firstLayer,
+            1, 1, lastLayer - firstLayer, 0);
         Voxels.CarveBox(
             new Vector3(globalX, firstLayer * 0.1f, globalY),
             new Vector3(globalX + 1f, lastLayer * 0.1f, globalY + 1f));
+
+        int index = GetColumnIndex(globalX, globalY);
+        _rangeCache[index] = null;
+        RecalculateSurfaceHeight(index);
+        MarkTerrainChanged(globalX, globalY);
     }
 
     public void SetRegionSolidHeight(
@@ -1209,7 +1220,7 @@ public sealed class WorldMap
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = storedMaterial;
         _rangeCache[index] = null;
-        Voxels.InvalidateBaseField();
+        Voxels.ResetBaseColumn(globalX, globalY);
         MarkTerrainChanged(globalX, globalY);
     }
 
@@ -1260,7 +1271,7 @@ public sealed class WorldMap
         _rangeCache[index] = null;
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = 0;
-        Voxels.InvalidateBaseField();
+        Voxels.ResetBaseColumn(globalX, globalY);
     }
 
     private void RecalculateSurfaceHeight(int columnIndex)
