@@ -291,6 +291,9 @@ public sealed class SparseVoxelField
         int minZ = tileZ * 10;
         int maxZ = Math.Min(Depth, minZ + 10);
 
+        if (!HasEditsInArea(minX, maxX - 1, minZ, maxZ - 1))
+            return;
+
         int firstChunkX = minX / ChunkSize;
         int lastChunkX = (maxX - 1) / ChunkSize;
         int firstChunkZ = minZ / ChunkSize;
@@ -299,6 +302,7 @@ public sealed class SparseVoxelField
 
         List<ChunkCoordinate>? removeChunks = null;
         long revision = Version + 1;
+        bool anyChanged = false;
 
         for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
         for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
@@ -345,6 +349,7 @@ public sealed class SparseVoxelField
             if (!changed)
                 continue;
 
+            anyChanged = true;
             chunk.Revision = revision;
             if (Array.IndexOf(chunk.DensityMask, (byte)1) < 0 &&
                 Array.IndexOf(chunk.MaterialMask, (byte)1) < 0)
@@ -353,11 +358,14 @@ public sealed class SparseVoxelField
             }
         }
 
-        if (removeChunks == null)
+        if (!anyChanged)
             return;
 
-        foreach (ChunkCoordinate key in removeChunks)
-            _chunks.Remove(key);
+        if (removeChunks != null)
+        {
+            foreach (ChunkCoordinate key in removeChunks)
+                _chunks.Remove(key);
+        }
 
         for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
         for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
