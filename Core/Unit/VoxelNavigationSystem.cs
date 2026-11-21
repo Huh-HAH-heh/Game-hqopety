@@ -52,6 +52,7 @@ public sealed class VoxelNavigationSystem
     private sealed class Route
     {
         public UnitId Owner;
+        public RegionKey Region;
         public long TerrainVersion;
         public int GoalNode;
         public float TargetX;
@@ -64,7 +65,10 @@ public sealed class VoxelNavigationSystem
     private readonly Dictionary<RegionKey, Graph> _graphs = new();
     private readonly Dictionary<int, Route> _routes = new();
     private WorldMap? _observedMap;
-    private long _observedTerrainVersion = long.MinValue;
+    private long _observedNavigationVersion = long.MinValue;
+
+    public int CachedRegionCount => _graphs.Count;
+    public int CachedRouteCount => _routes.Count;
 
     /// <summary>
     /// Returns true from ownsVoxelRegion when the requested route is inside a
@@ -122,7 +126,7 @@ public sealed class VoxelNavigationSystem
 
         if (!_routes.TryGetValue(unitId.Index, out Route? route) ||
             route.Owner != unitId ||
-            route.TerrainVersion != worldMap.TerrainVersion ||
+            route.Region != key ||
             route.GoalNode != goalNode ||
             MathF.Abs(route.TargetX - target.X) > 0.35f ||
             MathF.Abs(route.TargetY - target.Y) > 0.35f ||
@@ -138,7 +142,8 @@ public sealed class VoxelNavigationSystem
             route = new Route
             {
                 Owner = unitId,
-                TerrainVersion = worldMap.TerrainVersion,
+                Region = key,
+                TerrainVersion = worldMap.NavigationVersion,
                 GoalNode = goalNode,
                 TargetX = target.X,
                 TargetY = target.Y,
@@ -171,13 +176,75 @@ public sealed class VoxelNavigationSystem
 
     private void SynchronizeTerrainVersion(WorldMap worldMap)
     {
-        if (!ReferenceEquals(_observedMap, worldMap) ||
-            _observedTerrainVersion != worldMap.TerrainVersion)
+        if (!ReferenceEquals(_observedMap, worldMap))
         {
+            if (_observedMap != null)
+                _observedMap.Voxels.Changed -= OnVoxelFieldChanged;
+
             _observedMap = worldMap;
-            _observedTerrainVersion = worldMap.TerrainVersion;
+            _observedMap.Voxels.Changed += OnVoxelFieldChanged;
+            _observedNavigationVersion = worldMap.NavigationVersion;
             _graphs.Clear();
             _routes.Clear();
+            return;
+        }
+
+        // Non-voxel world changes (navigation blockers, legacy height edits)
+        // have no voxel bounds, so they still invalidate the whole graph cache.
+        if (_observedNavigationVersion != worldMap.NavigationVersion)
+        {
+            _observedNavigationVersion = worldMap.NavigationVersion;
+            _graphs.Clear();
+            _routes.Clear();
+        }
+    }
+
+    private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
+    {
+        WorldMap? map = _observedMap;
+        if (map == null)
+            return;
+
+        // WorldMap subscribed before this navigation system; its callback has
+        // already incremented NavigationVersion for this bounded edit.
+        _observedNavigationVersion = map.NavigationVersion;
+
+        float minimumX = Math.Max(0, bounds.MinX - 5) * SparseVoxelField.VoxelSizeMeters;
+        float maximumX = Math.Min(map.Voxels.Width, bounds.MaxX + 5) *
+            SparseVoxelField.VoxelSizeMeters;
+        float minimumY = Math.Max(0, bounds.MinZ - 5) * SparseVoxelField.VoxelSizeMeters;
+        float maximumY = Math.Min(map.Voxels.Depth, bounds.MaxZ + 5) *
+            SparseVoxelField.VoxelSizeMeters;
+
+        HashSet<RegionKey> invalidated = new();
+        foreach (RegionKey key in _graphs.Keys)
+        {
+            float regionMinX = key.X * RegionSizeMeters;
+            float regionMaxX = regionMinX + RegionSizeMeters;
+            float regionMinY = key.Y * RegionSizeMeters;
+            float regionMaxY = regionMinY + RegionSizeMeters;
+            if (minimumX < regionMaxX && maximumX > regionMinX &&
+                minimumY < regionMaxY && maximumY > regionMinY)
+                invalidated.Add(key);
+        }
+
+        if (invalidated.Count == 0)
+            return;
+
+        foreach (RegionKey key in invalidated)
+            _graphs.Remove(key);
+
+        List<int>? removeRoutes = null;
+        foreach ((int unitIndex, Route route) in _routes)
+        {
+            if (invalidated.Contains(route.Region))
+                (removeRoutes ??= new List<int>()).Add(unitIndex);
+        }
+
+        if (removeRoutes != null)
+        {
+            foreach (int unitIndex in removeRoutes)
+                _routes.Remove(unitIndex);
         }
     }
 

@@ -193,6 +193,41 @@ internal static class VoxelTerrainSelfTest
                    position.X, position.Z, position.Y, 0.2f, 1.1f);
     }
 
+    public static bool DistantVoxelEditsKeepLocalNavCache()
+    {
+        WorldMap worldMap = new(regionsX: 9, regionsY: 1, layerCount: 64);
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        for (int x = 0; x < worldMap.TileWidth; x++)
+            worldMap.SetSolidHeight(x, y, 20, Rock);
+
+        BuildTunnelAndBridge(worldMap.Voxels);
+        VoxelNavigationSystem navigation = new();
+        UnitId unit = new(1, 1);
+        Vector3 start = new(2.25f, 3.25f, 0.5f);
+        Vector3 goal = new(4.25f, 3.25f, 0.5f);
+
+        if (!navigation.TryGetWaypoint(
+                worldMap, unit, start, goal, 1.1f,
+                out bool ownsVoxelRegion, out _) ||
+            !ownsVoxelRegion ||
+            navigation.CachedRegionCount != 1 ||
+            navigation.CachedRouteCount != 1)
+            return false;
+
+        // The second edit lives in the next 128 m navigation region.
+        worldMap.CarveVoxelSphere(new Vector3(132f, 1f, 3f), 0.6f);
+        if (navigation.CachedRegionCount != 1 ||
+            navigation.CachedRouteCount != 1)
+            return false;
+
+        return navigation.TryGetWaypoint(
+                   worldMap, unit, start, goal, 1.1f,
+                   out ownsVoxelRegion, out _) &&
+               ownsVoxelRegion &&
+               navigation.CachedRegionCount == 1 &&
+               navigation.CachedRouteCount == 1;
+    }
+
     public static bool NavigationKeepsLowerFloor()
     {
         WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
