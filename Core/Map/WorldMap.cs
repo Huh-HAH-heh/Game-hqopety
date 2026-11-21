@@ -1213,19 +1213,31 @@ public sealed class WorldMap
             clampedHeight > 0 && materialId != 0 ? clampedHeight : 0));
         ushort storedMaterial = storedHeight > 0 ? materialId : (ushort)0;
 
+        long allocationStart = globalX == 0 && globalY == 0 ? GC.GetAllocatedBytesForCurrentThread() : 0L;
         Blocks.Volumes.SetSurfaceColumn(
             globalX, globalY, storedHeight, storedMaterial);
 
         _surfaceHeights[index] = storedHeight;
         _volumeSurfaceHeights[index] = 0;
         _simpleFillColumns[index] = true;
+        long afterSurface = globalX == 0 && globalY == 0 ? GC.GetAllocatedBytesForCurrentThread() : 0L;
         _columnMaterialIds[index] = storedMaterial;
         _rangeCache[index] = null;
         Voxels.ResetBaseColumn(globalX, globalY);
+        long afterReset = globalX == 0 && globalY == 0 ? GC.GetAllocatedBytesForCurrentThread() : 0L;
         Voxels.InvalidateBaseField();
+        long afterInvalidate = globalX == 0 && globalY == 0 ? GC.GetAllocatedBytesForCurrentThread() : 0L;
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = storedMaterial;
         MarkTerrainChanged(globalX, globalY);
+        if (globalX == 0 && globalY == 0)
+        {
+            long afterMark = GC.GetAllocatedBytesForCurrentThread();
+            Console.WriteLine(
+                $"[DETAIL] SetSolidHeight alloc surface={afterSurface - allocationStart}, " +
+                $"reset={afterReset - afterSurface}, invalidate={afterInvalidate - afterReset}, " +
+                $"mark={afterMark - afterInvalidate}");
+        }
     }
 
     // ============================================================
