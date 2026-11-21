@@ -1336,34 +1336,13 @@ public sealed class WorldMap
             voxelX >= Voxels.Width || voxelY > Voxels.Height || voxelZ >= Voxels.Depth)
             return -1f;
 
-        float tileX = Math.Clamp((voxelX + 0.5f) * 0.1f - 0.5f, 0f, MaxTileX);
-        float tileY = Math.Clamp((voxelZ + 0.5f) * 0.1f - 0.5f, 0f, MaxTileY);
-        int x0 = Math.Clamp((int)MathF.Floor(tileX), 0, MaxTileX);
-        int y0 = Math.Clamp((int)MathF.Floor(tileY), 0, MaxTileY);
-        int x1 = Math.Min(x0 + 1, MaxTileX);
-        int y1 = Math.Min(y0 + 1, MaxTileY);
-        float tx = Math.Clamp(tileX - x0, 0f, 1f);
-        float ty = Math.Clamp(tileY - y0, 0f, 1f);
-
-        float h00 = _surfaceHeights[GetColumnIndex(x0, y0)];
-        float h10 = _surfaceHeights[GetColumnIndex(x1, y0)];
-        float h01 = _surfaceHeights[GetColumnIndex(x0, y1)];
-        float h11 = _surfaceHeights[GetColumnIndex(x1, y1)];
-        float top = h00 + (h10 - h00) * tx;
-        float bottom = h01 + (h11 - h01) * tx;
-        float surfaceHeight = top + (bottom - top) * ty;
-
-        // Convert the vertical height difference into an approximate Euclidean
-        // signed distance. One tile is 10 native voxel samples in each horizontal
-        // direction; this keeps sphere tracing stable on steep slopes.
-        float gradientX =
-            ((h10 - h00) * (1f - ty) + (h11 - h01) * ty) * 0.1f;
-        float gradientZ =
-            ((h01 - h00) * (1f - tx) + (h11 - h10) * tx) * 0.1f;
-        float distanceScale = MathF.Sqrt(
-            1f + gradientX * gradientX + gradientZ * gradientZ);
-
-        return (surfaceHeight - (voxelY + 0.5f)) / distanceScale;
+        // The procedural base is authored at 1 m XY resolution. Keep each
+        // base map tile constant across its 10x10 horizontal voxel footprint;
+        // local edits are the full 0.1 m 3D detail layer.
+        int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
+        int tileY = Math.Clamp(voxelZ / 10, 0, MaxTileY);
+        ushort surfaceHeight = _surfaceHeights[GetColumnIndex(tileX, tileY)];
+        return surfaceHeight - (voxelY + 0.5f);
     }
 
     private ushort SampleBaseVoxelMaterial(int voxelX, int voxelY, int voxelZ)
