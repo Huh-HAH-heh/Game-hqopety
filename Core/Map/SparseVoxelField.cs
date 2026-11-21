@@ -132,6 +132,12 @@ public sealed class SparseVoxelField
         return _baseMaterial(x, y, z);
     }
 
+    public VoxelMaterialDefinition GetMaterialDefinition(int x, int y, int z) =>
+        VoxelMaterialCatalog.Get(GetMaterialId(x, y, z));
+
+    public float GetCellMassKg(int x, int y, int z) =>
+        GetMaterialDefinition(x, y, z).MassPerVoxelKg;
+
     public long GetChunkRevision(int chunkX, int chunkY, int chunkZ)
     {
         return _chunks.TryGetValue(
@@ -337,6 +343,80 @@ public sealed class SparseVoxelField
                 continue;
 
             SetMaterialOverride(x, y, z, materialId, revision, touched);
+        }
+
+        CompleteEdit(bounds, revision, touched);
+    }
+
+    /// <summary>
+    /// Smooths a local part of the signed-distance field without affecting
+    /// unrelated chunks. Strength is the interpolation factor toward a six-neighbour average.
+    /// </summary>
+    public void SmoothSphere(Vector3 centerMeters, float radiusMeters, float strength = 0.5f)
+    {
+        if (!float.IsFinite(strength) || strength <= 0f || strength > 1f)
+            throw new ArgumentOutOfRangeException(nameof(strength));
+        if (!float.IsFinite(radiusMeters) || radiusMeters <= 0f || radiusMeters > 4f)
+            throw new ArgumentOutOfRangeException(nameof(radiusMeters));
+
+        Vector3 center = ToVoxelPosition(centerMeters);
+        float radius = radiusMeters / VoxelSizeMeters;
+        GetCellBounds(center, radius + 1f, out VoxelBounds bounds);
+        int sizeX = bounds.MaxX - bounds.MinX;
+        int sizeY = bounds.MaxY - bounds.MinY;
+        int sizeZ = bounds.MaxZ - bounds.MinZ;
+        if (sizeX <= 0 || sizeY <= 0 || sizeZ <= 0)
+            return;
+
+        float[] smoothed = new float[checked(sizeX * sizeY * sizeZ)];
+        float radiusSquared = radius * radius;
+        int index = 0;
+
+        for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
+        for (int y = bounds.MinY; y < bounds.MaxY; y++)
+        for (int x = bounds.MinX; x < bounds.MaxX; x++)
+        {
+            float dx = x + 0.5f - center.X;
+            float dy = y + 0.5f - center.Y;
+            float dz = z + 0.5f - center.Z;
+            float current = GetDensity(x, y, z);
+
+            if (dx * dx + dy * dy + dz * dz > radiusSquared)
+            {
+                smoothed[index++] = current;
+                continue;
+            }
+
+            float neighbourAverage = (
+                GetDensity(x - 1, y, z) + GetDensity(x + 1, y, z) +
+                GetDensity(x, y - 1, z) + GetDensity(x, y + 1, z) +
+                GetDensity(x, y, z - 1) + GetDensity(x, y, z + 1)) / 6f;
+            smoothed[index++] = current + (neighbourAverage - current) * strength;
+        }
+
+        long revision = Version + 1;
+        HashSet<ChunkCoordinate> touched = new();
+        index = 0;
+        for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
+        for (int y = bounds.MinY; y < bounds.MaxY; y++)
+        for (int x = bounds.MinX; x < bounds.MaxX; x++)
+        {
+            float previous = GetDensity(x, y, z);
+            float next = smoothed[index++];
+            if (MathF.Abs(next - previous) <= 0.001f)
+                continue;
+
+            SetDensityOverride(x, y, z, next, revision, touched);
+
+            if (previous > 0f && next <= 0f)
+                SetMaterialOverride(x, y, z, 0, revision, touched);
+            else if (previous <= 0f && next > 0f)
+            {
+                ushort materialId = _baseMaterial(x, y, z);
+                if (materialId == 0)
+                    materialId = 1;
+                SetMaterialOverride(x, y, z, materialId, revision, touched);
+            }
         }
 
         CompleteEdit(bounds, revision, touched);
