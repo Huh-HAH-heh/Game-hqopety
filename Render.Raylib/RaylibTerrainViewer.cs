@@ -355,7 +355,7 @@ public static class RaylibTerrainViewer
                         if (IsKeyPressed(KeyboardKey.F3))
                         {
                             voxelEditMode = (VoxelEditMode)(
-                                ((int)voxelEditMode + 1) % 4);
+                                ((int)voxelEditMode + 1) % 7);
                         }
 
                         if (IsKeyPressed(KeyboardKey.F4))
