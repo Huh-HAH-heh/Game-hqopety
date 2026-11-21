@@ -1,91 +1,75 @@
-# Terrain request implementation audit
+# Voxel terrain implementation audit
 
-Audit baseline: `feature/raylib-terrain-renderer`, after the HUD/camera/voxel-Lod work and before this audit note. This is a source review; it is not a claim that the game was visually tested.
+Baseline: `feature/raylib-terrain-renderer` after the 3D density-field migration.
 
 ## Verdict
 
-The recent work improved the voxel-preview renderer and added a future architecture proposal, but it did **not** implement a Space Engineers-style editable voxel landscape. The word "Voxel" currently names an interval-column renderer, not a cubic 3D density terrain.
+The Raylib terrain path now has a real sparse 3D voxel representation and derives its rendered surface from that field. It is no longer the previous vertical-interval/XY-column mesh labelled as voxel terrain.
 
-The current implementation is a useful prototype for vertical caves and horizontal cutaways. It is not ready to be called a full voxel terrain system.
+This is a **sparse procedural-base + 3D voxel-edit** design. The large untouched canyon base is evaluated from the existing base-surface generator as a 3D signed-distance function. Edited areas materialize true cubic 0.1 m voxel data in 16³ chunks. This avoids a dense X×Y×Z world allocation while supporting 3D volume operations.
 
-## Findings against the request
+The source-level voxel representation and render path are in place. Runtime acceptance, target-hardware performance and integration into the full game simulation are not yet verified.
 
-| Requirement | Current result | Verdict |
+## Requirements audit
+
+| Requirement | Current result | Status |
 |---|---|---|
-| Landscape with real 3D editable volume | 1 m x 1 m XY columns with 0.1 m vertical runs | Not met |
-| Overhangs, arches and arbitrary slopes | Only shapes expressible by neighbouring vertical columns; stair-stepped at 1 m XY | Not met to SE quality |
-| Player-facing terrain editing | APIs for single cells and axis-aligned cuboids; no in-world brush/editor | Not met |
-| Sphere/capsule/ramp/flatten tools | No density brushes or matching tool UI | Not met |
-| Material painting independent of shape | Material ID exists, but no brush UI or terrain material renderer | Not met |
-| Continuous 3D surface geometry | Axis-aligned top/bottom quads and cardinal side walls from column runs | Not met |
-| Stable horizontal cutaway | GPU clip plane plus separate cut mask; boundary and replacement logic received fixes, but still needs runtime verification | Partial |
-| Multi-level navigation | 0.5 m XY grid with one surface height per XY cell | Not met |
-| Local navigation rebuild after terrain edits | Nav grid is cached by global `WorldMap.TerrainVersion`; next update rebuilds the full grid | Not met |
-| Large-world memory budget | Sparse interval columns; no dense X*Y*Z array | Partial success |
-| LOD | Separate 1 m / 4 m snapshots; coarse snapshot samples the centre column and can lose small features | Partial |
+| 3D voxel coordinates | Isotropic 0.1 m X/Y/Z cell grid | Met |
+| Per-voxel geometry | Signed-distance sample at voxel centres, quantized to signed 16-bit | Met |
+| Per-voxel material | 16-bit MaterialId per cubic cell; material definitions are shared | Met |
+| Sparse large-world storage | 16³ chunks allocated only where edits require them; untouched base is procedural | Met |
+| Real 3D surface | Marching-tetrahedra isosurface from eight density samples per source cube, not XY height extrusion | Met |
+| Smooth surface normals | Density-gradient normals | Met in source; visual verification pending |
+| Overhangs and arches | Additive sphere/capsule/box CSG can create disconnected solid volumes and air underneath | Met in source |
+| Tunnels and caves | Subtractive sphere/capsule/box CSG | Met in source |
+| Material painting | PaintSphere writes per-cell material IDs | Met in source |
+| Smoothing | Local six-neighbour density smoothing | Met in source |
+| Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
+| Horizontal cutaway | Cut cap clips/intersects the same density field | Implemented in source; flicker/seam test pending |
+| Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
+| Distance LOD | 0.1 / 0.5 / 1.0 / 4.0 m sampling steps; source data remains 0.1 m | Met in source |
+| Multi-level navigation | Existing UnitNavigationSystem remains an XY grid with one primary surface per XY cell | Not met |
+| Physics/collision from voxels | Existing gameplay collision/physics is not yet backed by the new SDF field | Not met |
+| Save/load of edited chunks | Chunk serialization and world-save integration are not yet implemented | Not met |
+| Undo/redo and edit history | Not implemented | Not met |
+| Measured performance | Sparse storage and per-frame build budgets exist; no target-PC benchmark has been run | Unverified |
 
-## Concrete code evidence
+## Architecture
 
-### Storage
+### Authoritative data
 
-`Core/Map/SparseVoxelStore.cs` uses 16x16 XY chunks. The common case is represented by `TopLayers[256]` plus `MaterialIds[256]`; edited columns are represented by `Dictionary<int, SolidRun[]>`. There is no Z chunk coordinate, no 3D sample array, and no signed density field.
+`Core/Map/SparseVoxelField.cs` stores:
+- a signed-distance sample for each materialized voxel centre;
+- a separate MaterialId for each cubic voxel cell;
+- sparse 16³ chunk allocations;
+- procedural base density/material callbacks for untouched terrain;
+- CSG operations for sphere, capsule and box addition/removal;
+- material painting, local smoothing and field raycasting.
 
-Native spacing is 1 m along X/Y and 0.1 m along Z. This is a compressed set of vertical intervals, not 0.1 m cubic voxels.
+The signed-distance value is not the material's physical mass density. Physical material properties live in `VoxelMaterialCatalog` and are referenced through MaterialId.
 
-### Base landscape and geometry
+### Geometry
 
-`World/WorldGenerator.cs` uses `GenerateSmooth` with `patchSize = 1`: one height per 1x1 m XY sample. It then creates the cave demo by carving axis-aligned volumes and a series of vertical-column runs.
+`Render.Raylib/VoxelChunkMesher.cs` extracts isosurfaces from 3D density samples using marching tetrahedra and computes normals from density gradients. LOD skips source samples but does not modify the source field resolution.
 
-`Render.Raylib/RegionMeshBuilder.cs` reads each column's solid/air intervals and emits horizontal faces and four cardinal side faces. Normals are axis-aligned. It does not extract an isosurface from a 3D field, so terrain cannot have smoothly sloped arbitrary surfaces inside a cell.
-
-The coarse 4x4 m LOD uses the centre source column. Thin arches, small rocks, narrow passages and other features between sample points can disappear at distance.
-
-### Materials and appearance
-
-`Render.Raylib/RaylibViewerSettings.cs` returns the same `BaseRock` colour for the surface, cliffs and cut surfaces regardless of `materialId`. The current default is a very dark neutral colour. Material IDs 2 and 3 only change cut-hatching direction; they do not provide a real material/texture system. That is far from the layered, textured ground presentation of Space Engineers.
+`Render.Raylib/VoxelTerrainRenderer.cs` caches 3D chunk meshes, applies frustum/distance selection, clips with the horizontal cut plane and rebuilds dirty chunks within per-frame budgets.
 
 ### Editing
 
-`WorldMap` exposes `SetVoxel`, `SetVoxelVolume`, `SetStaticVolume` and `CarveStaticVolume`. These are useful low-level APIs, but they are a single-cell write or axis-aligned cuboid edit. There is no Sphere, Capsule, Ramp, Terrain Auto Level, preview gizmo, continuous brush stroke, undo stack or material-paint tool comparable to Voxel Hands.
+`RaylibTerrainViewer` raycasts from the active 3D camera into `WorldMap.Voxels`. The brush operations are CSG/density edits, not changes to a surface-height array. The field raises changed bounds so the world caches and renderer can invalidate only affected areas.
 
-### Navigation
+### Base-world compromise
 
-`Core/Unit/UnitNavigationSystem.cs` uses `NavigationCellsPerMeter = 2`, so the horizontal grid spacing is 0.5 m. Each XY cell has one `_navigationHeights` value and one passability value. It cannot store a bridge floor and a tunnel floor as separate nodes at the same XY position.
-
-`EnsureNavigationGrid` invalidates against the global `WorldMap.TerrainVersion` and loops across the complete XY grid when it changes. This is not a local per-chunk rebuild, and it does not read a 3D density field.
-
-## Space Engineers comparison
-
-The target should be copied at the level of behaviour and player tools, not by assuming every Space Engineers version uses one universal implementation.
-
-- Space Engineers Voxel Hands exposes Box, Capsule, Ramp, Sphere and Terrain Auto Level; it supports adding, removing and replacing voxel material. See https://spaceengineers.wiki.gg/wiki/Voxel_Hands
-- The newer VRAGE3 planet work still describes a heightmap base, augmented by small voxel storages for overhangs and boulders. This is a practical reference for a large world: keep the cheap base terrain, then materialize editable 3D voxel volumes where the shape requires them. See https://blog.marekrosa.org/2025/08/mareks-dev-diary-august-21-2025/
-
-The RimClone target should therefore be a **hybrid landscape**:
-1. A cheap generated base surface at the current 1 m XY scale.
-2. Local, genuine 3D voxel storages for tunnels, arches, overhangs, boulders and edits.
-3. A single edit field (density + material) inside each storage. Render meshes, slice intersections, collision and navigation all consume that field.
-4. Tools matching the reference behaviour: box, sphere, capsule, ramp/plane, flatten, smooth, carve, add and material paint.
-
-This avoids allocating a cubic grid for the whole 2304 x 2304 x 50 m world while still supporting real 3D shapes where needed.
-
-## Changes made during this audit
-
-- Camera orbit was inconsistent: README promised right mouse, while the controller was still listening to Shift+left mouse. The controller, HUD and README now consistently use **Shift+right mouse drag**. MMB remains pan; Shift+MMB remains the temporary speed adjustment.
-- Cut-cap geometry had two duplication paths: the cap lookup could return material at an exact natural top boundary, and the base mesher could also emit a top face at the cut plane while the separate cap mesh emitted the same face. The voxel base mesher now suppresses its own top face when the plane crosses a solid run; the cap lookup creates that face once. At an exact natural top boundary the base face remains and no separate cap is created. A plane exactly between two adjacent solid material runs still receives a cap using the material below the plane.
-- Cut-cap meshes are built before replacing old ones. Region scanning is round-robin, and old base meshes remain visible while replacements are being prepared.
-- Camera zoom documentation was also brought in line with the current axis zoom (no cursor-anchored focus shift).
-- The architecture proposal now uses an explicit Space Engineers-style hybrid base-surface + local 3D voxel-storage target rather than implying a dense 3D volume across the whole map.
+The base canyon profile is still generated from the existing 1 m XY surface data, then evaluated as a 3D signed-distance field at 0.1 m sample spacing. This keeps the large world sparse. It provides a genuinely 3D edit field but does not give the untouched base arbitrary overhangs on its own; those require voxel additions/edits. This is an explicit hybrid design choice, not a claim that the entire 2304 × 2304 × 50 m volume is pre-materialized.
 
 ## Remaining acceptance work
 
-The control and cut fixes are source-level changes and still need a runtime pass. The following scenarios are required before claiming the original request is complete:
+1. Build the full .NET solution and resolve any compile/API issues.
+2. Run the Raylib viewer at close, medium and far zoom. Check the visible 0.1 / 0.5 / 1 / 4 m mesh steps and transitions.
+3. Sculpt a sphere, a long capsule, a box cut and an additive arch. Confirm a bridge/overhang and an air gap below it can exist at the same X/Z coordinates.
+4. Move the cut plane through a carved cave and the upper/lower passages. Check for caps, holes, flicker and seams across 3D chunk boundaries.
+5. Measure frame time and memory while moving the camera and editing at close range. Current per-frame budgets are source-level safeguards, not measured performance results.
+6. Integrate SDF queries into collision and multi-level navigation if units must walk over bridges and through tunnels as distinct floors.
+7. Add durable voxel edit serialization and undo/redo before relying on terrain edits in saved campaigns.
 
-1. Hold Shift+RMB and rotate in both axes; release either input and confirm orbit stops. Pan with MMB separately.
-2. Hold Q/E while the cutaway is enabled; check slow movement and fast movement, then place the plane exactly on a natural top face and just inside a solid volume. No flickering seam or duplicate face should appear.
-3. Move the cut plane across the full world while switching fine/coarse LOD. No missing caps, stale cut levels, black regions or visible chunk seams.
-4. Edit a sphere, capsule and ramp through the intended editor; verify a true overhang, an arch and a cave can be created and then removed/painted.
-5. Verify an agent can route on the upper surface, bridge, and lower tunnel at the same XY coordinates.
-6. Edit one voxel storage and confirm only its mesh, collision and neighbouring nav chunks are rebuilt.
-
-Until the 3D voxel storage, brush tools and layered navigation are implemented, acceptance of the Space Engineers-style terrain request is **failed / incomplete**.
+Until those runtime and gameplay-integration steps are completed, the terrain can accurately be called a **3D sparse voxel/SDF terrain renderer**, but not a fully integrated Space Engineers-style voxel gameplay system.
