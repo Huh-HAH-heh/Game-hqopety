@@ -14,7 +14,8 @@ public enum GameMenuPage
     Closed,
     Main,
     Settings,
-    TestScenes
+    TestScenes,
+    Controls
 }
 
 public enum GameMenuActionType
@@ -38,6 +39,9 @@ public enum GameMenuActionType
     ResetTerrainSettings,
     OpenInformation,
     OpenTestScenes,
+    OpenControls,
+    RebindControl,
+    ResetControls,
     BackToSettings,
     PreviousTestScene,
     NextTestScene,
@@ -78,7 +82,9 @@ public readonly record struct GameSettingsSnapshot(
     bool VisionEnabled,
     bool ShowCombatTracers,
     bool ShowCombatHud,
-    int UnitsPerCombatFaction);
+    int UnitsPerCombatFaction,
+    string[] ControlBindingLabels,
+    int CapturingControlIndex);
 
 public readonly record struct GameResolution(
     uint Width,
@@ -358,6 +364,9 @@ void main()
     private readonly RectangleShape _contoursButton = ButtonShape(136f, 34f);
     private readonly RectangleShape _contourLabelsButton = ButtonShape(136f, 34f);
     private readonly RectangleShape _unitRigButton = ButtonShape(576f, 32f);
+    private readonly RectangleShape _controlsButton = ButtonShape(170f, 34f);
+    private readonly RectangleShape _resetControlsButton = ButtonShape(190f, 34f);
+    private readonly RectangleShape[] _controlBindingButtons = CreateControlBindingButtons();
 
     private readonly RectangleShape _scenePrevious = ButtonShape(34f, 36f);
     private readonly RectangleShape _sceneNext = ButtonShape(34f, 36f);
@@ -447,6 +456,14 @@ void main()
     private readonly Text? _resetLabel;
     private readonly Text? _backLabel;
     private readonly Text? _keyboardHelp;
+    private readonly Text? _settingsControlsLabel;
+    private readonly Text? _controlsHeading;
+    private readonly Text? _controlsSubtitle;
+    private readonly Text? _controlsHint;
+    private readonly Text? _resetControlsLabel;
+    private readonly Text?[] _controlActionLabels = new Text?[GameControlBindings.ActionCount];
+    private readonly Text?[] _controlBindingLabels = new Text?[GameControlBindings.ActionCount];
+    private Text?[] _controlsTexts = Array.Empty<Text?>();
     private readonly Text? _sceneHeading;
     private readonly Text? _sceneName;
     private readonly Text? _sceneActiveLabel;
@@ -622,6 +639,27 @@ void main()
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _unitRigLabel = CreateText(
             "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _settingsControlsLabel = CreateText(
+            "УПРАВЛЕНИЕ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        _controlsHeading = CreateText(
+            "УПРАВЛЕНИЕ", 15, new Color(216, 224, 234), new Vector2f(0f, 0f), Text.Styles.Bold);
+        _controlsSubtitle = CreateText(
+            "Нажми на назначение, затем нажми новую клавишу", 11,
+            new Color(154, 168, 185), new Vector2f(0f, 0f));
+        _controlsHint = CreateText(
+            "Esc — отмена переназначения   •   Колесо — масштаб   •   СКМ — панорама   •   ПКМ — поворот",
+            10, new Color(154, 168, 185), new Vector2f(0f, 0f));
+        _resetControlsLabel = CreateText(
+            "СБРОСИТЬ НАЗНАЧЕНИЯ", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        for (int i = 0; i < GameControlBindings.ActionCount; i++)
+        {
+            _controlActionLabels[i] = CreateText(
+                GameControlBindings.GetActionName(GameControlBindings.GetActionAt(i)),
+                12, new Color(211, 219, 228), new Vector2f(0f, 0f));
+            _controlBindingLabels[i] = CreateText(
+                "", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
+        }
+
         _toneHeading = CreateText(
             "ПРЕВЬЮ МОНОХРОМНОГО ТОНА", 11,
             new Color(195, 204, 215), new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -634,7 +672,7 @@ void main()
         _backLabel = CreateText(
             "НАЗАД", 11, Color.White, new Vector2f(0f, 0f), Text.Styles.Bold);
         _keyboardHelp = CreateText(
-            "Колесо — масштаб   •   Средняя кнопка мыши — панорама",
+            "NumPad + / − — срез Z   •   Колесо — масштаб   •   СКМ — панорама",
             10, new Color(145, 157, 173), new Vector2f(0f, 0f));
 
         _sceneHeading = CreateText("ТЕСТОВЫЕ СЦЕНЫ", 13, new Color(216, 224, 234), new Vector2f(0f, 0f), Text.Styles.Bold);
@@ -679,12 +717,22 @@ void main()
             _contoursLabel,
             _contourLabelsLabel,
             _unitRigLabel,
+            _settingsControlsLabel,
             _toneHeading,
             _toneLowLabel,
             _toneHighLabel,
             _resetLabel,
             _backLabel,
             _keyboardHelp
+        };
+
+        _controlsTexts = new Text?[]
+        {
+            _settingsTitle, _settingsSubtitle, _closeLabel,
+            _controlsHeading, _controlsSubtitle, _controlsHint,
+            _resetControlsLabel, _backLabel,
+            .. _controlActionLabels,
+            .. _controlBindingLabels
         };
 
         _testSceneTexts = new Text?[]
@@ -783,6 +831,24 @@ void main()
             return null;
         }
 
+        if (page == GameMenuPage.Controls)
+        {
+            if (_closeButton.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.BackToMainMenu);
+            if (_backButton.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.BackToSettings);
+            if (_resetControlsButton.GetGlobalBounds().Contains(point))
+                return new GameMenuAction(GameMenuActionType.ResetControls);
+
+            for (int i = 0; i < _controlBindingButtons.Length; i++)
+            {
+                if (_controlBindingButtons[i].GetGlobalBounds().Contains(point))
+                    return new GameMenuAction(GameMenuActionType.RebindControl, Index: i);
+            }
+
+            return null;
+        }
+
         if (page == GameMenuPage.TestScenes)
         {
             if (_closeButton.GetGlobalBounds().Contains(point))
@@ -859,6 +925,9 @@ void main()
         {
             return new GameMenuAction(GameMenuActionType.OpenTestScenes);
         }
+
+        if (_controlsButton.GetGlobalBounds().Contains(point))
+            return new GameMenuAction(GameMenuActionType.OpenControls);
 
         if (_resetButton.GetGlobalBounds().Contains(point))
         {
@@ -1509,7 +1578,7 @@ void main()
             return false;
 
         _draggingMain = page == GameMenuPage.Main;
-        _draggingSettings = page is GameMenuPage.Settings or GameMenuPage.TestScenes;
+        _draggingSettings = page is GameMenuPage.Settings or GameMenuPage.TestScenes or GameMenuPage.Controls;
         _dragOffsetX = position.X - panel.Position.X;
         _dragOffsetY = position.Y - panel.Position.Y;
         return _draggingMain || _draggingSettings;
@@ -1590,6 +1659,12 @@ void main()
         if (page == GameMenuPage.TestScenes)
         {
             DrawTestScenes(window, settings, mousePosition);
+            return;
+        }
+
+        if (page == GameMenuPage.Controls)
+        {
+            DrawControls(window, settings, mousePosition);
             return;
         }
 
@@ -1712,10 +1787,25 @@ void main()
         }
 
         _resetButton.Position = new Vector2f(settingsX + 22f, settingsY + 594f);
+        _controlsButton.Position = new Vector2f(settingsX + 184f, settingsY + 594f);
         _backButton.Position = new Vector2f(settingsX + SettingsWidth - 150f, settingsY + 594f);
         _resetLabel!.Position = new Vector2f(settingsX + 38f, settingsY + 603f);
         _backLabel!.Position = new Vector2f(settingsX + SettingsWidth - 113f, settingsY + 603f);
         _keyboardHelp!.Position = new Vector2f(settingsX + 22f, settingsY + 574f);
+
+        _controlsHeading!.Position = new Vector2f(settingsX + 22f, settingsY + 80f);
+        _controlsSubtitle!.Position = new Vector2f(settingsX + 22f, settingsY + 108f);
+        _controlsHint!.Position = new Vector2f(settingsX + 22f, settingsY + 514f);
+        _resetControlsButton.Position = new Vector2f(settingsX + 22f, settingsY + 548f);
+        _resetControlsLabel!.Position = new Vector2f(settingsX + 38f, settingsY + 557f);
+
+        for (int i = 0; i < GameControlBindings.ActionCount; i++)
+        {
+            float rowY = settingsY + 146f + i * 45f;
+            _controlActionLabels[i]!.Position = new Vector2f(settingsX + 26f, rowY + 8f);
+            _controlBindingButtons[i].Position = new Vector2f(settingsX + 390f, rowY);
+            _controlBindingLabels[i]!.Position = new Vector2f(settingsX + 405f, rowY + 9f);
+        }
 
         if (_lastSelectedResolutionIndex != settings.SelectedResolutionIndex)
         {
@@ -1767,6 +1857,7 @@ void main()
         CenterButtonLabel(_contoursButton, _contoursLabel!);
         CenterButtonLabel(_contourLabelsButton, _contourLabelsLabel!);
         CenterButtonLabel(_unitRigButton, _unitRigLabel!);
+        CenterButtonLabel(_controlsButton, _settingsControlsLabel!);
 
         for (int i = 0; i < _toneSwatches.Length; i++)
         {
@@ -1808,6 +1899,7 @@ void main()
         UpdateHover(_contoursButton, mouse);
         UpdateHover(_contourLabelsButton, mouse);
         UpdateHover(_unitRigButton, mouse);
+        UpdateHover(_controlsButton, mouse);
         UpdateHover(_resetButton, mouse);
         UpdateHover(_backButton, mouse);
 
@@ -1840,6 +1932,7 @@ void main()
         window.Draw(_contoursButton);
         window.Draw(_contourLabelsButton);
         window.Draw(_unitRigButton);
+        window.Draw(_controlsButton);
         window.Draw(_resetButton);
         window.Draw(_backButton);
 
@@ -1869,6 +1962,54 @@ void main()
             return;
 
         DrawText(window, _settingsTexts);
+    }
+
+    private void DrawControls(
+        RenderWindow window,
+        GameSettingsSnapshot settings,
+        Vector2i mouse)
+    {
+        _settingsTitle!.DisplayedString = "НАСТРОЙКИ УПРАВЛЕНИЯ";
+        _settingsSubtitle!.DisplayedString = "Переназначение игровых клавиш";
+        UpdateHover(_closeButton, mouse);
+        UpdateHover(_backButton, mouse);
+        UpdateHover(_resetControlsButton, mouse);
+
+        window.Draw(_panel);
+        window.Draw(_accent);
+        window.Draw(_closeButton);
+
+        for (int i = 0; i < _controlBindingButtons.Length; i++)
+        {
+            bool capturing = settings.CapturingControlIndex == i;
+            RectangleShape button = _controlBindingButtons[i];
+            button.FillColor = capturing
+                ? new Color(70, 82, 98)
+                : button.GetGlobalBounds().Contains(mouse)
+                    ? new Color(48, 60, 76)
+                    : new Color(28, 36, 47);
+            window.Draw(button);
+
+            if (settings.ControlBindingLabels != null &&
+                i < settings.ControlBindingLabels.Length &&
+                _controlBindingLabels[i] != null)
+            {
+                _controlBindingLabels[i]!.DisplayedString = capturing
+                    ? "НАЖМИ КЛАВИШУ..."
+                    : settings.ControlBindingLabels[i];
+                CenterButtonLabel(button, _controlBindingLabels[i]!);
+                window.Draw(_controlBindingLabels[i]!);
+            }
+
+            if (_controlActionLabels[i] != null)
+                window.Draw(_controlActionLabels[i]!);
+        }
+
+        window.Draw(_resetControlsButton);
+        window.Draw(_backButton);
+
+        if (_font != null)
+            DrawText(window, _controlsTexts);
     }
 
     private void DrawTestScenes(RenderWindow window, GameSettingsSnapshot settings, Vector2i mouse)
@@ -1947,7 +2088,7 @@ void main()
         };
 
     public bool IsSettingsPanelHit(Vector2i point, GameMenuPage page) =>
-        page is GameMenuPage.Settings or GameMenuPage.TestScenes &&
+        page is GameMenuPage.Settings or GameMenuPage.TestScenes or GameMenuPage.Controls &&
         _panel.GetGlobalBounds().Contains(point);
 
     public void SetExtremes(
@@ -1964,6 +2105,14 @@ void main()
         _maximumHeightUnits = maximumHeightUnits;
         _maximumX = maximumX;
         _maximumY = maximumY;
+    }
+
+    private static RectangleShape[] CreateControlBindingButtons()
+    {
+        var buttons = new RectangleShape[GameControlBindings.ActionCount];
+        for (int i = 0; i < buttons.Length; i++)
+            buttons[i] = ButtonShape(190f, 34f);
+        return buttons;
     }
 
     private static RectangleShape ButtonShape(
@@ -2085,6 +2234,10 @@ void main()
     public void Dispose()
     {
         _sceneNameBox.Dispose();
+        _controlsButton.Dispose();
+        _resetControlsButton.Dispose();
+        for (int i = 0; i < _controlBindingButtons.Length; i++)
+            _controlBindingButtons[i].Dispose();
         _sceneUnitRig.Dispose();
         _sceneCombatHud.Dispose();
         _sceneTracers.Dispose();
