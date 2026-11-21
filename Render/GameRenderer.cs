@@ -4394,7 +4394,8 @@ public sealed class GameRenderer
                     TerrainTilePixelSize));
             Console.WriteLine(
                 "[Terrain preview] Isometric block view. " +
-                "Middle mouse: pan; wheel: zoom; B: return to game.");
+                "Middle mouse: pan; wheel: zoom; " +
+                $"{GameControlBindings.GetKeyName(_controlBindings.Get(GameControlAction.ToggleBlockTerrainPreview))}: return to game.");
         }
         else
         {
@@ -4409,7 +4410,7 @@ public sealed class GameRenderer
         bool enabled = !_camera.IsometricProjectionEnabled;
         _camera.SetIsometricProjection(enabled);
         Console.WriteLine(enabled
-            ? "[CAMERA] Изометрическая проекция включена. ПКМ-перетаскивание/Q/E — поворот камеры."
+            ? $"[CAMERA] Изометрическая проекция включена. ПКМ-перетаскивание, {_controlBindings.GetBindingLabels()[3]}/{_controlBindings.GetBindingLabels()[4]} — поворот камеры."
             : "[CAMERA] Возвращён обычный вид сверху 2D.");
     }
 
@@ -4598,8 +4599,10 @@ public sealed class GameRenderer
             else
                 _camera.RotateClockwise(orbitCenter);
 
+            string[] controlLabels = _controlBindings.GetBindingLabels();
             Console.WriteLine(
-                $"[CAMERA] Сектор орбиты: {_camera.OrbitSectorLabel}. Q/E — перемещение камеры на 45 градусов.");
+                $"[CAMERA] Сектор орбиты: {_camera.OrbitSectorLabel}. " +
+                $"{controlLabels[3]}/{controlLabels[4]} — поворот камеры на 45 градусов.");
             return;
         }
 
