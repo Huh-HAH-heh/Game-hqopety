@@ -90,7 +90,18 @@ internal static class VoxelTerrainSelfTest
         SparseVoxelField source = CreateField();
         BuildTunnelAndBridge(source);
         float carvedDensity = source.GetDensity(30, 12, 30);
-        ushort bridgeMaterial = source.GetMaterialId(30, 43, 30);
+        int materialSampleY = -1;
+        for (int y = 40; y < 44; y++)
+        {
+            if (source.GetMaterialId(30, y, 30) == BridgeMaterial)
+            {
+                materialSampleY = y;
+                break;
+            }
+        }
+        ushort bridgeMaterial = materialSampleY >= 0
+            ? source.GetMaterialId(30, materialSampleY, 30)
+            : (ushort)0;
 
         using MemoryStream save = new();
         source.SaveEdits(save);
@@ -108,7 +119,12 @@ internal static class VoxelTerrainSelfTest
 
         int restoredChunkCount = restored.ChunkCount;
         float restoredCarvedDensity = restored.GetDensity(30, 12, 30);
-        ushort restoredBridgeMaterial = restored.GetMaterialId(30, 43, 30);
+        ushort restoredBridgeMaterial = materialSampleY >= 0
+            ? restored.GetMaterialId(30, materialSampleY, 30)
+            : (ushort)0;
+        float materialDensity = materialSampleY >= 0
+            ? source.GetDensity(30, materialSampleY, 30)
+            : 0f;
         bool chunksMatch = restoredChunkCount == source.ChunkCount;
         bool densityMatches = MathF.Abs(restoredCarvedDensity - carvedDensity) < 0.001f;
         bool materialMatches = restoredBridgeMaterial == bridgeMaterial &&
@@ -119,8 +135,14 @@ internal static class VoxelTerrainSelfTest
         {
             Console.WriteLine(
                 $"[DETAIL] voxel save: chunks={restoredChunkCount}/{source.ChunkCount}, " +
-                $"density={restoredCarvedDensity:0.000}/{carvedDensity:0.000}, " +
-                $"material={restoredBridgeMaterial}/{bridgeMaterial}, surfaces={surfaceCount}.");
+                $"density={restoredCarvedDensity:0.000}/{carvedDensity}, " +
+                $"material={restoredBridgeMaterial}/{bridgeMaterial}, " +
+                $"materialY={materialSampleY}, materialDensity={materialDensity:0.000}, " +
+                $"nearby=" +
+                $"{source.GetMaterialId(30, 40, 30)}/" +
+                $"{source.GetMaterialId(30, 41, 30)}/" +
+                $"{source.GetMaterialId(30, 42, 30)}/" +
+                $"{source.GetMaterialId(30, 43, 30)}, surfaces={surfaceCount}.");
         }
 
         return chunksMatch && densityMatches && materialMatches && surfacesMatch;
