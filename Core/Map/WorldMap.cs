@@ -604,6 +604,15 @@ public sealed class WorldMap
         if (!IsInside(x, y) || z < 0 || z >= LayerCount)
             throw new IndexOutOfRangeException();
 
+        int index = GetColumnIndex(x, y);
+        if (_simpleFillColumns[index])
+        {
+            Blocks.Volumes.SetSurfaceColumn(
+                x, y,
+                _surfaceHeights[index], _columnMaterialIds[index]);
+            _simpleFillColumns[index] = false;
+        }
+
         Blocks.Volumes.SetVoxel(x, y, z, materialId);
         Vector3 minimum = new(x, z * 0.1f, y);
         Vector3 maximum = new(x + 1f, (z + 1) * 0.1f, y + 1f);
@@ -611,7 +620,7 @@ public sealed class WorldMap
             Voxels.CarveBox(minimum, maximum);
         else
             Voxels.FillBox(minimum, maximum, materialId);
-        int index = GetColumnIndex(x, y);
+
         _rangeCache[index] = null;
         RecalculateSurfaceHeight(index);
         MarkTerrainChanged(x, y);
@@ -942,6 +951,29 @@ public sealed class WorldMap
         if (cached != null)
             return cached;
 
+        if (_simpleFillColumns[index] &&
+            !Voxels.HasEditsInColumn(globalX * 10 + 5, globalY * 10 + 5))
+        {
+            int filledLayers = Math.Clamp(
+                (_surfaceHeights[index] + LayerHeightUnits - 1) /
+                    LayerHeightUnits,
+                0,
+                LayerCount);
+            if (filledLayers == 0 || _columnMaterialIds[index] == 0)
+                return ReadOnlySpan<TileRange>.Empty;
+
+            cached = new TileRange[1];
+            cached[0] = new TileRange
+            {
+                StartZ = 0,
+                EndZ = checked((ushort)filledLayers),
+                MaterialId = _columnMaterialIds[index],
+                State = StateSolid
+            };
+            _rangeCache[index] = cached;
+            return cached;
+        }
+
         Span<TileRange> ranges = stackalloc TileRange[LayerCount];
         int count = Blocks.Volumes.CopyColumnRanges(globalX, globalY, ranges);
         cached = new TileRange[count];
@@ -966,8 +998,22 @@ public sealed class WorldMap
         Blocks.Volumes.SetColumnRanges(globalX, globalY, ranges);
         _rangeCache[index] = null;
         RecalculateSurfaceHeight(index);
-        Voxels.ResetBaseColumn(globalX, globalY);
-        Voxels.InvalidateBaseField();
+
+        Vector3 minimum = new(globalX, 0f, globalY);
+        Vector3 maximum = new(globalX + 1f, LayerCount * 0.1f, globalY + 1f);
+        Voxels.CarveBox(minimum, maximum);
+        foreach (TileRange range in ranges)
+        {
+            if (range.State != StateSolid || range.MaterialId == 0 ||
+                range.EndZ <= range.StartZ)
+                continue;
+
+            Voxels.FillBox(
+                new Vector3(globalX, range.StartZ * 0.1f, globalY),
+                new Vector3(globalX + 1f, range.EndZ * 0.1f, globalY + 1f),
+                range.MaterialId);
+        }
+
         MarkTerrainChanged(globalX, globalY);
     }
 
@@ -1003,6 +1049,15 @@ public sealed class WorldMap
         if (endLayer <= startLayer)
             return true;
 
+        int index = GetColumnIndex(globalX, globalY);
+        if (_simpleFillColumns[index])
+        {
+            Blocks.Volumes.SetSurfaceColumn(
+                globalX, globalY,
+                _surfaceHeights[index], _columnMaterialIds[index]);
+            _simpleFillColumns[index] = false;
+        }
+
         Blocks.Volumes.SetVolume(
             globalX, globalY, startLayer,
             1, 1, endLayer - startLayer,
@@ -1015,7 +1070,6 @@ public sealed class WorldMap
         else
             Voxels.CarveBox(minimum, maximum);
 
-        int index = GetColumnIndex(globalX, globalY);
         _rangeCache[index] = null;
         RecalculateSurfaceHeight(index);
         MarkTerrainChanged(globalX, globalY);
@@ -1038,6 +1092,15 @@ public sealed class WorldMap
         if (firstLayer >= lastLayer)
             return;
 
+        int index = GetColumnIndex(globalX, globalY);
+        if (_simpleFillColumns[index])
+        {
+            Blocks.Volumes.SetSurfaceColumn(
+                globalX, globalY,
+                _surfaceHeights[index], _columnMaterialIds[index]);
+            _simpleFillColumns[index] = false;
+        }
+
         Blocks.Volumes.SetVolume(
             globalX, globalY, firstLayer,
             1, 1, lastLayer - firstLayer, 0);
@@ -1045,7 +1108,6 @@ public sealed class WorldMap
             new Vector3(globalX, firstLayer * 0.1f, globalY),
             new Vector3(globalX + 1f, lastLayer * 0.1f, globalY + 1f));
 
-        int index = GetColumnIndex(globalX, globalY);
         _rangeCache[index] = null;
         RecalculateSurfaceHeight(index);
         MarkTerrainChanged(globalX, globalY);
@@ -1224,14 +1286,15 @@ public sealed class WorldMap
             clampedHeight > 0 && materialId != 0 ? clampedHeight : 0));
         ushort storedMaterial = storedHeight > 0 ? materialId : (ushort)0;
 
-        Blocks.Volumes.SetSurfaceColumn(
-            globalX, globalY, storedHeight, storedMaterial);
-
+        // Keep ordinary terrain in the compact surface arrays. The detailed
+        // volume tree is created only when a column receives a complex edit.
+        Blocks.Volumes.ClearColumn(globalX, globalY);
         _surfaceHeights[index] = storedHeight;
         _volumeSurfaceHeights[index] = 0;
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = storedMaterial;
         _rangeCache[index] = null;
+
         Voxels.ResetBaseColumn(globalX, globalY);
         Voxels.InvalidateBaseField();
         _simpleFillColumns[index] = true;
@@ -1405,6 +1468,20 @@ public sealed class WorldMap
             {
                 int columnIndex = GetColumnIndex(tileX, tileY);
                 _rangeCache[columnIndex] = null;
+
+                // A local 3D edit promotes an ordinary implicit surface column
+                // to the compatibility volume tree once, preserving old range
+                // and navigation readers while the renderer uses SDF voxels.
+                bool fullColumnReset =
+                    bounds.MinY <= 0 && bounds.MaxY >= Voxels.Height;
+                if (_simpleFillColumns[columnIndex] && !fullColumnReset)
+                {
+                    Blocks.Volumes.SetSurfaceColumn(
+                        tileX, tileY,
+                        _surfaceHeights[columnIndex],
+                        _columnMaterialIds[columnIndex]);
+                }
+
                 _simpleFillColumns[columnIndex] = false;
                 MarkTerrainChanged(tileX, tileY);
             }
