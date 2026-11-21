@@ -172,9 +172,9 @@ internal static class VoxelChunkMesher
                 maximum = MathF.Max(maximum, value);
 
                 positions[corner] = new Vector3(
-                    (originX + (x + CornerX[corner]) * step) * SparseVoxelField.VoxelSizeMeters,
-                    (originY + (y + CornerY[corner]) * step) * SparseVoxelField.VoxelSizeMeters,
-                    (originZ + (z + CornerZ[corner]) * step) * SparseVoxelField.VoxelSizeMeters);
+                    (originX + (x + CornerX[corner]) * step + 0.5f) * SparseVoxelField.VoxelSizeMeters,
+                    (originY + (y + CornerY[corner]) * step + 0.5f) * SparseVoxelField.VoxelSizeMeters,
+                    (originZ + (z + CornerZ[corner]) * step + 0.5f) * SparseVoxelField.VoxelSizeMeters);
 
                 float gx = density[GetSampleIndex(sx + 1, sy, sz)] -
                     density[GetSampleIndex(sx - 1, sy, sz)];
@@ -292,8 +292,8 @@ internal static class VoxelChunkMesher
         float cutHeightMeters,
         TerrainPalette palette)
     {
-        float cutY = cutHeightMeters / SparseVoxelField.VoxelSizeMeters;
-        if (cutY <= 0f || cutY >= field.Height)
+        float cutSampleY = cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f;
+        if (cutSampleY <= -0.5f || cutSampleY >= field.Height - 0.5f)
             return Array.Empty<Mesh>();
 
         int originX = chunkX * CellsPerAxis * step;
@@ -311,10 +311,10 @@ internal static class VoxelChunkMesher
             Span<SlicePoint> input = stackalloc SlicePoint[4];
             Span<SlicePoint> polygon = stackalloc SlicePoint[8];
 
-            input[0] = MakeSlicePoint(field, x0, cutY, z0);
-            input[1] = MakeSlicePoint(field, x1, cutY, z0);
-            input[2] = MakeSlicePoint(field, x1, cutY, z1);
-            input[3] = MakeSlicePoint(field, x0, cutY, z1);
+            input[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
+            input[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
+            input[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
+            input[3] = MakeSlicePoint(field, x0, cutSampleY, z1, cutHeightMeters);
 
             int polygonCount = ClipSolidPolygon(input, polygon);
             if (polygonCount < 3)
@@ -322,7 +322,7 @@ internal static class VoxelChunkMesher
 
             ushort materialId = field.GetMaterialId(
                 Math.Clamp((int)MathF.Floor((x0 + x1) * 0.5f), 0, field.Width - 1),
-                Math.Clamp((int)MathF.Floor(cutY - 0.5f), 0, field.Height - 1),
+                Math.Clamp((int)MathF.Floor(cutSampleY), 0, field.Height - 1),
                 Math.Clamp((int)MathF.Floor((z0 + z1) * 0.5f), 0, field.Depth - 1));
             Color color = GetMaterialColor(palette, materialId);
             SurfaceVertex anchor = new(
@@ -348,14 +348,15 @@ internal static class VoxelChunkMesher
     private static SlicePoint MakeSlicePoint(
         SparseVoxelField field,
         float x,
-        float y,
-        float z)
+        float ySample,
+        float z,
+        float cutHeightMeters)
     {
         Vector3 position = new(
-            x * SparseVoxelField.VoxelSizeMeters,
-            y * SparseVoxelField.VoxelSizeMeters,
-            z * SparseVoxelField.VoxelSizeMeters);
-        return new SlicePoint(position, field.SampleDensity(x, y, z));
+            (x + 0.5f) * SparseVoxelField.VoxelSizeMeters,
+            cutHeightMeters,
+            (z + 0.5f) * SparseVoxelField.VoxelSizeMeters);
+        return new SlicePoint(position, field.SampleDensity(x, ySample, z));
     }
 
     private static int ClipSolidPolygon(
