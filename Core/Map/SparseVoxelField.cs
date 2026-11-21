@@ -27,6 +27,7 @@ public sealed class SparseVoxelField
     private const int CellCount = ChunkSize * ChunkSize * ChunkSize;
     private const int SamplePlane = DensitySamplesPerAxis * DensitySamplesPerAxis;
     private const int CellPlane = ChunkSize * ChunkSize;
+    private const long MaximumEditSampleCount = 20_000_000;
 
     public readonly record struct ChunkCoordinate(int X, int Y, int Z);
 
@@ -319,6 +320,7 @@ public sealed class SparseVoxelField
         Vector3 center = ToVoxelPosition(centerMeters);
         float radius = radiusMeters / VoxelSizeMeters;
         GetCellBounds(center, radius, out VoxelBounds bounds);
+        ValidateEditWork(bounds);
 
         long revision = Version + 1;
         HashSet<ChunkCoordinate> touched = new();
@@ -355,6 +357,7 @@ public sealed class SparseVoxelField
         Vector3 center = ToVoxelPosition(centerMeters);
         float radius = radiusMeters / VoxelSizeMeters;
         GetCellBounds(center, radius + 1f, out VoxelBounds bounds);
+        ValidateEditWork(bounds);
         int sizeX = bounds.MaxX - bounds.MinX;
         int sizeY = bounds.MaxY - bounds.MinY;
         int sizeZ = bounds.MaxZ - bounds.MinZ;
@@ -438,6 +441,7 @@ public sealed class SparseVoxelField
         Vector3 center = ToVoxelPosition(centerMeters);
         float radius = radiusMeters / VoxelSizeMeters;
         GetCellBounds(center, radius + 1f, out VoxelBounds bounds);
+        ValidateEditWork(bounds);
 
         long revision = Version + 1;
         HashSet<ChunkCoordinate> touched = new();
@@ -498,6 +502,7 @@ public sealed class SparseVoxelField
         Vector3 end = ToVoxelPosition(endMeters);
         float radius = radiusMeters / VoxelSizeMeters;
         GetCapsuleBounds(start, end, radius + 1f, out VoxelBounds bounds);
+        ValidateEditWork(bounds);
 
         Vector3 segment = end - start;
         float segmentLengthSquared = segment.LengthSquared();
@@ -569,6 +574,8 @@ public sealed class SparseVoxelField
             (int)MathF.Ceiling(max.X + 1f),
             (int)MathF.Ceiling(max.Y + 1f),
             (int)MathF.Ceiling(max.Z + 1f));
+
+        ValidateEditWork(bounds);
 
         Vector3 center = (min + max) * 0.5f;
         // Density samples sit at cell centres, so a one-cell box still has
@@ -750,10 +757,24 @@ public sealed class SparseVoxelField
 
     private void ValidateBrush(float radiusMeters, ushort materialId, bool allowAir)
     {
-        if (!float.IsFinite(radiusMeters) || radiusMeters <= 0f || radiusMeters > 64f)
+        if (!float.IsFinite(radiusMeters) || radiusMeters <= 0f || radiusMeters > 8f)
             throw new ArgumentOutOfRangeException(nameof(radiusMeters));
         if (allowAir && materialId == 0)
             throw new ArgumentOutOfRangeException(nameof(materialId));
+    }
+
+    private static void ValidateEditWork(VoxelBounds bounds)
+    {
+        long x = Math.Max(0, bounds.MaxX - bounds.MinX + 1);
+        long y = Math.Max(0, bounds.MaxY - bounds.MinY + 1);
+        long z = Math.Max(0, bounds.MaxZ - bounds.MinZ + 1);
+
+        if (x * y * z > MaximumEditSampleCount)
+        {
+            throw new InvalidOperationException(
+                "Voxel edit is too large for one synchronous operation. " +
+                "Split it into smaller local edits.");
+        }
     }
 
     private static short Quantize(float density)
