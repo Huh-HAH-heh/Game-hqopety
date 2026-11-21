@@ -44,6 +44,7 @@ public sealed class SparseVoxelField
     }
 
     private readonly Dictionary<ChunkCoordinate, Chunk> _chunks = new();
+    private readonly HashSet<(int X, int Z)> _editedChunkColumns = new();
     private readonly Func<int, int, int, float> _baseDensity;
     private readonly Func<int, int, int, ushort> _baseMaterial;
 
@@ -159,13 +160,10 @@ public sealed class SparseVoxelField
         int lastChunkX = Math.Min(Width - 1, maxX) / ChunkSize;
         int firstChunkZ = Math.Max(0, minZ) / ChunkSize;
         int lastChunkZ = Math.Min(Depth - 1, maxZ) / ChunkSize;
-        int chunksY = (Height + ChunkSize - 1) / ChunkSize;
-
         for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
         for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
-        for (int chunkY = 0; chunkY < chunksY; chunkY++)
         {
-            if (_chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ)))
+            if (_editedChunkColumns.Contains((chunkX, chunkZ)))
                 return true;
         }
 
@@ -178,15 +176,9 @@ public sealed class SparseVoxelField
             sampleZ < 0 || sampleZ >= Depth)
             return false;
 
-        int chunkX = sampleX / ChunkSize;
-        int chunkZ = sampleZ / ChunkSize;
-        int chunksY = (Height + ChunkSize - 1) / ChunkSize;
-        for (int chunkY = 0; chunkY < chunksY; chunkY++)
-        {
-            if (_chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ)))
-                return true;
-        }
-        return false;
+        return _editedChunkColumns.Contains((
+            sampleX / ChunkSize,
+            sampleZ / ChunkSize));
     }
 
     /// <summary>
@@ -288,6 +280,7 @@ public sealed class SparseVoxelField
             return;
 
         _chunks.Clear();
+        _editedChunkColumns.Clear();
         Version++;
         Changed?.Invoke(new VoxelBounds(0, 0, 0, Width, Height, Depth));
     }
@@ -644,6 +637,7 @@ public sealed class SparseVoxelField
         chunk.DensityMask[index] = 1;
         chunk.Revision = revision;
         touched.Add(key);
+        _editedChunkColumns.Add((key.X, key.Z));
     }
 
     private void SetMaterialOverride(
@@ -661,6 +655,7 @@ public sealed class SparseVoxelField
         chunk.MaterialMask[index] = 1;
         chunk.Revision = revision;
         touched.Add(key);
+        _editedChunkColumns.Add((key.X, key.Z));
     }
 
     private void CompleteEdit(
