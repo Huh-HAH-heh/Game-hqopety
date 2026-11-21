@@ -73,7 +73,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         public Mesh[] Surface = Array.Empty<Mesh>();
         public Mesh[] CutCap = Array.Empty<Mesh>();
-        public long SourceVersion = long.MinValue;
+        public long BaseVersion = long.MinValue;\n        public bool SurfaceDirty = true;\n        public bool CutDirty = true;
         public int PaletteVersion = int.MinValue;
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
@@ -97,7 +97,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float Radius,
         float DistanceSquared);
 
-    private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
+    private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();\n    private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
     private readonly Material _material;
     private readonly Shader _shader;
@@ -154,6 +154,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
         _paletteVersion++;
+        foreach (ChunkEntry entry in _chunks.Values)
+        {
+            entry.SurfaceDirty = true;
+            entry.CutDirty = true;
+        }
     }
 
     public void Draw(
@@ -167,6 +172,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(field);
+        EnsureFieldSubscription(field);
 
         _frame++;
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
@@ -269,7 +275,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             entry.LastSeenFrame = _frame;
             bool surfaceStale = !entry.Built ||
-                entry.SourceVersion != field.Version ||
+                entry.SurfaceDirty ||
+                entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
 
             if (surfaceStale && baseBuilds < maximumBaseBuilds)
@@ -279,8 +286,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
                 Mesh[] previous = entry.Surface;
                 entry.Surface = replacement;
-                entry.SourceVersion = field.Version;
+                entry.BaseVersion = field.BaseVersion;
                 entry.PaletteVersion = _paletteVersion;
+                entry.SurfaceDirty = false;
                 entry.Built = true;
                 foreach (Mesh mesh in previous)
                     UnloadMesh(mesh);
@@ -290,7 +298,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
 
             if (cutEnabled && key.Y == cutChunkY &&
-                entry.CutLayer != cutLayer &&
+                (entry.CutLayer != cutLayer || entry.CutDirty) &&
                 cutBuilds < MaximumCutBuildsPerFrame)
             {
                 Mesh[] replacement = VoxelChunkMesher.BuildCutCap(
@@ -299,6 +307,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Mesh[] previous = entry.CutCap;
                 entry.CutCap = replacement;
                 entry.CutLayer = cutLayer;
+                entry.CutDirty = false;
                 foreach (Mesh mesh in previous)
                     UnloadMesh(mesh);
 
@@ -431,6 +440,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             UnloadMesh(mesh);
         entry.CutCap = Array.Empty<Mesh>();
         entry.CutLayer = int.MinValue;
+        entry.CutDirty = true;
     }
 
     private void EvictUnusedChunks()
@@ -456,10 +466,57 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
+    private void EnsureFieldSubscription(SparseVoxelField field)
+    {
+        if (ReferenceEquals(_observedField, field))
+            return;
+
+        if (_observedField != null)
+            _observedField.Changed -= OnVoxelFieldChanged;
+
+        _observedField = field;
+        _observedField.Changed += OnVoxelFieldChanged;
+    }
+
+    private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
+    {
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+        {
+            int span = ChunkCells * key.Step;
+            int firstX = key.X * span - key.Step;
+            int firstY = key.Y * span - key.Step;
+            int firstZ = key.Z * span - key.Step;
+            int lastX = (key.X * ChunkCells + ChunkCells + 1) * key.Step;
+            int lastY = (key.Y * ChunkCells + ChunkCells + 1) * key.Step;
+            int lastZ = (key.Z * ChunkCells + ChunkCells + 1) * key.Step;
+
+            bool intersectsX = Intersects(firstX, lastX, bounds.MinX, bounds.MaxX);
+            bool intersectsY = Intersects(firstY, lastY, bounds.MinY, bounds.MaxY);
+            bool intersectsZ = Intersects(firstZ, lastZ, bounds.MinZ, bounds.MaxZ);
+
+            if (intersectsX && intersectsY && intersectsZ)
+                entry.SurfaceDirty = true;
+
+            if (entry.CutLayer != int.MinValue && intersectsX && intersectsZ)
+            {
+                int cutSample = entry.CutLayer - 1;
+                if (bounds.MinY <= cutSample + 1 && bounds.MaxY > cutSample)
+                    entry.CutDirty = true;
+            }
+        }
+    }
+
+    private static bool Intersects(int minA, int maxA, int minB, int maxB) =>
+        minA < maxB && minB < maxA;
+
     public void Dispose()
     {
         if (_disposed)
             return;
+
+        if (_observedField != null)
+            _observedField.Changed -= OnVoxelFieldChanged;
+        _observedField = null;
 
         foreach (ChunkEntry entry in _chunks.Values)
             entry.Dispose();
