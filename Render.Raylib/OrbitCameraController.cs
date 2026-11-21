@@ -6,7 +6,7 @@ namespace RimClone.Render.Raylib;
 
 /// <summary>
 /// RTS-style terrain camera:
-/// Shift+LMB orbits, MMB pans, wheel zooms toward the view focus, WASD moves.
+/// Shift+RMB orbits, MMB pans, wheel zooms toward the view focus, WASD moves.
 /// </summary>
 internal sealed class OrbitCameraController
 {
@@ -193,7 +193,7 @@ internal sealed class OrbitCameraController
     {
         if (_mouseMode == MouseMode.None)
         {
-            if (IsMouseButtonDown(MouseButton.Left) && IsShiftDown())
+            if (IsMouseButtonDown(MouseButton.Right) && IsShiftDown())
             {
                 _mouseMode = MouseMode.Orbit;
                 _ignoreFirstMouseDelta = true;
@@ -213,7 +213,7 @@ internal sealed class OrbitCameraController
 
         bool released =
             (_mouseMode == MouseMode.Orbit &&
-             (!IsMouseButtonDown(MouseButton.Left) || !IsShiftDown())) ||
+             (!IsMouseButtonDown(MouseButton.Right) || !IsShiftDown())) ||
             ((_mouseMode == MouseMode.Pan ||
               _mouseMode == MouseMode.SpeedAdjust) &&
              IsMouseButtonReleased(MouseButton.Middle));
