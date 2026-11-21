@@ -340,50 +340,85 @@ internal static class VoxelTerrainSelfTest
 
     public static bool ChunkBoundarySamplesMatchAcrossLods()
     {
-        SparseVoxelField field = CreateField();
-        field.CarveSphere(new Vector3(1.6f, 1.05f, 3f), 0.82f);
+        SparseVoxelField field = new(
+            width: 1024,
+            height: 1024,
+            depth: 1024,
+            baseDensity: static (_, y, _) => 1024f - (y + 0.5f),
+            baseMaterial: static (_, _, _) => Rock);
 
         foreach (int step in new[] { 1, 5, 10, 40 })
         {
-            int left = SparseVoxelField.GetChunkSampleCoordinate(0, 17, step);
-            int right = SparseVoxelField.GetChunkSampleCoordinate(1, 1, step);
-            if (left != right)
-                return false;
-
-            for (int sample = 0; sample < SparseVoxelField.ChunkSize + 3; sample++)
+            for (int axis = 0; axis < 3; axis++)
             {
-                int y = SparseVoxelField.GetChunkSampleCoordinate(0, sample, step);
-                int z = SparseVoxelField.GetChunkSampleCoordinate(1, sample, step);
-                int yRight = SparseVoxelField.GetChunkSampleCoordinate(0, sample, step);
-                int zRight = SparseVoxelField.GetChunkSampleCoordinate(1, sample, step);
+                int boundarySample = SparseVoxelField.ChunkSize * step;
+                int previousSample = boundarySample - step;
+                int nextSample = boundarySample + step;
+                int fixedA = 40;
+                int fixedB = 80;
 
-                if (y != yRight || z != zRight)
+                int centerX = axis == 0 ? boundarySample : fixedA;
+                int centerY = axis == 1 ? boundarySample : fixedA;
+                int centerZ = axis == 2 ? boundarySample : fixedB;
+
+                field.CarveSphere(
+                    new Vector3(
+                        (centerX + 0.5f) * SparseVoxelField.VoxelSizeMeters,
+                        (centerY + 0.5f) * SparseVoxelField.VoxelSizeMeters,
+                        (centerZ + 0.5f) * SparseVoxelField.VoxelSizeMeters),
+                    0.82f);
+
+                int boundaryLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 17, step);
+                int boundaryRight = SparseVoxelField.GetChunkSampleCoordinate(1, 1, step);
+                int previousLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 16, step);
+                int previousRight = SparseVoxelField.GetChunkSampleCoordinate(1, 0, step);
+                int nextLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 18, step);
+                int nextRight = SparseVoxelField.GetChunkSampleCoordinate(1, 2, step);
+
+                if (boundaryLeft != boundaryRight ||
+                    previousLeft != previousRight ||
+                    nextLeft != nextRight)
                     return false;
 
-                float leftDensity = field.GetDensity(left, y, z);
-                float rightDensity = field.GetDensity(right, yRight, zRight);
-                if (MathF.Abs(leftDensity - rightDensity) > 0.0001f)
+                int sampleX = axis == 0 ? boundaryLeft : fixedA;
+                int sampleY = axis == 1 ? boundaryLeft : fixedA;
+                int sampleZ = axis == 2 ? boundaryLeft : fixedB;
+
+                int previousX = axis == 0 ? previousLeft : sampleX;
+                int previousY = axis == 1 ? previousLeft : sampleY;
+                int previousZ = axis == 2 ? previousLeft : sampleZ;
+                int nextX = axis == 0 ? nextLeft : sampleX;
+                int nextY = axis == 1 ? nextLeft : sampleY;
+                int nextZ = axis == 2 ? nextLeft : sampleZ;
+
+                float boundaryFromLeft = field.GetDensity(sampleX, sampleY, sampleZ);
+                float boundaryFromRight = field.GetDensity(
+                    axis == 0 ? boundaryRight : sampleX,
+                    axis == 1 ? boundaryRight : sampleY,
+                    axis == 2 ? boundaryRight : sampleZ);
+                if (boundaryFromLeft >= 0f ||
+                    MathF.Abs(boundaryFromLeft - boundaryFromRight) > 0.0001f)
                     return false;
 
-                // Verify the halo used for central-difference normals is also
-                // identical on both sides of the same chunk boundary.
-                int leftPrevious = SparseVoxelField.GetChunkSampleCoordinate(0, 16, step);
-                int rightPrevious = SparseVoxelField.GetChunkSampleCoordinate(1, 0, step);
-                int leftNext = SparseVoxelField.GetChunkSampleCoordinate(0, 18, step);
-                int rightNext = SparseVoxelField.GetChunkSampleCoordinate(1, 2, step);
-                if (leftPrevious != rightPrevious || leftNext != rightNext)
-                    return false;
+                float previousFromLeft = field.GetDensity(previousX, previousY, previousZ);
+                float previousFromRight = field.GetDensity(
+                    axis == 0 ? previousRight : previousX,
+                    axis == 1 ? previousRight : previousY,
+                    axis == 2 ? previousRight : previousZ);
+                float nextFromLeft = field.GetDensity(nextX, nextY, nextZ);
+                float nextFromRight = field.GetDensity(
+                    axis == 0 ? nextRight : nextX,
+                    axis == 1 ? nextRight : nextY,
+                    axis == 2 ? nextRight : nextZ);
 
-                float gxLeft = field.GetDensity(leftNext, y, z) -
-                    field.GetDensity(leftPrevious, y, z);
-                float gxRight = field.GetDensity(rightNext, yRight, zRight) -
-                    field.GetDensity(rightPrevious, yRight, zRight);
-                if (MathF.Abs(gxLeft - gxRight) > 0.0001f)
+                float gradientLeft = nextFromLeft - previousFromLeft;
+                float gradientRight = nextFromRight - previousFromRight;
+                if (MathF.Abs(gradientLeft - gradientRight) > 0.0001f)
                     return false;
             }
         }
 
-        return field.ChunkCount >= 2;
+        return field.ChunkCount >= 12;
     }
 
     public static bool NavigationKeepsBridgeFloor()
