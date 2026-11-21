@@ -1539,6 +1539,15 @@ public sealed class WorldMap
     }
 
 
+    public void CarveVoxelBox(Vector3 minimumMeters, Vector3 maximumMeters) =>
+        Voxels.CarveBox(minimumMeters, maximumMeters);
+
+    public void AddVoxelBox(
+        Vector3 minimumMeters,
+        Vector3 maximumMeters,
+        ushort materialId) =>
+        Voxels.FillBox(minimumMeters, maximumMeters, materialId);
+
     public void FlattenVoxelPlane(
         Vector3 centerMeters,
         Vector3 normal,

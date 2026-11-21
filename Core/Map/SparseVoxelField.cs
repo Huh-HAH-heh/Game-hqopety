@@ -398,8 +398,8 @@ public sealed class SparseVoxelField
 
     /// <summary>
     /// Tests a vertical capsule approximation against the same signed-distance
-    /// field used by rendering. The five-point cross-section catches overhangs
-    /// and tunnel walls without creating a dense collision grid.
+    /// field used by rendering. The centre plus eight radial samples catches
+    /// overhangs and tunnel walls without creating a dense collision grid.
     /// </summary>
     public bool IsCapsuleClear(
         float xMeters,
@@ -416,19 +416,24 @@ public sealed class SparseVoxelField
 
         float sampleX = xMeters / VoxelSizeMeters - 0.5f;
         float sampleZ = zMeters / VoxelSizeMeters - 0.5f;
-        float offset = radiusMeters * 0.72f;
-        Span<Vector2> ring = stackalloc Vector2[5]
+        float offset = radiusMeters * 0.82f;
+        float diagonal = offset * 0.70710678f;
+        Span<Vector2> ring = stackalloc Vector2[9]
         {
             Vector2.Zero,
             new Vector2(offset, 0f),
             new Vector2(-offset, 0f),
             new Vector2(0f, offset),
-            new Vector2(0f, -offset)
+            new Vector2(0f, -offset),
+            new Vector2(diagonal, diagonal),
+            new Vector2(-diagonal, diagonal),
+            new Vector2(diagonal, -diagonal),
+            new Vector2(-diagonal, -diagonal)
         };
 
         float bottom = feetHeightMeters + MathF.Max(0.12f, radiusMeters * 0.35f);
         float top = feetHeightMeters + heightMeters - MathF.Max(0.12f, radiusMeters * 0.35f);
-        for (float height = bottom; height <= top; height += 0.2f)
+        for (float height = bottom; height <= top; height += 0.1f)
         {
             float sampleY = height / VoxelSizeMeters - 0.5f;
             for (int i = 0; i < ring.Length; i++)

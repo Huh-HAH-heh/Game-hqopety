@@ -161,6 +161,23 @@ internal static class VoxelTerrainSelfTest
         return false;
     }
 
+    public static bool BoxBrushChangesOnlyIts3DVolume()
+    {
+        SparseVoxelField field = CreateField();
+        float insideBefore = field.GetDensity(30, 15, 30);
+        float outsideBefore = field.GetDensity(80, 15, 30);
+
+        field.CarveBox(
+            new Vector3(2.5f, 1.4f, 2.5f),
+            new Vector3(3.5f, 2.2f, 3.5f));
+
+        float insideAfter = field.GetDensity(30, 15, 30);
+        float outsideAfter = field.GetDensity(80, 15, 30);
+        return insideBefore > 0f &&
+               insideAfter <= 0f &&
+               MathF.Abs(outsideAfter - outsideBefore) < 0.001f;
+    }
+
     public static bool SaveRejectsDifferentBaseWorld()
     {
         SparseVoxelField source = CreateField();

@@ -22,6 +22,8 @@ public static class RaylibTerrainViewer
         SmoothSphere,
         CarveCapsule,
         AddCapsule,
+        CarveBox,
+        AddBox,
         FlattenPlane
     }
 
@@ -369,7 +371,7 @@ public static class RaylibTerrainViewer
                         if (IsKeyPressed(KeyboardKey.F3))
                         {
                             voxelEditMode = (VoxelEditMode)(
-                                ((int)voxelEditMode + 1) % 8);
+                                ((int)voxelEditMode + 1) % 10);
                         }
 
                         if (IsKeyPressed(KeyboardKey.F4))
@@ -411,6 +413,11 @@ public static class RaylibTerrainViewer
                                 {
                                     voxelStrokeStart = hitPosition -
                                         hitNormal * voxelBrushRadiusMeters * 0.2f;
+                                    voxelStrokeActive = true;
+                                }
+                                else if (voxelEditMode is VoxelEditMode.CarveBox or VoxelEditMode.AddBox)
+                                {
+                                    voxelStrokeStart = hitPosition;
                                     voxelStrokeActive = true;
                                 }
                                 else
@@ -458,6 +465,32 @@ public static class RaylibTerrainViewer
                                             end,
                                             voxelBrushRadiusMeters,
                                             voxelBrushMaterial);
+                                    }
+                                }
+                                else if (voxelEditMode is VoxelEditMode.CarveBox or VoxelEditMode.AddBox)
+                                {
+                                    Vector3 minimum = Vector3.Min(voxelStrokeStart, hitPosition);
+                                    Vector3 maximum = Vector3.Max(voxelStrokeStart, hitPosition);
+                                    minimum.Z -= voxelBrushRadiusMeters;
+                                    maximum.Z += voxelBrushRadiusMeters;
+                                    if (maximum.X - minimum.X < 0.2f)
+                                    {
+                                        minimum.X -= voxelBrushRadiusMeters;
+                                        maximum.X += voxelBrushRadiusMeters;
+                                    }
+                                    if (maximum.Y - minimum.Y < 0.2f)
+                                    {
+                                        minimum.Y -= voxelBrushRadiusMeters;
+                                        maximum.Y += voxelBrushRadiusMeters;
+                                    }
+
+                                    using (worldMap.Voxels.BeginUndoableEdit())
+                                    {
+                                        if (voxelEditMode == VoxelEditMode.CarveBox)
+                                            worldMap.CarveVoxelBox(minimum, maximum);
+                                        else
+                                            worldMap.AddVoxelBox(
+                                                minimum, maximum, voxelBrushMaterial);
                                     }
                                 }
                             }
@@ -593,6 +626,8 @@ public static class RaylibTerrainViewer
             VoxelEditMode.SmoothSphere => "SMOOTH SPHERE",
             VoxelEditMode.CarveCapsule => "CARVE CAPSULE",
             VoxelEditMode.AddCapsule => "ADD CAPSULE",
+            VoxelEditMode.CarveBox => "CARVE BOX",
+            VoxelEditMode.AddBox => "ADD BOX",
             VoxelEditMode.FlattenPlane => "FLATTEN PLANE",
             _ => "EDIT OFF"
         };

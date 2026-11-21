@@ -58,7 +58,7 @@ These are CSG/density-field operations. They change the 3D volume rather than ed
 - **F4**: cycle material ID.
 - **F5 / F6**: decrease / increase brush radius.
 - **F7 / F8**: undo / redo the last voxel edit (in-session history, bounded to 16 operations / 64 MiB).
-- The F3 tool cycle also includes **Flatten Plane**, which levels the selected area toward the hit surface plane with a smooth radial falloff.
+- The F3 tool cycle includes carve/add sphere, paint, smooth, carve/add capsule, carve/add box and **Flatten Plane**, which levels the selected area toward the hit surface plane with a smooth radial falloff.
 - **Shift + right mouse drag**: orbit the camera.
 - **Middle mouse drag**: pan.
 - **Mouse wheel**: zoom.
