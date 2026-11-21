@@ -382,7 +382,7 @@ public sealed class SparseVoxelField
             if (distance > radius)
                 continue;
 
-            float density = SampleDensity(point.X, point.Y, point.Z);
+            float density = GetDensity(x, y, z);
             if (add && density > 0f)
                 SetMaterialOverride(x, y, z, materialId, revision, touched);
             else if (!add && density <= 0f)
@@ -413,8 +413,8 @@ public sealed class SparseVoxelField
             (int)MathF.Ceiling(max.Z + 1f));
 
         Vector3 center = (min + max) * 0.5f;
-        // Expand by half a native cell so even a one-voxel-thick edit
-        // produces positive lattice samples and a closed isosurface.
+        // Density samples sit at cell centres, so a one-cell box still has
+        // positive samples and produces a closed isosurface.
         Vector3 half = (max - min) * 0.5f;
         int minX = bounds.MinX;
         int minY = bounds.MinY;
@@ -470,7 +470,7 @@ public sealed class SparseVoxelField
         HashSet<ChunkCoordinate> touched)
     {
         if (x < 0 || y < 0 || z < 0 ||
-            x > Width || y > Height || z > Depth)
+            x >= Width || y >= Height || z >= Depth)
             return;
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
