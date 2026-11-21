@@ -631,8 +631,7 @@ public sealed class WorldMap
             return -1;
 
         int lastLayer = Math.Min(maxLayer, LayerCount - 1);
-        if (_simpleFillColumns[GetColumnIndex(x, y)] &&
-            !Voxels.HasEditsInArea(x * 10, (x + 1) * 10 - 1, y * 10, (y + 1) * 10 - 1))
+        if (_simpleFillColumns[GetColumnIndex(x, y)])
         {
             int filledLayers = Math.Clamp(
                 (_surfaceHeights[GetColumnIndex(x, y)] + LayerHeightUnits - 1) /
@@ -666,8 +665,7 @@ public sealed class WorldMap
             return false;
 
         int index = GetColumnIndex(x, y);
-        if (_simpleFillColumns[index] &&
-            !Voxels.HasEditsInColumn(x * 10 + 5, y * 10 + 5))
+        if (_simpleFillColumns[index])
         {
             if (_columnMaterialIds[index] == 0)
                 return false;
@@ -1234,10 +1232,7 @@ public sealed class WorldMap
             return 0;
 
         int index = GetColumnIndex(globalX, globalY);
-        if (_simpleFillColumns[index] &&
-            !Voxels.HasEditsInArea(
-                globalX * 10, (globalX + 1) * 10 - 1,
-                globalY * 10, (globalY + 1) * 10 - 1))
+        if (_simpleFillColumns[index])
             return _surfaceHeights[index];
 
         int topLayer = FindTopOccupiedLayer(globalX, globalY, LayerCount - 1);
@@ -1366,6 +1361,8 @@ public sealed class WorldMap
             bounds.MaxZ >= Voxels.Depth)
         {
             Array.Clear(_rangeCache);
+            Array.Fill(_simpleFillColumns, true);
+            Array.Clear(_rangeCache);
             foreach (WorldRegion region in _worldRegions)
                 region.MarkTerrainChanged();
 
@@ -1384,7 +1381,9 @@ public sealed class WorldMap
         {
             for (int tileX = firstTileX; tileX <= lastTileX; tileX++)
             {
-                _rangeCache[GetColumnIndex(tileX, tileY)] = null;
+                int columnIndex = GetColumnIndex(tileX, tileY);
+                _rangeCache[columnIndex] = null;
+                _simpleFillColumns[columnIndex] = false;
                 MarkTerrainChanged(tileX, tileY);
             }
         }
