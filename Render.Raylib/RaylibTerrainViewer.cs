@@ -467,7 +467,7 @@ public static class RaylibTerrainViewer
                 Color.RayWhite));
             lines.Add((
                 settings.TerrainMode == TerrainRenderMode.Voxel
-                    ? $"VOXEL LOD {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m | Z 0.1 m"
+                    ? $"VOXEL MESH {renderer.ActiveVoxelSizeMeters:0.0}m | FIELD 0.1m | CHUNKS {renderer.CachedVoxelChunks}"
                     : $"HEIGHTMAP CELL {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m",
                 17f,
                 Color.LightGray));
@@ -476,7 +476,7 @@ public static class RaylibTerrainViewer
                 13f,
                 Color.LightGray));
             lines.Add((
-                $"VISIBLE GPU BATCHES {renderer.VisibleRegionsLastFrame}/{terrain.StorageRegionCount}   DRAWS {renderer.DrawCallsLastFrame}",
+                $"VISIBLE VOXEL CHUNKS {renderer.VisibleRegionsLastFrame}   DRAWS {renderer.DrawCallsLastFrame}",
                 13f,
                 Color.LightGray));
             lines.Add((
