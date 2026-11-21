@@ -1312,7 +1312,7 @@ public sealed class WorldMap
     private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
     {
         if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-            voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
+            voxelX >= Voxels.Width || voxelY > Voxels.Height || voxelZ >= Voxels.Depth)
             return -1f;
 
         float tileX = Math.Clamp((voxelX + 0.5f) * 0.1f - 0.5f, 0f, MaxTileX);
