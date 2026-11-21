@@ -632,7 +632,7 @@ public sealed class WorldMap
 
         int lastLayer = Math.Min(maxLayer, LayerCount - 1);
         if (_simpleFillColumns[GetColumnIndex(x, y)] &&
-            !Voxels.HasEditsInColumn(x * 10 + 5, y * 10 + 5))
+            !Voxels.HasEditsInArea(x * 10, (x + 1) * 10 - 1, y * 10, (y + 1) * 10 - 1))
         {
             int filledLayers = Math.Clamp(
                 (_surfaceHeights[GetColumnIndex(x, y)] + LayerHeightUnits - 1) /
@@ -1233,11 +1233,13 @@ public sealed class WorldMap
             return 0;
 
         int index = GetColumnIndex(globalX, globalY);
-        if (_simpleFillColumns[index])
+        if (_simpleFillColumns[index] &&
+            !Voxels.HasEditsInArea(
+                globalX * 10, (globalX + 1) * 10 - 1,
+                globalY * 10, (globalY + 1) * 10 - 1))
             return _surfaceHeights[index];
 
-        int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
-            globalX, globalY, LayerCount - 1);
+        int topLayer = FindTopOccupiedLayer(globalX, globalY, LayerCount - 1);
         return topLayer < 0
             ? (ushort)0
             : checked((ushort)((topLayer + 1) * LayerHeightUnits));
