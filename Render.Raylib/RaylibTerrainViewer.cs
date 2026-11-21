@@ -508,7 +508,7 @@ public static class RaylibTerrainViewer
         if (settings.ShowControls)
         {
             lines.Add((
-                $"WASD {camera.CurrentMovementSpeedMetersPerSecond:0} m/s | Shift+LMB orbit | MMB pan | Shift+MMB speed",
+                $"WASD {camera.CurrentMovementSpeedMetersPerSecond:0} m/s | Shift+RMB orbit | MMB pan | Shift+MMB speed",
                 16f,
                 Color.RayWhite));
             lines.Add((
