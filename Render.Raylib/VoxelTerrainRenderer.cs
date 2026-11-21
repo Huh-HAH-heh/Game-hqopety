@@ -73,7 +73,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         public Mesh[] Surface = Array.Empty<Mesh>();
         public Mesh[] CutCap = Array.Empty<Mesh>();
-        public long BaseVersion = long.MinValue;\n        public bool SurfaceDirty = true;\n        public bool CutDirty = true;
+        public long BaseVersion = long.MinValue;
+        public bool SurfaceDirty = true;
+        public bool CutDirty = true;
         public int PaletteVersion = int.MinValue;
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
@@ -97,7 +99,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float Radius,
         float DistanceSquared);
 
-    private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();\n    private SparseVoxelField? _observedField;
+    private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
+    private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
     private readonly Material _material;
     private readonly Shader _shader;
