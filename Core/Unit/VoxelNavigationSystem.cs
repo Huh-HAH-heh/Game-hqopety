@@ -125,6 +125,9 @@ public sealed class VoxelNavigationSystem
         }
 
         RegionKey key = startRegion;
+        if (!RegionHasVoxelEdits(worldMap, key))
+            return false;
+
         Graph? graph = GetOrBuildGraph(worldMap, key);
         if (graph == null)
             return false;
@@ -320,53 +323,52 @@ public sealed class VoxelNavigationSystem
         waypoint = default;
 
         List<RegionKey> xFirst = BuildRegionPath(startRegion, goalRegion, xFirst: true);
-        if (xFirst.Count < 2 || xFirst.Count > 25)
+        List<RegionKey> yFirst = BuildRegionPath(startRegion, goalRegion, xFirst: false);
+        if (xFirst.Count < 2 || xFirst.Count > 25 ||
+            yFirst.Count < 2 || yFirst.Count > 25)
             return false;
 
-        bool corridorHasVoxelEdits = false;
-        foreach (RegionKey key in xFirst)
-            corridorHasVoxelEdits |= RegionHasVoxelEdits(map, key);
-        if (!corridorHasVoxelEdits)
-        {
-            List<RegionKey> yFirst = BuildRegionPath(startRegion, goalRegion, xFirst: false);
-            foreach (RegionKey key in yFirst)
-                corridorHasVoxelEdits |= RegionHasVoxelEdits(map, key);
-        }
-
-        if (!corridorHasVoxelEdits)
+        bool xFirstHasEdits = CorridorHasVoxelEdits(map, xFirst);
+        bool yFirstHasEdits = CorridorHasVoxelEdits(map, yFirst);
+        if (!xFirstHasEdits && !yFirstHasEdits)
             return false;
 
         ownsVoxelRegion = true;
         float preferredGoalHeight = target.Z > 0.01f ? target.Z : position.Z;
-        if (!_multiRegionRoutes.TryGetValue(unitId.Index, out MultiRegionRoute? route) ||
-            route.Owner != unitId ||
-            !RegionsEqual(route.Regions, xFirst) ||
-            MathF.Abs(route.TargetX - target.X) > 0.35f ||
-            MathF.Abs(route.TargetY - target.Y) > 0.35f ||
-            MathF.Abs(route.TargetHeight - preferredGoalHeight) > 0.25f)
+        bool routeMatches =
+            _multiRegionRoutes.TryGetValue(unitId.Index, out MultiRegionRoute? route) &&
+            route.Owner == unitId &&
+            (RegionsEqual(route.Regions, xFirst) || RegionsEqual(route.Regions, yFirst)) &&
+            MathF.Abs(route.TargetX - target.X) <= 0.35f &&
+            MathF.Abs(route.TargetY - target.Y) <= 0.35f &&
+            MathF.Abs(route.TargetHeight - preferredGoalHeight) <= 0.25f;
+        if (!routeMatches)
         {
-            if (!TryBuildHierarchicalPath(
+            List<RegionKey>? selectedPath = null;
+            Vector3[] waypoints = Array.Empty<Vector3>();
+            if (xFirstHasEdits && TryBuildHierarchicalPath(
                     map, xFirst, position, target, bodyHeight, preferredGoalHeight,
-                    out Vector3[] waypoints))
+                    out waypoints))
             {
-                List<RegionKey> yFirst = BuildRegionPath(
-                    startRegion, goalRegion, xFirst: false);
-                if (!RegionsEqual(xFirst, yFirst) &&
-                    !TryBuildHierarchicalPath(
-                        map, yFirst, position, target, bodyHeight, preferredGoalHeight,
-                        out waypoints))
-                {
-                    _multiRegionRoutes.Remove(unitId.Index);
-                    return false;
-                }
+                selectedPath = xFirst;
+            }
+            else if (yFirstHasEdits && TryBuildHierarchicalPath(
+                         map, yFirst, position, target, bodyHeight, preferredGoalHeight,
+                         out waypoints))
+            {
+                selectedPath = yFirst;
+            }
 
-                xFirst = yFirst;
+            if (selectedPath == null)
+            {
+                _multiRegionRoutes.Remove(unitId.Index);
+                return false;
             }
 
             route = new MultiRegionRoute
             {
                 Owner = unitId,
-                Regions = xFirst.ToArray(),
+                Regions = selectedPath.ToArray(),
                 Waypoints = waypoints,
                 TargetX = target.X,
                 TargetY = target.Y,
@@ -471,6 +473,18 @@ public sealed class VoxelNavigationSystem
         }
 
         return result;
+    }
+
+    private static bool CorridorHasVoxelEdits(
+        WorldMap map,
+        List<RegionKey> regions)
+    {
+        foreach (RegionKey key in regions)
+        {
+            if (RegionHasVoxelEdits(map, key))
+                return true;
+        }
+        return false;
     }
 
     private static bool RegionHasVoxelEdits(WorldMap map, RegionKey key)

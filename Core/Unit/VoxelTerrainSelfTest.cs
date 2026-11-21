@@ -251,6 +251,46 @@ internal static class VoxelTerrainSelfTest
                navigation.CachedRouteCount == 1;
     }
 
+    public static bool NavigationCrossesRegionPortals()
+    {
+        WorldMap worldMap = new(regionsX: 9, regionsY: 1, layerCount: 64);
+        for (int y = 0; y < worldMap.TileHeight; y++)
+        for (int x = 0; x < worldMap.TileWidth; x++)
+            worldMap.SetSolidHeight(x, y, 20, Rock);
+
+        // Tunnel spans the 128 m boundary and has enough body clearance.
+        worldMap.CarveVoxelBox(
+            new Vector3(126f, 0.5f, 2f),
+            new Vector3(130f, 1.8f, 5f));
+
+        VoxelNavigationSystem navigation = new();
+        bool found = navigation.TryGetWaypoint(
+            worldMap,
+            new UnitId(2, 1),
+            new Vector3(126.25f, 3.25f, 0.5f),
+            new Vector3(129.25f, 3.25f, 0.5f),
+            bodyHeight: 1.1f,
+            out bool ownsVoxelRegion,
+            out Vector3 waypoint);
+
+        if (!found || !ownsVoxelRegion ||
+            MathF.Abs(waypoint.Z - 0.5f) > 0.2f ||
+            navigation.CachedRegionCount < 2 ||
+            navigation.CachedRouteCount != 1)
+            return false;
+
+        return navigation.TryGetWaypoint(
+                   worldMap,
+                   new UnitId(2, 1),
+                   new Vector3(126.25f, 3.25f, 0.5f),
+                   new Vector3(129.25f, 3.25f, 0.5f),
+                   bodyHeight: 1.1f,
+                   out ownsVoxelRegion,
+                   out _) &&
+               ownsVoxelRegion &&
+               navigation.CachedRouteCount == 1;
+    }
+
     public static bool NavigationKeepsLowerFloor()
     {
         WorldMap worldMap = new(regionsX: 1, regionsY: 1, layerCount: 64);
