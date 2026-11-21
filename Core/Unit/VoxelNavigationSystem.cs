@@ -62,13 +62,25 @@ public sealed class VoxelNavigationSystem
         public int Cursor;
     }
 
+    private sealed class MultiRegionRoute
+    {
+        public UnitId Owner;
+        public RegionKey[] Regions = Array.Empty<RegionKey>();
+        public Vector3[] Waypoints = Array.Empty<Vector3>();
+        public float TargetX;
+        public float TargetY;
+        public float TargetHeight;
+        public int Cursor;
+    }
+
     private readonly Dictionary<RegionKey, Graph> _graphs = new();
     private readonly Dictionary<int, Route> _routes = new();
+    private readonly Dictionary<int, MultiRegionRoute> _multiRegionRoutes = new();
     private WorldMap? _observedMap;
     private long _observedNavigationVersion = long.MinValue;
 
     public int CachedRegionCount => _graphs.Count;
-    public int CachedRouteCount => _routes.Count;
+    public int CachedRouteCount => _routes.Count + _multiRegionRoutes.Count;
 
     /// <summary>
     /// Returns true from ownsVoxelRegion when the requested route is inside a
@@ -98,15 +110,21 @@ public sealed class VoxelNavigationSystem
             target.Y > worldMap.MaxTileY)
             return false;
 
+        SynchronizeTerrainVersion(worldMap);
         int startRegionX = (int)MathF.Floor(position.X / RegionSizeMeters);
         int startRegionY = (int)MathF.Floor(position.Y / RegionSizeMeters);
         int goalRegionX = (int)MathF.Floor(target.X / RegionSizeMeters);
         int goalRegionY = (int)MathF.Floor(target.Y / RegionSizeMeters);
-        if (startRegionX != goalRegionX || startRegionY != goalRegionY)
-            return false;
+        RegionKey startRegion = new(startRegionX, startRegionY);
+        RegionKey goalRegion = new(goalRegionX, goalRegionY);
+        if (startRegion != goalRegion)
+        {
+            return TryGetHierarchicalWaypoint(
+                worldMap, unitId, position, target, bodyHeight,
+                startRegion, goalRegion, out ownsVoxelRegion, out waypoint);
+        }
 
-        SynchronizeTerrainVersion(worldMap);
-        RegionKey key = new(startRegionX, startRegionY);
+        RegionKey key = startRegion;
         Graph? graph = GetOrBuildGraph(worldMap, key);
         if (graph == null)
             return false;
@@ -186,6 +204,7 @@ public sealed class VoxelNavigationSystem
             _observedNavigationVersion = worldMap.NavigationVersion;
             _graphs.Clear();
             _routes.Clear();
+            _multiRegionRoutes.Clear();
             return;
         }
 
@@ -196,6 +215,7 @@ public sealed class VoxelNavigationSystem
             _observedNavigationVersion = worldMap.NavigationVersion;
             _graphs.Clear();
             _routes.Clear();
+            _multiRegionRoutes.Clear();
         }
     }
 
@@ -259,6 +279,385 @@ public sealed class VoxelNavigationSystem
             foreach (int unitIndex in removeRoutes)
                 _routes.Remove(unitIndex);
         }
+
+        removeRoutes = null;
+        foreach ((int unitIndex, MultiRegionRoute route) in _multiRegionRoutes)
+        {
+            bool intersects = false;
+            foreach (RegionKey key in route.Regions)
+            {
+                if (invalidated.Contains(key))
+                {
+                    intersects = true;
+                    break;
+                }
+            }
+
+            if (intersects)
+                (removeRoutes ??= new List<int>()).Add(unitIndex);
+        }
+
+        if (removeRoutes != null)
+        {
+            foreach (int unitIndex in removeRoutes)
+                _multiRegionRoutes.Remove(unitIndex);
+        }
+    }
+
+
+    private bool TryGetHierarchicalWaypoint(
+        WorldMap map,
+        UnitId unitId,
+        Vector3 position,
+        Vector3 target,
+        float bodyHeight,
+        RegionKey startRegion,
+        RegionKey goalRegion,
+        out bool ownsVoxelRegion,
+        out Vector3 waypoint)
+    {
+        ownsVoxelRegion = false;
+        waypoint = default;
+
+        List<RegionKey> xFirst = BuildRegionPath(startRegion, goalRegion, xFirst: true);
+        if (xFirst.Count < 2 || xFirst.Count > 25)
+            return false;
+
+        bool corridorHasVoxelEdits = false;
+        foreach (RegionKey key in xFirst)
+            corridorHasVoxelEdits |= RegionHasVoxelEdits(map, key);
+        if (!corridorHasVoxelEdits)
+        {
+            List<RegionKey> yFirst = BuildRegionPath(startRegion, goalRegion, xFirst: false);
+            foreach (RegionKey key in yFirst)
+                corridorHasVoxelEdits |= RegionHasVoxelEdits(map, key);
+        }
+
+        if (!corridorHasVoxelEdits)
+            return false;
+
+        ownsVoxelRegion = true;
+        float preferredGoalHeight = target.Z > 0.01f ? target.Z : position.Z;
+        if (!_multiRegionRoutes.TryGetValue(unitId.Index, out MultiRegionRoute? route) ||
+            route.Owner != unitId ||
+            !RegionsEqual(route.Regions, xFirst) ||
+            MathF.Abs(route.TargetX - target.X) > 0.35f ||
+            MathF.Abs(route.TargetY - target.Y) > 0.35f ||
+            MathF.Abs(route.TargetHeight - preferredGoalHeight) > 0.25f)
+        {
+            if (!TryBuildHierarchicalPath(
+                    map, xFirst, position, target, bodyHeight, preferredGoalHeight,
+                    out Vector3[] waypoints))
+            {
+                List<RegionKey> yFirst = BuildRegionPath(
+                    startRegion, goalRegion, xFirst: false);
+                if (!RegionsEqual(xFirst, yFirst) &&
+                    !TryBuildHierarchicalPath(
+                        map, yFirst, position, target, bodyHeight, preferredGoalHeight,
+                        out waypoints))
+                {
+                    _multiRegionRoutes.Remove(unitId.Index);
+                    return false;
+                }
+
+                xFirst = yFirst;
+            }
+
+            route = new MultiRegionRoute
+            {
+                Owner = unitId,
+                Regions = xFirst.ToArray(),
+                Waypoints = waypoints,
+                TargetX = target.X,
+                TargetY = target.Y,
+                TargetHeight = preferredGoalHeight,
+                Cursor = 0
+            };
+            _multiRegionRoutes[unitId.Index] = route;
+        }
+
+        AdvanceRoute(route.Waypoints, ref route.Cursor, position);
+        Vector3 next = route.Waypoints[route.Cursor];
+        waypoint = route.Cursor == route.Waypoints.Length - 1
+            ? new Vector3(target.X, target.Y, next.Z)
+            : next;
+        return true;
+    }
+
+    private static bool RegionsEqual(
+        RegionKey[] first,
+        List<RegionKey> second)
+    {
+        if (first.Length != second.Count)
+            return false;
+        for (int i = 0; i < first.Length; i++)
+        {
+            if (first[i] != second[i])
+                return false;
+        }
+        return true;
+    }
+
+    private static bool RegionsEqual(List<RegionKey> first, List<RegionKey> second)
+    {
+        if (first.Count != second.Count)
+            return false;
+        for (int i = 0; i < first.Count; i++)
+        {
+            if (first[i] != second[i])
+                return false;
+        }
+        return true;
+    }
+
+    private static void AdvanceRoute(
+        Vector3[] waypoints,
+        ref int cursor,
+        Vector3 position)
+    {
+        while (cursor < waypoints.Length - 1)
+        {
+            Vector3 current = waypoints[cursor];
+            float dx = current.X - position.X;
+            float dy = current.Y - position.Y;
+            if (dx * dx + dy * dy > NodeArrivalRadius * NodeArrivalRadius ||
+                MathF.Abs(current.Z - position.Z) > 0.30f)
+                break;
+            cursor++;
+        }
+    }
+
+    private static List<RegionKey> BuildRegionPath(
+        RegionKey start,
+        RegionKey goal,
+        bool xFirst)
+    {
+        List<RegionKey> result = new();
+        result.Add(start);
+        int x = start.X;
+        int y = start.Y;
+
+        if (xFirst)
+        {
+            int stepX = Math.Sign(goal.X - x);
+            while (x != goal.X)
+            {
+                x += stepX;
+                result.Add(new RegionKey(x, y));
+            }
+
+            int stepY = Math.Sign(goal.Y - y);
+            while (y != goal.Y)
+            {
+                y += stepY;
+                result.Add(new RegionKey(x, y));
+            }
+        }
+        else
+        {
+            int stepY = Math.Sign(goal.Y - y);
+            while (y != goal.Y)
+            {
+                y += stepY;
+                result.Add(new RegionKey(x, y));
+            }
+
+            int stepX = Math.Sign(goal.X - x);
+            while (x != goal.X)
+            {
+                x += stepX;
+                result.Add(new RegionKey(x, y));
+            }
+        }
+
+        return result;
+    }
+
+    private static bool RegionHasVoxelEdits(WorldMap map, RegionKey key)
+    {
+        int minX = key.X * RegionSizeMeters * 10;
+        int minY = key.Y * RegionSizeMeters * 10;
+        int maxX = Math.Min(map.Voxels.Width, (key.X + 1) * RegionSizeMeters * 10);
+        int maxY = Math.Min(map.Voxels.Depth, (key.Y + 1) * RegionSizeMeters * 10);
+        return minX < maxX && minY < maxY &&
+            map.Voxels.HasEditsInArea(minX, maxX - 1, minY, maxY - 1);
+    }
+
+    private bool TryBuildHierarchicalPath(
+        WorldMap map,
+        List<RegionKey> regions,
+        Vector3 position,
+        Vector3 target,
+        float bodyHeight,
+        float preferredGoalHeight,
+        out Vector3[] waypoints)
+    {
+        waypoints = Array.Empty<Vector3>();
+        if (regions.Count < 2 || regions.Count > 25)
+            return false;
+
+        float requiredClearance = MathF.Max(0.1f, bodyHeight);
+        Graph? currentGraph = GetOrBuildGraph(map, regions[0]);
+        if (currentGraph == null)
+            return false;
+
+        int currentNode = FindNearestNode(
+            currentGraph, position.X, position.Y, position.Z,
+            requiredClearance, maximumCellRadius: 3);
+        if (currentNode < 0)
+            return false;
+
+        List<Vector3> routePoints = new();
+        for (int transition = 0; transition < regions.Count - 1; transition++)
+        {
+            RegionKey fromRegion = regions[transition];
+            RegionKey toRegion = regions[transition + 1];
+            Graph? nextGraph = GetOrBuildGraph(map, toRegion);
+            if (nextGraph == null ||
+                !TryFindRegionPortal(
+                    currentGraph, nextGraph, fromRegion, toRegion,
+                    position, target, requiredClearance,
+                    out int exitNode, out int entryNode))
+                return false;
+
+            int[] localPath = FindPath(
+                currentGraph, currentNode, exitNode, requiredClearance);
+            if (localPath.Length == 0)
+                return false;
+
+            AppendWaypoints(currentGraph, localPath, routePoints);
+            currentGraph = nextGraph;
+            currentNode = entryNode;
+        }
+
+        int goalNode = FindNearestNode(
+            currentGraph, target.X, target.Y, preferredGoalHeight,
+            requiredClearance, maximumCellRadius: 5);
+        if (goalNode < 0)
+            return false;
+
+        int[] finalPath = FindPath(
+            currentGraph, currentNode, goalNode, requiredClearance);
+        if (finalPath.Length == 0)
+            return false;
+
+        AppendWaypoints(currentGraph, finalPath, routePoints);
+        if (routePoints.Count == 0)
+            return false;
+
+        waypoints = routePoints.ToArray();
+        return true;
+    }
+
+    private static void AppendWaypoints(
+        Graph graph,
+        int[] path,
+        List<Vector3> output)
+    {
+        foreach (int nodeIndex in path)
+        {
+            Node node = graph.Nodes[nodeIndex];
+            Vector3 point = new(node.X, node.Y, node.Height);
+            if (output.Count > 0 &&
+                Vector3.DistanceSquared(output[^1], point) < 0.0001f)
+                continue;
+            output.Add(point);
+        }
+    }
+
+    private static bool TryFindRegionPortal(
+        Graph from,
+        Graph to,
+        RegionKey fromRegion,
+        RegionKey toRegion,
+        Vector3 start,
+        Vector3 target,
+        float bodyHeight,
+        out int fromNode,
+        out int toNode)
+    {
+        fromNode = -1;
+        toNode = -1;
+        bool crossesX = fromRegion.X != toRegion.X;
+        int alongCount;
+        int fromFixed;
+        int toFixed;
+        float expectedAlong;
+        if (crossesX)
+        {
+            bool positive = toRegion.X > fromRegion.X;
+            fromFixed = positive ? from.Width - 1 : 0;
+            toFixed = positive ? 0 : to.Width - 1;
+            alongCount = Math.Min(from.Height, to.Height);
+            float boundary = (positive ? fromRegion.X + 1 : fromRegion.X) *
+                RegionSizeMeters;
+            float denominator = target.X - start.X;
+            float blend = MathF.Abs(denominator) > 0.0001f
+                ? Math.Clamp((boundary - start.X) / denominator, 0f, 1f)
+                : 0.5f;
+            expectedAlong = start.Y + (target.Y - start.Y) * blend;
+        }
+        else
+        {
+            bool positive = toRegion.Y > fromRegion.Y;
+            fromFixed = positive ? from.Height - 1 : 0;
+            toFixed = positive ? 0 : to.Height - 1;
+            alongCount = Math.Min(from.Width, to.Width);
+            float boundary = (positive ? fromRegion.Y + 1 : fromRegion.Y) *
+                RegionSizeMeters;
+            float denominator = target.Y - start.Y;
+            float blend = MathF.Abs(denominator) > 0.0001f
+                ? Math.Clamp((boundary - start.Y) / denominator, 0f, 1f)
+                : 0.5f;
+            expectedAlong = start.X + (target.X - start.X) * blend;
+        }
+
+        float bestCost = float.PositiveInfinity;
+        float maximumPortalStep = Math.Min(
+            MaximumStepHeight,
+            CellSizeMeters * MaximumGrade + 0.08f);
+        for (int along = 0; along < alongCount; along++)
+        {
+            int fromCell = crossesX
+                ? fromFixed + along * from.Width
+                : along + fromFixed * from.Width;
+            int toCell = crossesX
+                ? toFixed + along * to.Width
+                : along + toFixed * to.Width;
+
+            foreach (int firstNode in from.CellNodes[fromCell])
+            {
+                Node first = from.Nodes[firstNode];
+                if (first.Clearance + 0.0001f < bodyHeight)
+                    continue;
+
+                foreach (int secondNode in to.CellNodes[toCell])
+                {
+                    Node second = to.Nodes[secondNode];
+                    if (second.Clearance + 0.0001f < bodyHeight)
+                        continue;
+
+                    float heightDifference = MathF.Abs(first.Height - second.Height);
+                    if (heightDifference > maximumPortalStep)
+                        continue;
+
+                    float alongPosition = crossesX
+                        ? (first.Y + second.Y) * 0.5f
+                        : (first.X + second.X) * 0.5f;
+                    float deviation = alongPosition - expectedAlong;
+                    float cost = deviation * deviation +
+                        heightDifference * heightDifference * 4f;
+                    if (cost >= bestCost)
+                        continue;
+
+                    bestCost = cost;
+                    fromNode = firstNode;
+                    toNode = secondNode;
+                }
+            }
+        }
+
+        return fromNode >= 0 && toNode >= 0;
     }
 
     private Graph? GetOrBuildGraph(WorldMap map, RegionKey key)
@@ -271,13 +670,6 @@ public sealed class VoxelNavigationSystem
         int width = Math.Clamp(map.TileWidth * CellsPerMeter - originCellX, 0, CellsPerRegion);
         int height = Math.Clamp(map.TileHeight * CellsPerMeter - originCellY, 0, CellsPerRegion);
         if (width == 0 || height == 0)
-            return null;
-
-        int minSampleX = Math.Max(0, originCellX * 5);
-        int minSampleY = Math.Max(0, originCellY * 5);
-        int maxSampleX = Math.Min(map.Voxels.Width - 1, (originCellX + width) * 5 - 1);
-        int maxSampleY = Math.Min(map.Voxels.Depth - 1, (originCellY + height) * 5 - 1);
-        if (!map.Voxels.HasEditsInArea(minSampleX, maxSampleX, minSampleY, maxSampleY))
             return null;
 
         List<Node> nodes = new();
