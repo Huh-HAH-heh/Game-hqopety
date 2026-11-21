@@ -1311,6 +1311,9 @@ public sealed class WorldMap
     public void PaintVoxelSphere(Vector3 centerMeters, float radiusMeters, ushort materialId) =>
         Voxels.PaintSphere(centerMeters, radiusMeters, materialId);
 
+    public void SmoothVoxelSphere(Vector3 centerMeters, float radiusMeters, float strength = 0.5f) =>
+        Voxels.SmoothSphere(centerMeters, radiusMeters, strength);
+
     private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
     {
         if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
