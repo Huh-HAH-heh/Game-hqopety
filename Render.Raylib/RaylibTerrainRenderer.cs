@@ -128,48 +128,13 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
 
         Material material = LoadMaterialDefault();
-        if (_mode == TerrainRenderMode.Voxel)
-        {
-            _voxelShader = LoadShaderFromMemory(
-                VoxelVertexShader,
-                VoxelFragmentShader);
-            if (!IsShaderValid(_voxelShader))
-            {
-                UnloadMaterial(material);
-                throw new InvalidOperationException(
-                    "The voxel cutaway shader could not be created by the active graphics backend.");
-            }
-
-            _cutEnabledLocation = GetShaderLocation(_voxelShader, "uCutEnabled");
-            _cutHeightLocation = GetShaderLocation(_voxelShader, "uCutHeight");
-            _sunDirectionLocation = GetShaderLocation(_voxelShader, "uSunDirection");
-            _ambientLightLocation = GetShaderLocation(_voxelShader, "uAmbientLight");
-            _sunIntensityLocation = GetShaderLocation(_voxelShader, "uSunIntensity");
-            if (_cutEnabledLocation < 0 ||
-                _cutHeightLocation < 0 ||
-                _sunDirectionLocation < 0 ||
-                _ambientLightLocation < 0 ||
-                _sunIntensityLocation < 0)
-            {
-                UnloadShader(_voxelShader);
-                UnloadMaterial(material);
-                throw new InvalidOperationException(
-                    "The voxel cutaway shader is missing a required uniform.");
-            }
-
-            material.Shader = _voxelShader;
-            _hasVoxelShader = true;
-        }
-        else
-        {
-            _voxelShader = default;
-            _cutEnabledLocation = -1;
-            _cutHeightLocation = -1;
-            _sunDirectionLocation = -1;
-            _ambientLightLocation = -1;
-            _sunIntensityLocation = -1;
-            _hasVoxelShader = false;
-        }
+        _voxelShader = default;
+        _cutEnabledLocation = -1;
+        _cutHeightLocation = -1;
+        _sunDirectionLocation = -1;
+        _ambientLightLocation = -1;
+        _sunIntensityLocation = -1;
+        _hasVoxelShader = false;
 
         _material = material;
 
