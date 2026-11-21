@@ -1208,6 +1208,7 @@ public sealed class WorldMap
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = storedMaterial;
         _rangeCache[index] = null;
+        Voxels.InvalidateBaseField();
         MarkTerrainChanged(globalX, globalY);
     }
 
@@ -1261,6 +1262,7 @@ public sealed class WorldMap
         _rangeCache[index] = null;
         _simpleFillColumns[index] = true;
         _columnMaterialIds[index] = 0;
+        Voxels.InvalidateBaseField();
     }
 
     private void RecalculateSurfaceHeight(int columnIndex)
