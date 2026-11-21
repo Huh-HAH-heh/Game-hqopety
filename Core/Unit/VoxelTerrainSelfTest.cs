@@ -259,7 +259,7 @@ internal static class VoxelTerrainSelfTest
             worldMap.SetSolidHeight(x, y, 20, Rock);
 
         // Tunnel spans the 128 m boundary and has enough body clearance.
-        worldMap.CarveVoxelBox(
+        worldMap.Voxels.CarveBox(
             new Vector3(126f, 0.5f, 2f),
             new Vector3(130f, 1.8f, 5f));
 

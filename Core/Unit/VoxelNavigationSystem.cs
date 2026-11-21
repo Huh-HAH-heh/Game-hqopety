@@ -264,6 +264,15 @@ public sealed class VoxelNavigationSystem
                 invalidated.Add(route.Region);
         }
 
+        foreach (MultiRegionRoute route in _multiRegionRoutes.Values)
+        {
+            foreach (RegionKey key in route.Regions)
+            {
+                if (IntersectsEditedArea(key))
+                    invalidated.Add(key);
+            }
+        }
+
         if (invalidated.Count == 0)
             return;
 
@@ -324,8 +333,8 @@ public sealed class VoxelNavigationSystem
 
         List<RegionKey> xFirst = BuildRegionPath(startRegion, goalRegion, xFirst: true);
         List<RegionKey> yFirst = BuildRegionPath(startRegion, goalRegion, xFirst: false);
-        if (xFirst.Count < 2 || xFirst.Count > 25 ||
-            yFirst.Count < 2 || yFirst.Count > 25)
+        if (xFirst.Count < 2 || xFirst.Count > 40 ||
+            yFirst.Count < 2 || yFirst.Count > 40)
             return false;
 
         bool xFirstHasEdits = CorridorHasVoxelEdits(map, xFirst);
@@ -507,7 +516,7 @@ public sealed class VoxelNavigationSystem
         out Vector3[] waypoints)
     {
         waypoints = Array.Empty<Vector3>();
-        if (regions.Count < 2 || regions.Count > 25)
+        if (regions.Count < 2 || regions.Count > 40)
             return false;
 
         float requiredClearance = MathF.Max(0.1f, bodyHeight);
