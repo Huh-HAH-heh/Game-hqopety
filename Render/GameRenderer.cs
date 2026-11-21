@@ -54,6 +54,9 @@ public sealed class GameRenderer
     private readonly GameCamera _camera;
     private readonly GameInput _input;
     private readonly MapRenderSystem _mapRenderer;
+    private readonly VoxelTerrainSystem _voxelTerrains = new();
+    private readonly IndependentVoxelTerrainRenderer _voxelTerrainRenderer = new();
+    private bool _independentVoxelTerrainMode;
     private readonly BlockTerrainPreviewRenderer _blockTerrainPreviewRenderer = new();
     private readonly UnitSimulation _unitSimulation;
     private readonly UnitRenderSystem _unitRenderer;
@@ -452,6 +455,8 @@ public sealed class GameRenderer
             // Release every native render resource while the SFML context
             // still exists, even if initialization, update, or drawing throws.
             _mapRenderer.Dispose();
+            _voxelTerrainRenderer.Dispose();
+            _voxelTerrains.Clear();
             _blockTerrainPreviewRenderer.Dispose();
             _projectileRenderer.Dispose();
             _unitRenderer.Dispose();
@@ -747,6 +752,7 @@ public sealed class GameRenderer
 
             // Only dispose/rebuild cached GPU objects after SetActive succeeds.
             _mapRenderer.InvalidateGraphicsResources();
+            _voxelTerrainRenderer.InvalidateGraphicsResources();
             _graphicsRecoveryPending = false;
             Console.WriteLine(
                 "[Render] Graphics context restored; terrain GPU cache will rebuild.");
@@ -794,14 +800,24 @@ public sealed class GameRenderer
             return;
         }
 
-        _mapRenderer.Draw(
+        if (!_independentVoxelTerrainMode)
+        {
+            _mapRenderer.Draw(
+                _window,
+                _worldMap,
+                _camera.View,
+                TerrainTilePixelSize,
+                _camera.ZoomLevel,
+                _showDebugGrid,
+                _visibleMaxLayer);
+        }
+
+        _voxelTerrainRenderer.Draw(
             _window,
-            _worldMap,
             _camera.View,
+            _voxelTerrains,
             TerrainTilePixelSize,
-            _camera.ZoomLevel,
-            _showDebugGrid,
-            _visibleMaxLayer);
+            _camera.ZoomLevel);
         _lastTerrainDrawMilliseconds = Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
 
         if (_showVisionDebug &&
@@ -4905,6 +4921,8 @@ public sealed class GameRenderer
         _movementTestMode = false;
         _visionTestMode = false;
         _terrainStressMode = false;
+        _independentVoxelTerrainMode = false;
+        _voxelTerrains.Clear();
         _massCombatWorldReady = false;
         _startupMassCombatSelectionApplied = false;
         _simulationPaused = false;
@@ -5017,6 +5035,17 @@ public sealed class GameRenderer
                 StartSimulationThread();
                 break;
             }
+            case 5:
+            {
+                _independentVoxelTerrainMode = true;
+                _unitSimulation.AI.Enabled = false;
+                _unitSimulation.VisionEnabled = false;
+                CreateIndependentVoxelTerrainDemo();
+                _camera.CenterOnPosition(new Vector2f(
+                    380f * TerrainTilePixelSize,
+                    380f * TerrainTilePixelSize));
+                break;
+            }
         }
 
         _activeTestSceneIndex = sceneIndex;
@@ -5051,6 +5080,35 @@ public sealed class GameRenderer
         _camera.CenterOnPosition(new Vector2f(
             (position.X + 9f) * TerrainTilePixelSize,
             (position.Y + 3.75f) * TerrainTilePixelSize));
+    }
+
+    private void CreateIndependentVoxelTerrainDemo()
+    {
+        // Each object owns a separate WorldMap, voxel tree, layer storage and
+        // render cache. The common world coordinates are only their placement.
+        VoxelTerrain first = _voxelTerrains.Create(
+            "Voxel mass A", 326f, 326f, 1, 1, 240);
+        first.FillVolume(4, 4, 0, 40, 40, 6, 1);
+        first.CutVolume(4, 4, 0, 8, 8, 6);
+        first.CutVolume(36, 4, 0, 8, 8, 6);
+        first.CutVolume(4, 36, 0, 8, 8, 6);
+        first.CutVolume(36, 36, 0, 8, 8, 6);
+        first.CutVolume(18, 4, 3, 4, 40, 3);
+        first.CutVolume(11, 18, 2, 22, 8, 4);
+
+        VoxelTerrain second = _voxelTerrains.Create(
+            "Voxel mass B", 382f, 326f, 1, 1, 240);
+        second.FillVolume(8, 10, 0, 32, 28, 4, 2);
+        second.CutVolume(19, 10, 2, 6, 28, 2);
+        second.CutVolume(8, 21, 1, 18, 6, 3);
+        second.FillVolume(20, 19, 0, 8, 8, 2, 3);
+
+        VoxelTerrain third = _voxelTerrains.Create(
+            "Voxel mass C", 326f, 382f, 1, 1, 240);
+        third.FillVolume(2, 2, 0, 44, 44, 3, 3);
+        third.CutVolume(2, 19, 1, 44, 6, 2);
+        third.CutVolume(20, 2, 1, 7, 44, 2);
+        third.FillVolume(20, 20, 0, 7, 7, 5, 1);
     }
 
     private void CreateVisionTestScene()
