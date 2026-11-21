@@ -65,7 +65,7 @@ public sealed class GameControlBindings
         GameControlAction.ToggleCameraProjection => "Переключить проекцию камеры",
         GameControlAction.RotateCameraCounterClockwise => "Поворот камеры влево",
         GameControlAction.RotateCameraClockwise => "Поворот камеры вправо",
-        GameControlAction.ToggleBlockTerrainPreview => "Просмотр блочного террейна",
+        GameControlAction.ToggleBlockTerrainPreview => "Просмотр воксельного террейна",
         GameControlAction.ToggleInformationLayers => "Информационные слои",
         GameControlAction.ToggleAutonomousMovement => "Автономное движение выделения",
         _ => action.ToString()
