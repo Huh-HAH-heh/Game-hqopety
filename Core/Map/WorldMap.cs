@@ -960,16 +960,35 @@ public sealed class WorldMap
                 0,
                 LayerCount);
             if (filledLayers == 0 || _columnMaterialIds[index] == 0)
-                return ReadOnlySpan<TileRange>.Empty;
-
-            cached = new TileRange[1];
-            cached[0] = new TileRange
             {
-                StartZ = 0,
-                EndZ = checked((ushort)filledLayers),
-                MaterialId = _columnMaterialIds[index],
-                State = StateSolid
-            };
+                cached = new TileRange[1];
+                cached[0] = new TileRange
+                {
+                    StartZ = 0,
+                    EndZ = checked((ushort)LayerCount),
+                    MaterialId = 0,
+                    State = StateEmpty
+                };
+            }
+            else
+            {
+                cached = new TileRange[2];
+                cached[0] = new TileRange
+                {
+                    StartZ = 0,
+                    EndZ = checked((ushort)filledLayers),
+                    MaterialId = _columnMaterialIds[index],
+                    State = StateSolid
+                };
+                cached[1] = new TileRange
+                {
+                    StartZ = checked((ushort)filledLayers),
+                    EndZ = checked((ushort)LayerCount),
+                    MaterialId = 0,
+                    State = StateEmpty
+                };
+            }
+
             _rangeCache[index] = cached;
             return cached;
         }
