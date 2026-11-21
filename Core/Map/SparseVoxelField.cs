@@ -7,8 +7,8 @@ namespace Core.Map;
 /// <summary>
 /// Sparse, editable 3D scalar voxel field.
 ///
-/// Coordinates are isotropic 0.1 m voxels on all three axes. Density is sampled
-/// on lattice points; positive density is solid, negative density is air and
+/// Coordinates are isotropic 0.1 m voxels on all three axes. Signed distance is
+/// sampled at voxel centres; positive density is solid, negative density is air and
 /// zero is the isosurface. Material IDs belong to cells, not to vertical columns.
 /// Unmodified terrain is evaluated by a procedural base sampler; edited areas
 /// materialize only the affected 16^3 chunks.
@@ -402,7 +402,7 @@ public sealed class SparseVoxelField
             if (MathF.Abs(next - previous) <= 0.001f)
                 continue;
 
-            SetDensityOverride(x, y, z, next, revision, touched);
+            SetDensityOverride(x, y, z, next, previous, revision, touched);
 
             if (previous > 0f && next <= 0f)
                 SetMaterialOverride(x, y, z, 0, revision, touched);
@@ -466,7 +466,7 @@ public sealed class SparseVoxelField
             float nextDensity = add
                 ? MathF.Max(oldDensity, shapeDensity)
                 : MathF.Min(oldDensity, -shapeDensity);
-            SetDensityOverride(x, y, z, nextDensity, revision, touched);
+            SetDensityOverride(x, y, z, nextDensity, oldDensity, revision, touched);
         }
 
         for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
@@ -530,7 +530,7 @@ public sealed class SparseVoxelField
             float nextDensity = add
                 ? MathF.Max(oldDensity, shapeDensity)
                 : MathF.Min(oldDensity, -shapeDensity);
-            SetDensityOverride(x, y, z, nextDensity, revision, touched);
+            SetDensityOverride(x, y, z, nextDensity, oldDensity, revision, touched);
         }
 
         for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
@@ -603,7 +603,7 @@ public sealed class SparseVoxelField
             float nextDensity = add
                 ? MathF.Max(oldDensity, shapeDensity)
                 : MathF.Min(oldDensity, -shapeDensity);
-            SetDensityOverride(x, y, z, nextDensity, revision, touched);
+            SetDensityOverride(x, y, z, nextDensity, oldDensity, revision, touched);
         }
 
         for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
@@ -631,11 +631,13 @@ public sealed class SparseVoxelField
     private void SetDensityOverride(
         int x, int y, int z,
         float density,
+        float previousDensity,
         long revision,
         HashSet<ChunkCoordinate> touched)
     {
         if (x < 0 || y < 0 || z < 0 ||
-            x >= Width || y >= Height || z >= Depth)
+            x >= Width || y >= Height || z >= Depth ||
+            Quantize(density) == Quantize(previousDensity))
             return;
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
