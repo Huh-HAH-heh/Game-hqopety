@@ -297,7 +297,7 @@ public sealed class SparseVoxelField
         int lastChunkZ = (maxZ - 1) / ChunkSize;
         int chunkCountY = (Height + ChunkSize - 1) / ChunkSize;
 
-        List<ChunkCoordinate> removeChunks = new();
+        List<ChunkCoordinate>? removeChunks = null;
         long revision = Version + 1;
 
         for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
@@ -349,11 +349,11 @@ public sealed class SparseVoxelField
             if (Array.IndexOf(chunk.DensityMask, (byte)1) < 0 &&
                 Array.IndexOf(chunk.MaterialMask, (byte)1) < 0)
             {
-                removeChunks.Add(key);
+                (removeChunks ??= new List<ChunkCoordinate>()).Add(key);
             }
         }
 
-        if (removeChunks.Count == 0)
+        if (removeChunks == null)
             return;
 
         foreach (ChunkCoordinate key in removeChunks)
