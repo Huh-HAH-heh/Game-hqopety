@@ -1165,6 +1165,8 @@ public sealed class WorldMap
         NavigationVersion++;
         TerrainVersion++;
         TerrainGeometryVersion++;
+
+        Voxels.InvalidateBaseField();
     }
 
     public void SetSolidHeight(
