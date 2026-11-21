@@ -87,7 +87,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private readonly int _sunDirectionLocation;
     private readonly int _ambientLightLocation;
     private readonly int _sunIntensityLocation;
-    private readonly TerrainRenderMode _mode;\n    private readonly VoxelTerrainRenderer? _densityVoxelRenderer;
+    private readonly TerrainRenderMode _mode;
+    private readonly VoxelTerrainRenderer? _densityVoxelRenderer;
 
     private TerrainPalette _palette;
     private int _paletteVersion;
@@ -98,9 +99,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public int RebuiltRegions { get; private set; }
     public int CutSurfaceRebuilds { get; private set; }
     public int ActiveRenderCellSize => _activeVoxelCellSize;
-    public bool IsUsingCoarseVoxelLod => _mode == TerrainRenderMode.Voxel &&
-        _coarseTerrain != null &&
-        _usingCoarseLod;
+    public float ActiveVoxelSizeMeters =>
+        _densityVoxelRenderer?.ActiveVoxelSizeMeters ?? _activeVoxelCellSize;
+    public bool IsUsingCoarseVoxelLod =>
+        _densityVoxelRenderer?.IsUsingCoarseLod ??
+        (_mode == TerrainRenderMode.Voxel && _coarseTerrain != null && _usingCoarseLod);
 
     public RaylibTerrainRenderer(
         TerrainRenderSnapshot terrain,
@@ -109,7 +112,10 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         TerrainRenderSnapshot? coarseTerrain = null)
     {
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
-        _mode = mode;\n        _densityVoxelRenderer = mode == TerrainRenderMode.Voxel\n            ? new VoxelTerrainRenderer(palette)\n            : null;
+        _mode = mode;
+        _densityVoxelRenderer = mode == TerrainRenderMode.Voxel
+            ? new VoxelTerrainRenderer(palette)
+            : null;
         _coarseTerrain = mode == TerrainRenderMode.Voxel &&
             coarseTerrain?.IsVoxelMode == true
                 ? coarseTerrain
@@ -499,7 +505,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public void SetPalette(TerrainPalette palette)
     {
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
-        _paletteVersion++;\n        _densityVoxelRenderer?.SetPalette(palette);
+        _paletteVersion++;
+        _densityVoxelRenderer?.SetPalette(palette);
     }
 
     public void Dispose()
@@ -507,7 +514,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         if (_disposed)
             return;
 
-        _densityVoxelRenderer?.Dispose();\n        DisposeMeshes(_regionMeshes);
+        _densityVoxelRenderer?.Dispose();
+        DisposeMeshes(_regionMeshes);
         DisposeMeshes(_coarseRegionMeshes);
 
         UnloadMaterial(_material);
