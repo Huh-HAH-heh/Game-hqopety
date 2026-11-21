@@ -64,8 +64,6 @@ public sealed class VoxelTerrainRenderer : IDisposable
     private readonly List<ChunkRequest> _pendingBuilds = new();
     private readonly List<ChunkKey> _staleKeys = new();
     private long _frameNumber;
-    private int _highestLayerCache = -1;
-    private long _highestLayerVersion = long.MinValue;
 
     public int CachedChunkCount => _chunks.Count;
     public int ChunksBuiltLastFrame { get; private set; }
@@ -279,8 +277,6 @@ public sealed class VoxelTerrainRenderer : IDisposable
 
                 int nextY = Math.Min(worldMap.TileHeight, cellY + lodStep);
                 int sampleWorldY = cellY + Math.Max(0, nextY - cellY) / 2;
-                if (sampleY == request.HeightSamples)
-                    sampleWorldY = cellY;
 
                 for (int sampleX = 0; sampleX <= request.WidthSamples; sampleX++)
                 {
@@ -290,8 +286,6 @@ public sealed class VoxelTerrainRenderer : IDisposable
 
                     int nextX = Math.Min(worldMap.TileWidth, cellX + lodStep);
                     int sampleWorldX = cellX + Math.Max(0, nextX - cellX) / 2;
-                    if (sampleX == request.WidthSamples)
-                        sampleWorldX = cellX;
 
                     voxels[zOffset + sampleX + sampleY * strideX] =
                         worldMap.GetMaterialId(sampleWorldX, sampleWorldY, sourceLayer);
@@ -451,18 +445,8 @@ public sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
-    private float GetHighestHeightMeters(WorldMap worldMap)
-    {
-        if (_highestLayerVersion != worldMap.TerrainGeometryVersion)
-        {
-            _highestLayerCache = worldMap.GetHighestOccupiedLayer();
-            _highestLayerVersion = worldMap.TerrainGeometryVersion;
-        }
-
-        return _highestLayerCache < 0
-            ? 0f
-            : (_highestLayerCache + 1f) * 0.1f;
-    }
+    private static float GetHighestHeightMeters(WorldMap worldMap) =>
+        worldMap.LayerCount * 0.1f;
 
     private static Color GetFaceColor(
         ushort materialId,
