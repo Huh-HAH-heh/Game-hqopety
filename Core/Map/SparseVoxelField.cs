@@ -191,7 +191,6 @@ public sealed class SparseVoxelField
     {
         Version++;
         BaseVersion++;
-        Changed?.Invoke(new VoxelBounds(0, 0, 0, Width, Height, Depth));
     }
 
     /// <summary>
