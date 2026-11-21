@@ -1330,7 +1330,19 @@ public sealed class WorldMap
         float h11 = _surfaceHeights[GetColumnIndex(x1, y1)];
         float top = h00 + (h10 - h00) * tx;
         float bottom = h01 + (h11 - h01) * tx;
-        return top + (bottom - top) * ty - (voxelY + 0.5f);
+        float surfaceHeight = top + (bottom - top) * ty;
+
+        // Convert the vertical height difference into an approximate Euclidean
+        // signed distance. One tile is 10 native voxel samples in each horizontal
+        // direction; this keeps sphere tracing stable on steep slopes.
+        float gradientX =
+            ((h10 - h00) * (1f - ty) + (h11 - h01) * ty) * 0.1f;
+        float gradientZ =
+            ((h01 - h00) * (1f - tx) + (h11 - h10) * tx) * 0.1f;
+        float distanceScale = MathF.Sqrt(
+            1f + gradientX * gradientX + gradientZ * gradientZ);
+
+        return (surfaceHeight - (voxelY + 0.5f)) / distanceScale;
     }
 
     private ushort SampleBaseVoxelMaterial(int voxelX, int voxelY, int voxelZ)
@@ -1360,7 +1372,6 @@ public sealed class WorldMap
             bounds.MaxY >= Voxels.Height &&
             bounds.MaxZ >= Voxels.Depth)
         {
-            Array.Clear(_rangeCache);
             Array.Fill(_simpleFillColumns, true);
             Array.Clear(_rangeCache);
             foreach (WorldRegion region in _worldRegions)
