@@ -489,9 +489,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int firstX = key.X * span - key.Step;
             int firstY = key.Y * span - key.Step;
             int firstZ = key.Z * span - key.Step;
-            int lastX = (key.X * ChunkCells + ChunkCells + 1) * key.Step;
-            int lastY = (key.Y * ChunkCells + ChunkCells + 1) * key.Step;
-            int lastZ = (key.Z * ChunkCells + ChunkCells + 1) * key.Step;
+            int lastX = (key.X * ChunkCells + ChunkCells + 1) * key.Step + 1;
+            int lastY = (key.Y * ChunkCells + ChunkCells + 1) * key.Step + 1;
+            int lastZ = (key.Z * ChunkCells + ChunkCells + 1) * key.Step + 1;
 
             bool intersectsX = Intersects(firstX, lastX, bounds.MinX, bounds.MaxX);
             bool intersectsY = Intersects(firstY, lastY, bounds.MinY, bounds.MaxY);
