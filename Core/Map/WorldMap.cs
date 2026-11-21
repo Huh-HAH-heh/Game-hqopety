@@ -1357,6 +1357,21 @@ public sealed class WorldMap
 
     private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
     {
+        if (bounds.MinX <= 0 && bounds.MinY <= 0 && bounds.MinZ <= 0 &&
+            bounds.MaxX >= Voxels.Width &&
+            bounds.MaxY >= Voxels.Height &&
+            bounds.MaxZ >= Voxels.Depth)
+        {
+            Array.Clear(_rangeCache);
+            foreach (WorldRegion region in _worldRegions)
+                region.MarkTerrainChanged();
+
+            NavigationVersion++;
+            TerrainVersion++;
+            TerrainGeometryVersion++;
+            return;
+        }
+
         int firstTileX = Math.Clamp(bounds.MinX / 10, 0, TileWidth - 1);
         int firstTileY = Math.Clamp(bounds.MinZ / 10, 0, TileHeight - 1);
         int lastTileX = Math.Clamp((Math.Max(bounds.MinX, bounds.MaxX - 1)) / 10, 0, TileWidth - 1);
