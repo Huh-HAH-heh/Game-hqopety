@@ -410,7 +410,7 @@ public sealed class TerrainRenderSnapshot
                 0,
                 LayerCount);
 
-            return topLayer >= cutLayer
+            return topLayer > cutLayer
                 ? _materialIds[index]
                 : (ushort)0;
         }
@@ -420,7 +420,7 @@ public sealed class TerrainRenderSnapshot
             if (range.State == WorldMap.StateSolid &&
                 range.MaterialId != 0 &&
                 range.StartZ < cutLayer &&
-                range.EndZ >= cutLayer)
+                range.EndZ > cutLayer)
             {
                 return range.MaterialId;
             }
