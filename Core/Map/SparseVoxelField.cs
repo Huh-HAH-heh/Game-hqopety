@@ -1251,7 +1251,10 @@ public sealed class SparseVoxelField
             if (signedDistance > 0f)
                 continue;
 
-            float density = SampleDensity(point.X, point.Y, point.Z);
+            // Density samples are owned by voxel centres and indexed by x/y/z.
+            // Sampling at point (x+0.5,y+0.5,z+0.5) would add a second half-cell
+            // interpolation offset and can erase material exactly at box faces.
+            float density = GetDensity(x, y, z);
             if (add && density > 0f)
                 SetMaterialOverride(x, y, z, materialId, revision, touched);
             else if (!add && density <= 0f)
