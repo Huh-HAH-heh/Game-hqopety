@@ -90,18 +90,8 @@ internal static class VoxelTerrainSelfTest
         SparseVoxelField source = CreateField();
         BuildTunnelAndBridge(source);
         float carvedDensity = source.GetDensity(30, 12, 30);
-        int materialSampleY = -1;
-        for (int y = 40; y < 44; y++)
-        {
-            if (source.GetMaterialId(30, y, 30) == BridgeMaterial)
-            {
-                materialSampleY = y;
-                break;
-            }
-        }
-        ushort bridgeMaterial = materialSampleY >= 0
-            ? source.GetMaterialId(30, materialSampleY, 30)
-            : (ushort)0;
+        const int materialSampleY = 43;
+        ushort bridgeMaterial = source.GetMaterialId(30, materialSampleY, 30);
 
         using MemoryStream save = new();
         source.SaveEdits(save);
