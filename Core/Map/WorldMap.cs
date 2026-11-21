@@ -286,8 +286,9 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Writes one cuboid in native voxel coordinates. X/Y are 1 m cells;
-    /// Z and height are 0.1 m layers. Material zero removes the volume.
+    /// Compatibility cuboid API. X/Y and width/depth use 1 m map tiles;
+    /// Z and height use 0.1 m vertical layers. It writes into the finer
+    /// 0.1 m isotropic 3D voxel field. Material zero removes the volume.
     /// </summary>
         public void SetVoxelVolume(
         int x,
@@ -325,8 +326,9 @@ public sealed class WorldMap
             materialId: 0);
 
     /// <summary>
-    /// Writes one native terrain voxel: 1 m x 1 m x 0.1 m.
-    /// Material ID zero clears the cell to air.
+    /// Compatibility helper for the gameplay grid: one 1 m x 1 m tile
+    /// across one 0.1 m vertical layer. The edit is translated into the
+    /// underlying 0.1 m x 0.1 m x 0.1 m voxel field.
     /// </summary>
     public void SetVoxel(int x, int y, int zLayer, ushort materialId) =>
         SetMaterialId(x, y, zLayer, materialId);
@@ -335,10 +337,9 @@ public sealed class WorldMap
         SetVoxel(x, y, zLayer, materialId: 0);
 
     /// <summary>
-    /// Places or clears one large cuboid in the sparse voxel store.
-    /// X/Y and width/depth use one-metre map cells. Z and height use metres.
-    /// Material ID zero cuts an empty cuboid. Partial edits refine only the
-    /// affected vertical columns in the 16x16 XY chunk.
+    /// Compatibility cuboid helper. X/Y and width/depth use one-metre map
+    /// cells; Z and height use metres. Material zero removes the cuboid.
+    /// The actual edit is evaluated in the isotropic 0.1 m 3D density field.
     /// </summary>
         public void SetBlockVolume(
         int x,
@@ -367,11 +368,11 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Adds a static material cuboid to the sparse 3D voxel backing.
-    /// Coordinates X/Y use map tiles; Z and height use metres.
-    /// Material zero creates an empty cut; nonzero materials create a solid
-    /// geological layer. The surface itself is also stored as compressed
-    /// voxel occupancy; surface heights are derived caches for navigation.
+    /// Adds a static material cuboid to the sparse 3D voxel field.
+    /// X/Y and width/depth use 1 m map tiles; Z and height use metres.
+    /// Material zero creates an empty cut. The untouched broad base surface
+    /// remains a procedural signed-distance field; local 3D edits materialize
+    /// only affected 16^3 voxel chunks.
     /// </summary>
         public void SetStaticVolume(
         int x,
@@ -398,7 +399,7 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Carves a static empty cuboid without materializing the implicit terrain.
+    /// Carves a static empty cuboid out of the procedural base/voxel field.
     /// </summary>
         public void CarveStaticVolume(
         int x,
