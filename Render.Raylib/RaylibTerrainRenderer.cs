@@ -103,6 +103,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _densityVoxelRenderer?.ActiveVoxelSizeMeters ?? _activeVoxelCellSize;
     public int CachedVoxelChunks => _densityVoxelRenderer?.CachedChunks ?? 0;
     public int DynamicFragmentCount => _densityVoxelRenderer?.DynamicFragmentCount ?? 0;
+    public bool IsMergingFragments => _densityVoxelRenderer?.IsMergingFragments ?? false;
     public bool IsUsingCoarseVoxelLod =>
         _densityVoxelRenderer?.IsUsingCoarseLod ??
         (_mode == TerrainRenderMode.Voxel && _coarseTerrain != null && _usingCoarseLod);
