@@ -39,6 +39,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         public float QuietTime;
         public bool Sleeping;
         public bool Active = true;
+        public bool Baked;
+        public SparseVoxelField.FragmentMergeJob? MergeJob;
 
         public void Dispose()
         {
@@ -239,11 +241,42 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             float step = MathF.Min(fixedStep, remaining);
             for (int i = 0; i < _bodies.Count; i++)
             {
-                if (_bodies[i].Active)
-                    Integrate(_bodies[i], staticField, step);
+                Body body = _bodies[i];
+                if (body.Active && !body.Baked && body.MergeJob == null)
+                    Integrate(body, staticField, step);
             }
             ResolveBodyContacts();
             remaining -= step;
+        }
+
+        // Only one body bakes at a time. The source field owns the merge job and
+        // commits it in fixed-size batches, keeping terrain edits out of Draw's
+        // mesh-build budget.
+        foreach (Body body in _bodies)
+        {
+            if (!body.Active)
+                continue;
+
+            if (body.Sleeping && body.MergeJob == null && !body.Baked)
+            {
+                body.MergeJob = staticField.BeginFragmentMerge(
+                    body.Snapshot,
+                    body.Position,
+                    body.Rotation);
+            }
+
+            if (body.MergeJob == null)
+                continue;
+
+            if (staticField.ProcessFragmentMerge(
+                    body.MergeJob,
+                    maximumSamples: 12_000))
+            {
+                body.Baked = true;
+                body.MergeJob = null;
+            }
+
+            break;
         }
     }
 
@@ -262,6 +295,32 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 
             foreach (Mesh mesh in body.Meshes)
                 DrawMesh(mesh, material, transform);
+        }
+    }
+
+    /// <summary>
+    /// Keeps a baked body's visual mesh alive until any cached static meshes
+    /// overlapping its world bounds have been rebuilt. Missing cache entries
+    /// are safe: they will be generated from the merged master field on demand.
+    /// </summary>
+    public void ReleaseBakedBodies(Func<SparseVoxelField.VoxelBounds, bool> staticMeshesReady)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(staticMeshesReady);
+
+        for (int i = _bodies.Count - 1; i >= 0; i--)
+        {
+            Body body = _bodies[i];
+            if (!body.Active || !body.Baked || body.MergeJob != null ||
+                !staticMeshesReady(body.BakedBounds))
+                continue;
+
+            body.Active = false;
+            _activeBodyCount--;
+            _snapshotBytes -= body.Snapshot.EstimatedBytes;
+            body.Dispose();
+            _bodies.RemoveAt(i);
+            RemoveFromHistory(body);
         }
     }
 
