@@ -401,9 +401,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             float priorityY = cutEnabled
                 ? cutHeightMeters
                 : Math.Clamp(
-                    field.Height * SparseVoxelField.VoxelSizeMeters * 0.55f,
-                    1f,
-                    field.Height * SparseVoxelField.VoxelSizeMeters - 1f);
+                    camera.Target.Y,
+                    0f,
+                    field.Height * SparseVoxelField.VoxelSizeMeters);
             float dy = center.Y - priorityY;
             float priorityDistanceSquared = dx * dx + dy * dy + dz * dz;
 
@@ -1379,7 +1379,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (remove != null)
         {
-                foreach (ChunkKey key in remove)
+            foreach (ChunkKey key in remove)
             {
                 if (_chunks.Remove(key, out ChunkEntry? entry))
                     entry.Dispose();
