@@ -455,7 +455,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 (entry.CutLayer != cutLayer || entry.CutDirty);
 
             if (surfaceStale || needsCutCap)
-                RequestBuild(field, key, entry, needsCutCap, cutLayer);
+                RequestBuild(field, key, entry, needsCutCap, cutLayer, isPrewarm: false);
 
             if (!cutEnabled && entry.CutCap.Length > 0)
                 ClearCutCap(entry);
@@ -726,23 +726,36 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ChunkKey key,
         ChunkEntry entry,
         bool buildCutCap,
-        int cutLayer)
+        int cutLayer,
+        bool isPrewarm)
     {
+        if (entry.FailedRevision == entry.RequestRevision)
+            return;
+
         if (entry.RunningBuild != null ||
             entry.NeedsCapture ||
             entry.Capture != null ||
             entry.BuildQueued ||
-            entry.ReadyBuild.HasValue ||
-            entry.FailedRevision == entry.RequestRevision ||
-            _pendingCaptures + _buildQueue.Count >= MaximumPendingMeshJobs)
+            entry.ReadyBuild.HasValue)
+        {
+            _totalDuplicateRequestAttempts++;
             return;
+        }
+
+        if (_pendingCaptures + _buildQueue.Count >= MaximumPendingMeshJobs)
+        {
+            _totalQueueSaturated++;
+            return;
+        }
 
         entry.NeedsCapture = true;
+        _totalBuildRequests++;
         entry.CaptureRevision = entry.RequestRevision;
         entry.CapturePaletteVersion = _paletteVersion;
         entry.CaptureBaseVersion = field.BaseVersion;
         entry.CaptureCutCap = buildCutCap;
         entry.CaptureCutLayer = buildCutCap ? cutLayer : int.MinValue;
+        entry.CaptureIsPrewarm = isPrewarm;
         _pendingCaptures++;
     }
 
@@ -1254,7 +1267,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (!stale)
                 continue;
 
-            RequestBuild(field, key, entry, buildCutCap: false, cutLayer: -1);
+            RequestBuild(field, key, entry, buildCutCap: false, cutLayer: -1, isPrewarm: true);
             builds++;
         }
     }
