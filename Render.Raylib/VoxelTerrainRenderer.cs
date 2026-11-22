@@ -858,6 +858,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.RunningBuild = request;
             request.Task = Task.Run(() =>
             {
+                Stopwatch workerTimer = Stopwatch.StartNew();
                 CancellationToken token = request.Cancellation.Token;
                 VoxelMeshData[] surface =
                     VoxelChunkMesher.BuildSurfaceData(
@@ -869,12 +870,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         request.Palette,
                         token)
                     : Array.Empty<VoxelMeshData>();
+                workerTimer.Stop();
+
+                int vertices = surface.Sum(static mesh => mesh.VertexCount) +
+                    cutCap.Sum(static mesh => mesh.VertexCount);
+                int triangles = surface.Sum(static mesh => mesh.TriangleCount) +
+                    cutCap.Sum(static mesh => mesh.TriangleCount);
                 return new VoxelMeshBuildResult(
-                    surface, cutCap, request.BuildCutCap, request.CutLayer);
+                    surface,
+                    cutCap,
+                    request.BuildCutCap,
+                    request.CutLayer,
+                    workerTimer.Elapsed.TotalMilliseconds,
+                    vertices,
+                    triangles);
             });
 
             _runningBuilds.Add(request);
             _activeMeshWorkers++;
+            _totalBuildStarted++;
         }
     }
 
@@ -894,10 +908,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (ReferenceEquals(entry.RunningBuild, request))
                 entry.RunningBuild = null;
 
-            if (task.IsFaulted || task.IsCanceled)
+            if (task.IsCanceled)
             {
+                _totalBuildCancelled++;
                 if (request.RequestRevision == entry.RequestRevision)
                     entry.FailedRevision = request.RequestRevision;
+                _logger.Write(
+                    "MESH_CANCELLED",
+                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision}");
+                continue;
+            }
+
+            if (task.IsFaulted)
+            {
+                _totalBuildFailed++;
+                if (request.RequestRevision == entry.RequestRevision)
+                    entry.FailedRevision = request.RequestRevision;
+                _logger.Write(
+                    "MESH_FAILED",
+                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"{task.Exception?.GetBaseException().Message}\"");
                 continue;
             }
 
@@ -906,9 +935,49 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 request.RequestRevision != entry.RequestRevision ||
                 request.PaletteVersion != _paletteVersion ||
                 request.BaseVersion != field.BaseVersion)
+            {
+                _totalStaleResults++;
+                _logger.Write(
+                    "MESH_STALE",
+                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) requestRev={request.RequestRevision} currentRev={entry.RequestRevision} base={request.BaseVersion}/{field.BaseVersion}");
                 continue;
+            }
 
-            entry.ReadyBuild = task.GetAwaiter().GetResult();
+            VoxelMeshBuildResult build = task.GetAwaiter().GetResult();
+            BuildIdentity identity = new(
+                request.Key, request.BaseVersion, request.PaletteVersion);
+            int sameRevisionBuilds = _completedBuildCounts.TryGetValue(
+                identity, out int previousBuilds)
+                    ? previousBuilds + 1
+                    : 1;
+            _completedBuildCounts[identity] = sameRevisionBuilds;
+            if (_completedBuildCounts.Count > 4096)
+                _completedBuildCounts.Clear();
+
+            if (sameRevisionBuilds > 1)
+            {
+                _totalRepeatedBuilds++;
+                _logger.Write(
+                    "REBUILD_REPEAT",
+                    $"count={sameRevisionBuilds} step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) base={request.BaseVersion} palette={request.PaletteVersion}");
+            }
+
+            _totalBuildCompleted++;
+            BuildsCompletedLastFrame++;
+            WorkerBuildMillisecondsLastFrame += build.WorkerMilliseconds;
+            LastWorkerBuildMilliseconds = build.WorkerMilliseconds;
+            LastWorkerQueueWaitMilliseconds = Math.Max(
+                0d,
+                Stopwatch.GetElapsedTime(request.EnqueuedTimestamp).TotalMilliseconds -
+                    build.WorkerMilliseconds);
+            LastBuildStep = request.Key.Step;
+            LastBuildVertices = build.VertexCount;
+            LastBuildTriangles = build.TriangleCount;
+            _logger.Write(
+                "MESH_BUILT",
+                $"kind={(request.IsPrewarm ? "prewarm" : "visible")} step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount}");
+
+            entry.ReadyBuild = build;
             entry.ReadyRequest = request;
             entry.SurfaceUploadIndex = 0;
             entry.CutUploadIndex = 0;
