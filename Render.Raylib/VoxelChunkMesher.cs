@@ -119,7 +119,7 @@ internal static class VoxelChunkMesher
     }
 
     public static Mesh[] BuildSurface(
-        SparseVoxelField field,
+        IVoxelFieldSource field,
         int chunkX,
         int chunkY,
         int chunkZ,
