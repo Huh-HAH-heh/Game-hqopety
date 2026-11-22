@@ -172,7 +172,11 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 torqueAxis = Vector3.Normalize(torqueAxis);
 
             if (!MakeRoomForBody())
+            {
+                foreach (Mesh mesh in meshes)
+                    UnloadMesh(mesh);
                 return false;
+            }
 
             Body body = new()
             {
@@ -295,9 +299,10 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 
     private void ClearRedoEdits()
     {
-        foreach (Body[] edit in _redoEdits)
-            DisposeInactiveBodies(edit);
+        Body[][] expiredEdits = _redoEdits.ToArray();
         _redoEdits.Clear();
+        foreach (Body[] edit in expiredEdits)
+            DisposeInactiveBodies(edit);
     }
 
     private void DisposeInactiveBodies(Body[] edit)
