@@ -12,6 +12,159 @@ namespace RimClone.Render.Raylib;
 /// mesher: every output triangle is generated from eight 3D density samples and
 /// the same field is used for horizontal cut caps.
 /// </summary>
+internal sealed class VoxelMeshData
+{
+    public Vector3[] Vertices { get; }
+    public Vector3[] Normals { get; }
+    public byte[] Colors { get; }
+    public ushort[] Indices { get; }
+
+    public int VertexCount => Vertices.Length;
+    public int TriangleCount => Indices.Length / 3;
+
+    public VoxelMeshData(
+        Vector3[] vertices,
+        Vector3[] normals,
+        byte[] colors,
+        ushort[] indices)
+    {
+        Vertices = vertices;
+        Normals = normals;
+        Colors = colors;
+        Indices = indices;
+    }
+}
+
+/// <summary>
+/// Immutable-to-worker, incrementally captured source data for one terrain
+/// chunk. Capture reads the live field only on the render thread; workers never
+/// touch WorldMap or mutable voxel dictionaries.
+/// </summary>
+internal sealed class VoxelChunkBuildInput
+{
+    private const int Cells = SparseVoxelField.ChunkSize;
+    private const int SampleSide = Cells + 3;
+    private const int SamplePlane = SampleSide * SampleSide;
+    private const int SampleCount = SampleSide * SampleSide * SampleSide;
+    private const int CellCount = Cells * Cells * Cells;
+
+    public readonly float[] DensitySamples = new float[SampleCount];
+    public readonly ushort[] Materials = new ushort[CellCount];
+
+    public int ChunkX { get; }
+    public int ChunkY { get; }
+    public int ChunkZ { get; }
+    public int Step { get; }
+    public int OriginX { get; }
+    public int OriginY { get; }
+    public int OriginZ { get; }
+    public int FieldWidth { get; }
+    public int FieldHeight { get; }
+    public int FieldDepth { get; }
+    public int CaptureCursor { get; private set; }
+    public int CaptureCount => SampleCount + CellCount;
+    public bool IsComplete => CaptureCursor >= CaptureCount;
+
+    public VoxelChunkBuildInput(
+        IVoxelFieldSource field,
+        int chunkX,
+        int chunkY,
+        int chunkZ,
+        int step)
+    {
+        ChunkX = chunkX;
+        ChunkY = chunkY;
+        ChunkZ = chunkZ;
+        Step = step;
+        OriginX = chunkX * Cells * step;
+        OriginY = chunkY * Cells * step;
+        OriginZ = chunkZ * Cells * step;
+        FieldWidth = field.Width;
+        FieldHeight = field.Height;
+        FieldDepth = field.Depth;
+    }
+
+    public int CaptureNext(IVoxelFieldSource field, int maximumValues)
+    {
+        int end = Math.Min(CaptureCount, CaptureCursor + maximumValues);
+        int captured = 0;
+        while (CaptureCursor < end)
+        {
+            int index = CaptureCursor++;
+            if (index < SampleCount)
+            {
+                int x = index % SampleSide;
+                int y = index / SampleSide % SampleSide;
+                int z = index / SamplePlane;
+                int worldX = SparseVoxelField.GetChunkSampleCoordinate(ChunkX, x, Step);
+                int worldY = SparseVoxelField.GetChunkSampleCoordinate(ChunkY, y, Step);
+                int worldZ = SparseVoxelField.GetChunkSampleCoordinate(ChunkZ, z, Step);
+                DensitySamples[index] = field.GetDensity(worldX, worldY, worldZ);
+            }
+            else
+            {
+                int cellIndex = index - SampleCount;
+                int x = cellIndex % Cells;
+                int y = cellIndex / Cells % Cells;
+                int z = cellIndex / (Cells * Cells);
+                int worldX = Math.Clamp(OriginX + x * Step + Step / 2, 0, field.Width - 1);
+                int worldY = Math.Clamp(OriginY + y * Step + Step / 2, 0, field.Height - 1);
+                int worldZ = Math.Clamp(OriginZ + z * Step + Step / 2, 0, field.Depth - 1);
+                Materials[cellIndex] = field.GetMaterialId(worldX, worldY, worldZ);
+            }
+            captured++;
+        }
+        return captured;
+    }
+
+    public ushort GetMaterialId(int x, int y, int z)
+    {
+        if ((uint)x >= Cells || (uint)y >= Cells || (uint)z >= Cells)
+            return 0;
+        return Materials[x + y * Cells + z * Cells * Cells];
+    }
+
+    public float SampleDensity(float x, float y, float z)
+    {
+        float sx = (x - OriginX) / Step + 1f;
+        float sy = (y - OriginY) / Step + 1f;
+        float sz = (z - OriginZ) / Step + 1f;
+        int x0 = (int)MathF.Floor(sx);
+        int y0 = (int)MathF.Floor(sy);
+        int z0 = (int)MathF.Floor(sz);
+        float tx = sx - x0;
+        float ty = sy - y0;
+        float tz = sz - z0;
+
+        float c000 = GetSample(x0, y0, z0);
+        float c100 = GetSample(x0 + 1, y0, z0);
+        float c010 = GetSample(x0, y0 + 1, z0);
+        float c110 = GetSample(x0 + 1, y0 + 1, z0);
+        float c001 = GetSample(x0, y0, z0 + 1);
+        float c101 = GetSample(x0 + 1, y0, z0 + 1);
+        float c011 = GetSample(x0, y0 + 1, z0 + 1);
+        float c111 = GetSample(x0 + 1, y0 + 1, z0 + 1);
+        float x00 = Lerp(c000, c100, tx);
+        float x10 = Lerp(c010, c110, tx);
+        float x01 = Lerp(c001, c101, tx);
+        float x11 = Lerp(c011, c111, tx);
+        return Lerp(Lerp(x00, x10, ty), Lerp(x01, x11, ty), tz);
+    }
+
+    private float GetSample(int x, int y, int z)
+    {
+        if ((uint)x >= SampleSide || (uint)y >= SampleSide || (uint)z >= SampleSide)
+            return -1f;
+        return DensitySamples[x + y * SampleSide + z * SamplePlane];
+    }
+
+    private static float Lerp(float a, float b, float t) => a + (b - a) * t;
+}
+
+internal readonly record struct VoxelMeshBuildResult(
+    VoxelMeshData[] Surface,
+    VoxelMeshData[] CutCap);
+
 internal static class VoxelChunkMesher
 {
     private const int CellsPerAxis = SparseVoxelField.ChunkSize;
@@ -49,9 +202,9 @@ internal static class VoxelChunkMesher
         private readonly List<Vector3> _normals = new(MaximumVerticesPerMesh);
         private readonly List<Color> _colors = new(MaximumVerticesPerMesh);
         private readonly List<ushort> _indices = new(MaximumVerticesPerMesh);
-        private readonly List<Mesh> _output;
+        private readonly List<VoxelMeshData> _output;
 
-        public MeshBatch(List<Mesh> output) => _output = output;
+        public MeshBatch(List<VoxelMeshData> output) => _output = output;
 
         public void AddTriangle(
             SurfaceVertex a,
@@ -81,28 +234,21 @@ internal static class VoxelChunkMesher
             if (_vertices.Count == 0)
                 return;
 
-            Mesh mesh = new(_vertices.Count, _indices.Count / 3);
-            mesh.AllocVertices();
-            mesh.AllocNormals();
-            mesh.AllocColors();
-            mesh.AllocIndices();
-
-            _vertices.CopyTo(mesh.VerticesAs<Vector3>());
-            _normals.CopyTo(mesh.NormalsAs<Vector3>());
-
-            Span<byte> colorData = mesh.ColorsAs<byte>();
+            byte[] colors = new byte[_colors.Count * 4];
             for (int i = 0; i < _colors.Count; i++)
             {
                 int offset = i * 4;
-                colorData[offset] = _colors[i].R;
-                colorData[offset + 1] = _colors[i].G;
-                colorData[offset + 2] = _colors[i].B;
-                colorData[offset + 3] = _colors[i].A;
+                colors[offset] = _colors[i].R;
+                colors[offset + 1] = _colors[i].G;
+                colors[offset + 2] = _colors[i].B;
+                colors[offset + 3] = _colors[i].A;
             }
 
-            _indices.CopyTo(mesh.IndicesAs<ushort>());
-            UploadMesh(ref mesh, false);
-            _output.Add(mesh);
+            _output.Add(new VoxelMeshData(
+                _vertices.ToArray(),
+                _normals.ToArray(),
+                colors,
+                _indices.ToArray()));
 
             _vertices.Clear();
             _normals.Clear();
@@ -126,26 +272,57 @@ internal static class VoxelChunkMesher
         int step,
         TerrainPalette palette)
     {
-        if (step < 1)
-            throw new ArgumentOutOfRangeException(nameof(step));
+        VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ, step);
+        while (!input.IsComplete)
+            input.CaptureNext(field, input.CaptureCount);
+        return Upload(BuildSurfaceData(input, palette));
+    }
 
-        int originX = chunkX * CellsPerAxis * step;
-        int originY = chunkY * CellsPerAxis * step;
-        int originZ = chunkZ * CellsPerAxis * step;
+    public static Mesh[] Upload(VoxelMeshData[] data)
+    {
+        if (data.Length == 0)
+            return Array.Empty<Mesh>();
 
-        float[] density = new float[SampleCount];
-        for (int z = 0; z < SampleSide; z++)
-        for (int y = 0; y < SampleSide; y++)
-        for (int x = 0; x < SampleSide; x++)
+        Mesh[] meshes = new Mesh[data.Length];
+        int uploaded = 0;
+        try
         {
-            int worldX = SparseVoxelField.GetChunkSampleCoordinate(chunkX, x, step);
-            int worldY = SparseVoxelField.GetChunkSampleCoordinate(chunkY, y, step);
-            int worldZ = SparseVoxelField.GetChunkSampleCoordinate(chunkZ, z, step);
-            density[GetSampleIndex(x, y, z)] =
-                field.GetDensity(worldX, worldY, worldZ);
+            for (; uploaded < data.Length; uploaded++)
+            {
+                VoxelMeshData source = data[uploaded];
+                Mesh mesh = new(source.VertexCount, source.TriangleCount);
+                mesh.AllocVertices();
+                mesh.AllocNormals();
+                mesh.AllocColors();
+                mesh.AllocIndices();
+                source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
+                source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
+                source.Colors.CopyTo(mesh.ColorsAs<byte>());
+                source.Indices.CopyTo(mesh.IndicesAs<ushort>());
+                UploadMesh(ref mesh, false);
+                meshes[uploaded] = mesh;
+            }
+            return meshes;
         }
+        catch
+        {
+            for (int i = 0; i < uploaded; i++)
+                UnloadMesh(meshes[i]);
+            throw;
+        }
+    }
 
-        List<Mesh> output = new(2);
+    public static VoxelMeshData[] BuildSurfaceData(
+        VoxelChunkBuildInput input,
+        TerrainPalette palette)
+    {
+        int step = input.Step;
+        int originX = input.OriginX;
+        int originY = input.OriginY;
+        int originZ = input.OriginZ;
+        float[] density = input.DensitySamples;
+
+        List<VoxelMeshData> output = new(2);
         MeshBatch batch = new(output);
         Span<Vector3> positions = stackalloc Vector3[8];
         Span<Vector3> normals = stackalloc Vector3[8];
@@ -193,10 +370,7 @@ internal static class VoxelChunkMesher
             int materialX = originX + x * step + step / 2;
             int materialY = originY + y * step + step / 2;
             int materialZ = originZ + z * step + step / 2;
-            ushort materialId = field.GetMaterialId(
-                Math.Min(materialX, field.Width - 1),
-                Math.Min(materialY, field.Height - 1),
-                Math.Min(materialZ, field.Depth - 1));
+            ushort materialId = input.GetMaterialId(x, y, z);
             Color color = GetMaterialColor(palette, materialId);
 
             for (int tetra = 0; tetra < 6; tetra++)
