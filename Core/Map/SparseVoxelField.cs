@@ -88,6 +88,68 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             MaterialMask.AsSpan().SequenceEqual(other.MaterialMask);
     }
 
+    private sealed class ChunkFieldSnapshot : IVoxelFieldSource
+    {
+        private readonly Func<int, int, int, float> _baseDensity;
+        private readonly Func<int, int, int, ushort> _baseMaterial;
+        private readonly Dictionary<ChunkCoordinate, ChunkSnapshot> _chunks;
+
+        public int Width { get; }
+        public int Height { get; }
+        public int Depth { get; }
+
+        public ChunkFieldSnapshot(
+            int width,
+            int height,
+            int depth,
+            Func<int, int, int, float> baseDensity,
+            Func<int, int, int, ushort> baseMaterial,
+            Dictionary<ChunkCoordinate, ChunkSnapshot> chunks)
+        {
+            Width = width;
+            Height = height;
+            Depth = depth;
+            _baseDensity = baseDensity;
+            _baseMaterial = baseMaterial;
+            _chunks = chunks;
+        }
+
+        public float GetDensity(int x, int y, int z)
+        {
+            if (x < 0 || y < 0 || z < 0 ||
+                x >= Width || y > Height || z >= Depth)
+                return -1f;
+
+            ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
+            int index = x % ChunkSize +
+                (y % ChunkSize) * DensitySamplesPerAxis +
+                (z % ChunkSize) * SamplePlane;
+            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk) &&
+                chunk.DensityMask[index] != 0)
+                return chunk.Density[index] / DensityScale;
+
+            return _baseDensity(x, y, z);
+        }
+
+        public ushort GetMaterialId(int x, int y, int z)
+        {
+            if (x < 0 || y < 0 || z < 0 ||
+                x >= Width || y >= Height || z >= Depth ||
+                GetDensity(x, y, z) <= 0f)
+                return 0;
+
+            ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
+            int index = x % ChunkSize +
+                (y % ChunkSize) * ChunkSize +
+                (z % ChunkSize) * CellPlane;
+            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk) &&
+                chunk.MaterialMask[index] != 0)
+                return chunk.Materials[index];
+
+            return _baseMaterial(x, y, z);
+        }
+    }
+
     private sealed class EditHistoryCapture
     {
         public readonly Dictionary<ChunkCoordinate, ChunkSnapshot?> Before = new();
@@ -235,6 +297,57 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         Depth = depth;
         _baseDensity = baseDensity ?? throw new ArgumentNullException(nameof(baseDensity));
         _baseMaterial = baseMaterial ?? throw new ArgumentNullException(nameof(baseMaterial));
+    }
+
+    /// <summary>
+    /// Copies only edited storage chunks needed by one render chunk. The returned
+    /// source is immutable and safe for worker-thread density/material capture;
+    /// procedural base samplers are shared because they are read-only.
+    /// </summary>
+    public IVoxelFieldSource CreateChunkSnapshot(
+        int chunkX,
+        int chunkY,
+        int chunkZ,
+        int step)
+    {
+        if (chunkX < 0 || chunkY < 0 || chunkZ < 0 || step <= 0)
+            throw new ArgumentOutOfRangeException(nameof(step));
+
+        int originX = chunkX * ChunkSize * step;
+        int originY = chunkY * ChunkSize * step;
+        int originZ = chunkZ * ChunkSize * step;
+
+        int minX = Math.Max(0, originX - step);
+        int minY = Math.Max(0, originY - step);
+        int minZ = Math.Max(0, originZ - step);
+        int maxX = Math.Min(Width - 1, originX + (ChunkSize + 1) * step);
+        int maxY = Math.Min(Height, originY + (ChunkSize + 1) * step);
+        int maxZ = Math.Min(Depth - 1, originZ + (ChunkSize + 1) * step);
+
+        int minChunkX = minX / ChunkSize;
+        int minChunkY = minY / ChunkSize;
+        int minChunkZ = minZ / ChunkSize;
+        int maxChunkX = maxX / ChunkSize;
+        int maxChunkY = maxY / ChunkSize;
+        int maxChunkZ = maxZ / ChunkSize;
+
+        Dictionary<ChunkCoordinate, ChunkSnapshot> snapshots = new();
+        for (int z = minChunkZ; z <= maxChunkZ; z++)
+        for (int y = minChunkY; y <= maxChunkY; y++)
+        for (int x = minChunkX; x <= maxChunkX; x++)
+        {
+            ChunkCoordinate key = new(x, y, z);
+            if (_chunks.TryGetValue(key, out Chunk? chunk))
+                snapshots.Add(key, ChunkSnapshot.From(chunk));
+        }
+
+        return new ChunkFieldSnapshot(
+            Width,
+            Height,
+            Depth,
+            _baseDensity,
+            _baseMaterial,
+            snapshots);
     }
 
     public float GetDensity(int x, int y, int z)
