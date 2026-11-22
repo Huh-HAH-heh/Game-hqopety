@@ -1851,12 +1851,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             for (int i = 0; i < tail; i++)
                 componentMask[queue[i]] = 1;
 
-            int fineMinX = minX + componentMinX * scanStep;
-            int fineMinY = minY + componentMinY * scanStep;
-            int fineMinZ = minZ + componentMinZ * scanStep;
-            int fineMaxX = Math.Min(Width, minX + (componentMaxX + 1) * scanStep);
-            int fineMaxY = Math.Min(Height, minY + (componentMaxY + 1) * scanStep);
-            int fineMaxZ = Math.Min(Depth, minZ + (componentMaxZ + 1) * scanStep);
+            // Keep one 0.2 m air shell around the component so the
+            // detached mesh retains the source SDF gradients at its surface.
+            int fineMinX = minX + (componentMinX - 1) * scanStep;
+            int fineMinY = minY + (componentMinY - 1) * scanStep;
+            int fineMinZ = minZ + (componentMinZ - 1) * scanStep;
+            int fineMaxX = Math.Min(Width, minX + (componentMaxX + 2) * scanStep);
+            int fineMaxY = Math.Min(Height, minY + (componentMaxY + 2) * scanStep);
+            int fineMaxZ = Math.Min(Depth, minZ + (componentMaxZ + 2) * scanStep);
             int fragmentWidth = fineMaxX - fineMinX + 2;
             int fragmentHeight = fineMaxY - fineMinY + 2;
             int fragmentDepth = fineMaxZ - fineMinZ + 2;
@@ -1880,11 +1882,22 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     int coarseY = (y - minY) / scanStep;
                     int coarseZ = (z - minZ) / scanStep;
                     int coarseIndex = coarseX + coarseY * nx + coarseZ * nx * ny;
-                    if (componentMask[coarseIndex] == 0)
+                    bool inComponent = componentMask[coarseIndex] != 0;
+                    bool inAirHalo =
+                        !inComponent &&
+                        ((coarseX > 0 && componentMask[coarseIndex - 1] != 0) ||
+                         (coarseX + 1 < nx && componentMask[coarseIndex + 1] != 0) ||
+                         (coarseY > 0 && componentMask[coarseIndex - nx] != 0) ||
+                         (coarseY + 1 < ny && componentMask[coarseIndex + nx] != 0) ||
+                         (coarseZ > 0 && componentMask[coarseIndex - nx * ny] != 0) ||
+                         (coarseZ + 1 < nz && componentMask[coarseIndex + nx * ny] != 0));
+                    if (!inComponent && !inAirHalo)
                         continue;
 
                     float oldDensity = GetDensity(x, y, z);
-                    if (oldDensity <= 0f)
+                    // The shell is for SDF interpolation only. Never pull a
+                    // second positive component into this fragment's bounds.
+                    if (oldDensity > 0f && !inComponent)
                         continue;
 
                     int localX = x - fineMinX + 1;
@@ -1893,15 +1906,18 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     int localIndex = localX +
                         localY * fragmentWidth +
                         localZ * fragmentWidth * fragmentHeight;
+                    density[localIndex] = checked((short)Math.Clamp(
+                        (int)MathF.Round(oldDensity * DensityScale),
+                        short.MinValue,
+                        short.MaxValue));
+
+                    if (oldDensity <= 0f)
+                        continue;
 
                     ushort materialId = GetMaterialId(x, y, z);
                     if (materialId == 0)
                         materialId = 1;
 
-                    density[localIndex] = checked((short)Math.Clamp(
-                        (int)MathF.Round(oldDensity * DensityScale),
-                        short.MinValue,
-                        short.MaxValue));
                     materials[localIndex] = materialId;
                     massKg += VoxelMaterialCatalog.Get(materialId).MassPerVoxelKg;
                     solidSamples++;
