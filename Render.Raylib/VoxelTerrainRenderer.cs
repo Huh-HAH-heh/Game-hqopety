@@ -677,6 +677,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int cutLayer)
     {
         if (entry.RunningBuild != null ||
+            entry.NeedsCapture ||
             entry.Capture != null ||
             entry.BuildQueued ||
             entry.ReadyBuild.HasValue ||
