@@ -389,13 +389,17 @@ public static class RaylibTerrainViewer
 
                         if (IsKeyPressed(KeyboardKey.F7))
                         {
-                            if (!worldMap.Voxels.Undo())
+                            if (worldMap.Voxels.Undo())
+                                renderer.UndoVoxelEdit();
+                            else
                                 Console.WriteLine("[Voxel] Nothing to undo.");
                         }
 
                         if (IsKeyPressed(KeyboardKey.F8))
                         {
-                            if (!worldMap.Voxels.Redo())
+                            if (worldMap.Voxels.Redo())
+                                renderer.RedoVoxelEdit();
+                            else
                                 Console.WriteLine("[Voxel] Nothing to redo.");
                         }
 
@@ -452,6 +456,7 @@ public static class RaylibTerrainViewer
                                     hitNormal * voxelBrushRadiusMeters * 0.2f;
                                 if (voxelEditMode == VoxelEditMode.CarveCapsule)
                                 {
+                                    renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
                                         worldMap.CarveVoxelCapsule(
@@ -465,9 +470,11 @@ public static class RaylibTerrainViewer
                                         LogDetachedFragments(renderer.DetachLooseFragments(
                                             worldMap.Voxels, fragmentCenter, fragmentHalfExtents));
                                     }
+                                    renderer.EndVoxelEdit();
                                 }
                                 else if (voxelEditMode == VoxelEditMode.AddCapsule)
                                 {
+                                    renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
                                         worldMap.AddVoxelCapsule(
@@ -476,6 +483,7 @@ public static class RaylibTerrainViewer
                                             voxelBrushRadiusMeters,
                                             voxelBrushMaterial);
                                     }
+                                    renderer.EndVoxelEdit();
                                 }
                                 else if (voxelEditMode is VoxelEditMode.CarveBox or VoxelEditMode.AddBox)
                                 {
@@ -494,6 +502,7 @@ public static class RaylibTerrainViewer
                                         maximum.Y += voxelBrushRadiusMeters;
                                     }
 
+                                    renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
                                         if (voxelEditMode == VoxelEditMode.CarveBox)
@@ -511,9 +520,11 @@ public static class RaylibTerrainViewer
                                                 minimum, maximum, voxelBrushMaterial);
                                         }
                                     }
+                                    renderer.EndVoxelEdit();
                                 }
                                 else if (voxelEditMode is VoxelEditMode.CarveRamp or VoxelEditMode.AddRamp)
                                 {
+                                    renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
                                         if (voxelEditMode == VoxelEditMode.CarveRamp)
@@ -540,6 +551,7 @@ public static class RaylibTerrainViewer
                                                 voxelBrushMaterial);
                                         }
                                     }
+                                    renderer.EndVoxelEdit();
                                 }
                             }
                             voxelStrokeActive = false;
@@ -700,9 +712,12 @@ public static class RaylibTerrainViewer
         float radiusMeters,
         ushort materialId)
     {
-        using IDisposable edit = worldMap.Voxels.BeginUndoableEdit();
-        Vector3 carveCenter = hitPosition - hitNormal * radiusMeters * 0.2f;
-        switch (mode)
+        renderer.BeginVoxelEdit();
+        try
+        {
+            using IDisposable edit = worldMap.Voxels.BeginUndoableEdit();
+            Vector3 carveCenter = hitPosition - hitNormal * radiusMeters * 0.2f;
+            switch (mode)
         {
             case VoxelEditMode.CarveSphere:
                 worldMap.CarveVoxelSphere(carveCenter, radiusMeters);
@@ -734,6 +749,11 @@ public static class RaylibTerrainViewer
                     materialId,
                     strength: 0.9f);
                 break;
+            }
+        }
+        finally
+        {
+            renderer.EndVoxelEdit();
         }
     }
 
