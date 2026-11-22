@@ -18,10 +18,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 {
     private const int ChunkCells = SparseVoxelField.ChunkSize;
     private const int MaximumCachedChunks = 1800;
-    private const int MaximumCoarseBuildsPerFrame = 10;
-    private const int MaximumMediumBuildsPerFrame = 5;
-    private const int MaximumFineBuildsPerFrame = 2;
-    private const int MaximumCutBuildsPerFrame = 20;
     private const int MaximumLodPrewarmBuildsPerFrame = 2;
 
     private const string VertexShader = """
@@ -191,6 +187,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public double CpuCaptureMillisecondsLastFrame { get; private set; }
     public double GpuUploadMillisecondsLastFrame { get; private set; }
     public int RunningMeshJobs => _activeMeshWorkers;
+    public double CpuCaptureMilliseconds => CpuCaptureMillisecondsLastFrame;
+    public double GpuUploadMilliseconds => GpuUploadMillisecondsLastFrame;
     public int PendingMeshJobs => _buildQueue.Count + _chunks.Values.Count(static e => e.Capture != null);
     public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
     public int CachedChunks => _chunks.Count;
