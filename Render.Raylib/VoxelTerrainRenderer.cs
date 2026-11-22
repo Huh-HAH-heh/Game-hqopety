@@ -90,6 +90,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public bool CaptureCutCap;
         public int CaptureCutLayer = int.MinValue;
         public bool BuildQueued;
+        public bool NeedsCapture;
         public VoxelChunkBuildInput? Capture;
         public BuildRequest? RunningBuild;
         public VoxelMeshBuildResult? ReadyBuild;
@@ -683,8 +684,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _pendingCaptures + _buildQueue.Count >= MaximumPendingMeshJobs)
             return;
 
-        entry.Capture = new VoxelChunkBuildInput(
-            field, key.X, key.Y, key.Z, key.Step);
+        entry.NeedsCapture = true;
         entry.CaptureRevision = entry.RequestRevision;
         entry.CapturePaletteVersion = _paletteVersion;
         entry.CaptureBaseVersion = field.BaseVersion;
@@ -698,32 +698,39 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         Stopwatch timer = Stopwatch.StartNew();
         CpuCaptureMillisecondsLastFrame = 0d;
 
-        List<ChunkEntry> pending = new();
-        foreach (ChunkEntry entry in _chunks.Values)
+        List<(ChunkKey Key, ChunkEntry Entry)> pending = new();
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (entry.Capture != null)
-                pending.Add(entry);
+            if (entry.NeedsCapture || entry.Capture != null)
+                pending.Add((key, entry));
         }
         pending.Sort(static (a, b) =>
-            a.PriorityDistanceSquared.CompareTo(b.PriorityDistanceSquared));
+            a.Entry.PriorityDistanceSquared.CompareTo(b.Entry.PriorityDistanceSquared));
 
-        foreach (ChunkEntry entry in pending)
+        foreach ((ChunkKey key, ChunkEntry entry) in pending)
         {
             if (timer.Elapsed.TotalMilliseconds >= CaptureBudgetMilliseconds)
                 break;
-
-            VoxelChunkBuildInput? input = entry.Capture;
-            if (input == null)
-                continue;
 
             if (entry.CaptureRevision != entry.RequestRevision ||
                 entry.CapturePaletteVersion != _paletteVersion ||
                 entry.CaptureBaseVersion != field.BaseVersion)
             {
                 entry.Capture = null;
-                _pendingCaptures--;
+                entry.NeedsCapture = false;
+                _pendingCaptures = Math.Max(0, _pendingCaptures - 1);
                 continue;
             }
+
+            VoxelChunkBuildInput? input = entry.Capture;
+            if (input == null && entry.NeedsCapture)
+            {
+                input = new VoxelChunkBuildInput(
+                    field, key.X, key.Y, key.Z, key.Step);
+                entry.Capture = input;
+            }
+            if (input == null)
+                continue;
 
             // Check the clock every 16 samples. Field sampling is the only
             // render-thread CPU work in this stage; it is deliberately sliced
@@ -750,6 +757,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Palette = _palette
             };
             entry.Capture = null;
+            entry.NeedsCapture = false;
             _pendingCaptures--;
             entry.BuildQueued = true;
             _buildQueue.Enqueue(request);
@@ -942,9 +950,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private void InvalidatePendingBuild(ChunkEntry entry)
     {
         entry.RunningBuild?.Cancellation.Cancel();
-        if (entry.Capture != null)
+        if (entry.NeedsCapture || entry.Capture != null)
         {
             entry.Capture = null;
+            entry.NeedsCapture = false;
             _pendingCaptures = Math.Max(0, _pendingCaptures - 1);
         }
         entry.BuildQueued = false;
