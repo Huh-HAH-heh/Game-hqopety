@@ -35,6 +35,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         public Vector3 AngularVelocity;
         public float QuietTime;
         public bool Sleeping;
+        public bool Active = true;
 
         public void Dispose()
         {
@@ -44,10 +45,78 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     }
 
     private readonly List<Body> _bodies = new(MaximumBodies);
+    private readonly List<Body[]> _undoEdits = new();
+    private readonly List<Body[]> _redoEdits = new();
+    private List<Body>? _pendingEdit;
+    private int _activeBodyCount;
     private bool _disposed;
 
-    public int Count => _bodies.Count;
-    public int AvailableSlots => Math.Max(0, MaximumBodies - _bodies.Count);
+    public int Count => _activeBodyCount;
+    public int AvailableSlots => Math.Max(0, MaximumBodies - _activeBodyCount);
+
+    public void BeginEdit()
+    {
+        ThrowIfDisposed();
+        if (_pendingEdit != null)
+            throw new InvalidOperationException("A dynamic fragment edit is already active.");
+        _pendingEdit = new List<Body>(1);
+    }
+
+    public void EndEdit()
+    {
+        ThrowIfDisposed();
+        if (_pendingEdit == null)
+            return;
+
+        _undoEdits.Add(_pendingEdit.ToArray());
+        _pendingEdit = null;
+        ClearRedoEdits();
+
+        while (_undoEdits.Count > 16)
+        {
+            Body[] expired = _undoEdits[0];
+            _undoEdits.RemoveAt(0);
+            DisposeInactiveBodies(expired);
+        }
+    }
+
+    public void UndoLastEdit()
+    {
+        ThrowIfDisposed();
+        if (_pendingEdit != null || _undoEdits.Count == 0)
+            return;
+
+        int last = _undoEdits.Count - 1;
+        Body[] edit = _undoEdits[last];
+        _undoEdits.RemoveAt(last);
+        foreach (Body body in edit)
+        {
+            if (!body.Active)
+                continue;
+            body.Active = false;
+            _activeBodyCount--;
+        }
+        _redoEdits.Add(edit);
+    }
+
+    public void RedoLastEdit()
+    {
+        ThrowIfDisposed();
+        if (_pendingEdit != null || _redoEdits.Count == 0)
+            return;
+
+        int last = _redoEdits.Count - 1;
+        Body[] edit = _redoEdits[last];
+        _redoEdits.RemoveAt(last);
+        foreach (Body body in edit)
+        {
+            if (body.Active)
+                continue;
+            body.Active = true;
+            _activeBodyCount++;
+        }
+        _undoEdits.Add(edit);
+    }
 
     public bool TryAdd(
         VoxelFragmentSnapshot snapshot,
@@ -102,6 +171,9 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             else
                 torqueAxis = Vector3.Normalize(torqueAxis);
 
+            if (!MakeRoomForBody())
+                return false;
+
             Body body = new()
             {
                 Meshes = meshes.ToArray(),
@@ -113,6 +185,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 AngularVelocity = torqueAxis * 0.65f
             };
             _bodies.Add(body);
+            _activeBodyCount++;
+            _pendingEdit?.Add(body);
             return true;
         }
         catch
@@ -150,6 +224,9 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         ThrowIfDisposed();
         foreach (Body body in _bodies)
         {
+            if (!body.Active)
+                continue;
+
             Matrix4x4 transform =
                 Matrix4x4.CreateTranslation(-body.LocalPivot) *
                 Matrix4x4.CreateFromQuaternion(body.Rotation) *
@@ -165,6 +242,74 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         foreach (Body body in _bodies)
             body.Dispose();
         _bodies.Clear();
+        _undoEdits.Clear();
+        _redoEdits.Clear();
+        _pendingEdit = null;
+        _activeBodyCount = 0;
+    }
+
+    private bool MakeRoomForBody()
+    {
+        if (_bodies.Count < MaximumBodies)
+            return true;
+
+        int inactiveIndex = _bodies.FindIndex(static body => !body.Active);
+        if (inactiveIndex < 0)
+            return false;
+
+        Body expired = _bodies[inactiveIndex];
+        expired.Dispose();
+        _bodies.RemoveAt(inactiveIndex);
+        RemoveFromHistory(expired);
+        return true;
+    }
+
+    private void RemoveFromHistory(Body body)
+    {
+        for (int i = 0; i < _undoEdits.Count; i++)
+            _undoEdits[i] = RemoveBody(_undoEdits[i], body);
+        for (int i = 0; i < _redoEdits.Count; i++)
+            _redoEdits[i] = RemoveBody(_redoEdits[i], body);
+        _pendingEdit?.Remove(body);
+    }
+
+    private static Body[] RemoveBody(Body[] source, Body target)
+    {
+        int remaining = 0;
+        for (int i = 0; i < source.Length; i++)
+            if (!ReferenceEquals(source[i], target))
+                remaining++;
+
+        if (remaining == source.Length)
+            return source;
+
+        Body[] result = new Body[remaining];
+        int write = 0;
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (!ReferenceEquals(source[i], target))
+                result[write++] = source[i];
+        }
+        return result;
+    }
+
+    private void ClearRedoEdits()
+    {
+        foreach (Body[] edit in _redoEdits)
+            DisposeInactiveBodies(edit);
+        _redoEdits.Clear();
+    }
+
+    private void DisposeInactiveBodies(Body[] edit)
+    {
+        foreach (Body body in edit)
+        {
+            if (body.Active)
+                continue;
+            body.Dispose();
+            _bodies.Remove(body);
+            RemoveFromHistory(body);
+        }
     }
 
     private static void Integrate(
@@ -252,7 +397,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             for (int j = i + 1; j < _bodies.Count; j++)
             {
                 Body second = _bodies[j];
-                if (first.Sleeping && second.Sleeping)
+                if (!first.Active || !second.Active ||
+                    (first.Sleeping && second.Sleeping))
                     continue;
 
                 float firstRadius = first.HalfExtents.Length();
