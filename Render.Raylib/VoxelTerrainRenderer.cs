@@ -532,6 +532,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         CollectCompletedBuilds(field);
         UploadReadyMeshes();
+        double remainingUploadBudget = Math.Max(
+            0d,
+            GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
+        if (remainingUploadBudget > 0d)
+        {
+            GpuUploadMillisecondsLastFrame +=
+                _dynamicFragments.UploadPendingMeshes(remainingUploadBudget);
+        }
         ProcessCaptureJobs(field);
         StartQueuedBuilds(field);
 
@@ -610,7 +618,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int detached = 0;
         foreach (VoxelFragmentSnapshot fragment in fragments)
         {
-            if (_dynamicFragments.TryAdd(fragment, centerMeters, _palette))
+            if (_dynamicFragments.TryAdd(fragment, centerMeters, _palette, field))
             {
                 detached++;
             }
