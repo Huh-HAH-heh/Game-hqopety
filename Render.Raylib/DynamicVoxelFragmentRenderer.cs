@@ -212,10 +212,11 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             AngularVelocity = torqueAxis * 0.65f
         };
 
+        CancellationToken meshToken = body.MeshBuildCancellation.Token;
         body.MeshBuildTask = Task.Run(() =>
         {
             List<VoxelMeshData> result = new();
-            CancellationToken token = body.MeshBuildCancellation.Token;
+            CancellationToken token = meshToken;
             for (int z = 0; z < chunksZ; z++)
             for (int y = 0; y < chunksY; y++)
             for (int x = 0; x < chunksX; x++)
@@ -346,8 +347,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             if (!body.Active)
                 continue;
 
-            if (body.Sleeping && body.MergeJob == null &&
-                !body.Baked && !body.MergeRejected)
+            if (body.Sleeping && body.Meshes.Length > 0 &&
+                body.MergeJob == null && !body.Baked && !body.MergeRejected)
             {
                 try
                 {
