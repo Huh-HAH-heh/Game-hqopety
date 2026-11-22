@@ -604,6 +604,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.ReleaseBakedBodies(
             bounds => AreCachedMeshesCurrent(bounds, field, step));
 
+        if ((_frame % 120) == 0)
+        {
+            string summary =
+                $"frame={_frame} lod={step} candidates={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
+                $"captureMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
+                $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} " +
+                $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
+                $"workers={_activeMeshWorkers} pending={_buildQueue.Count + _pendingCaptures} " +
+                $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
+                $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
+                $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
+                $"lastMeshStep={LastBuildStep} vertices={LastBuildVertices} triangles={LastBuildTriangles}";
+            _logger.Write("FRAME_SUMMARY", summary);
+            Console.WriteLine($"[TERRAIN][PERF] {summary}");
+        }
+
         SetLighting();
         SetCutShader(cutEnabled, effectiveCutHeight);
 
@@ -1022,6 +1038,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Mesh mesh = VoxelChunkMesher.UploadOne(
                     result.Surface[entry.SurfaceUploadIndex++]);
                 entry.UploadingSurface.Add(mesh);
+                GpuUploadsLastFrame++;
+                _totalGpuUploads++;
                 if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                     break;
             }
@@ -1037,6 +1055,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     Mesh mesh = VoxelChunkMesher.UploadOne(
                         result.CutCap[entry.CutUploadIndex++]);
                     entry.UploadingCutCap.Add(mesh);
+                    GpuUploadsLastFrame++;
+                    _totalGpuUploads++;
                     if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                         break;
                 }
@@ -1443,6 +1463,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _chunks.Clear();
         // UnloadMaterial also releases the non-default shader assigned to it.
         UnloadMaterial(_material);
+        _logger.Write(
+            "RENDERER_STOP",
+            $"requests={_totalBuildRequests} completed={_totalBuildCompleted} cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} repeats={_totalRepeatedBuilds} gpuUploads={_totalGpuUploads}");
+        _logger.Dispose();
         _disposed = true;
     }
 
