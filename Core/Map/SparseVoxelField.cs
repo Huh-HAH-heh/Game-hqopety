@@ -19,7 +19,7 @@ namespace Core.Map;
 /// This keeps the 2304 x 2304 x 50 m world sparse while retaining a genuine
 /// three-dimensional field for caves, arches, overhangs and CSG terrain edits.
 /// </summary>
-public sealed class SparseVoxelField
+public sealed class SparseVoxelField : IVoxelFieldSource
 {
     public const int ChunkSize = 16;
     public const int DensitySamplesPerAxis = ChunkSize;
