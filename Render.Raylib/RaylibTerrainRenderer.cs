@@ -418,10 +418,10 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _densityVoxelRenderer?.BeginVoxelEdit();
     }
 
-    public void EndVoxelEdit()
+    public void EndVoxelEdit(bool commit)
     {
         ThrowIfDisposed();
-        _densityVoxelRenderer?.EndVoxelEdit();
+        _densityVoxelRenderer?.EndVoxelEdit(commit);
     }
 
     public void UndoVoxelEdit()
