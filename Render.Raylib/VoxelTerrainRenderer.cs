@@ -232,6 +232,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             entry.SurfaceDirty = true;
             entry.CutDirty = true;
+            entry.RequestRevision++;
+            entry.FailedRevision = int.MinValue;
+            InvalidatePendingBuild(entry);
         }
     }
 
@@ -337,13 +340,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         HashSet<ChunkKey> visibleKeys = new();
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
             new(candidates.Count);
-        int baseBuilds = 0;
-        int cutBuilds = 0;
-        int maximumBaseBuilds = step >= 40
-            ? MaximumCoarseBuildsPerFrame
-            : step >= 10
-                ? MaximumMediumBuildsPerFrame
-                : MaximumFineBuildsPerFrame;
+
 
         int cutSampleY = (int)MathF.Floor(
             cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f);
@@ -395,47 +392,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
-
-            if (surfaceStale && baseBuilds < maximumBaseBuilds)
-            {
-                Mesh[] replacement = VoxelChunkMesher.BuildSurface(
-                    field, key.X, key.Y, key.Z, step, _palette);
-
-                Mesh[] previous = entry.Surface;
-                entry.Surface = replacement;
-                entry.BaseVersion = field.BaseVersion;
-                entry.PaletteVersion = _paletteVersion;
-                entry.SurfaceDirty = false;
-                entry.Built = true;
-                foreach (Mesh mesh in previous)
-                    UnloadMesh(mesh);
-
-                RebuiltChunks++;
-                baseBuilds++;
-            }
-
-            if (cutEnabled && _cutLayerStableFrames >= CutCapSettleFrames &&
+            bool needsCutCap = cutEnabled &&
+                _cutLayerStableFrames >= CutCapSettleFrames &&
                 key.Y == cutChunkY &&
-                (entry.CutLayer != cutLayer || entry.CutDirty) &&
-                cutBuilds < MaximumCutBuildsPerFrame)
-            {
-                Mesh[] replacement = VoxelChunkMesher.BuildCutCap(
-                    field, key.X, key.Z, step, effectiveCutHeight, _palette);
+                (entry.CutLayer != cutLayer || entry.CutDirty);
 
-                Mesh[] previous = entry.CutCap;
-                entry.CutCap = replacement;
-                entry.CutLayer = cutLayer;
-                entry.CutDirty = false;
-                foreach (Mesh mesh in previous)
-                    UnloadMesh(mesh);
+            if (surfaceStale || needsCutCap)
+                RequestBuild(field, key, entry, needsCutCap, cutLayer);
 
-                RebuiltCutCaps++;
-                cutBuilds++;
-            }
-            else if (!cutEnabled && entry.CutCap.Length > 0)
-            {
+            if (!cutEnabled && entry.CutCap.Length > 0)
                 ClearCutCap(entry);
-            }
 
             candidateEntries.Add((candidate, entry));
         }
@@ -558,6 +524,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             maximumViewDistanceMeters,
             step,
             cameraDistance);
+
+        CollectCompletedBuilds(field);
+        UploadReadyMeshes();
+        ProcessCaptureJobs(field);
+        StartQueuedBuilds(field);
 
         if (_chunks.Count > MaximumCachedChunks)
             EvictUnusedChunks();
@@ -922,19 +893,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (!stale)
                 continue;
 
-            Mesh[] replacement = VoxelChunkMesher.BuildSurface(
-                field, key.X, key.Y, key.Z, key.Step, _palette);
-            Mesh[] previous = entry.Surface;
-            entry.Surface = replacement;
-            entry.BaseVersion = field.BaseVersion;
-            entry.PaletteVersion = _paletteVersion;
-            entry.SurfaceDirty = false;
-            entry.Built = true;
-            foreach (Mesh mesh in previous)
-                UnloadMesh(mesh);
-
-            RebuiltChunks++;
-            LodPrewarmBuilds++;
+            RequestBuild(field, key, entry, buildCutCap: false, cutLayer: -1);
             builds++;
         }
     }
