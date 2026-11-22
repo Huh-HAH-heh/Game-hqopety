@@ -1864,7 +1864,7 @@ public sealed class SparseVoxelField
                     changedMaxZ = Math.Max(changedMaxZ, z + 1);
                 }
 
-                if (solidSamples >= minimumCoarseCells * 4 && massKg > 0f)
+                if (solidSamples >= minimumCoarseCells && massKg > 0f)
                 {
                     fragments.Add(new VoxelFragmentSnapshot(
                         density,
