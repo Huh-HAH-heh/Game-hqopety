@@ -96,7 +96,7 @@ This is a bounded first implementation, not a full rigid-body fracture solver: t
 
 ### LOD quality and pipeline diagnostics
 
-Runtime voxel surface LOD steps are 1, 2 and 4 source voxels (0.1, 0.2 and 0.4 m). Step 4 is now deferred to distant views beyond roughly 400 m; the ordinary close/mid-distance range stays at step 1 or 2. Steps 8 and 40 remain benchmark-only quality probes: on the narrow-ridge fixture, maximum SDF error was 0.38 m at step 2, 0.98 m at step 4, 1.19 m at step 8 and 1.28 m at step 40. The previous 5/10/40 runtime tiers sampled at up to 4 m. The LOD regression executable measures SDF reconstruction error, checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction at runtime and legacy LOD steps.
+Runtime voxel surface LOD uses six screen-space tiers: 1, 2, 4, 8, 16 and 40 source voxels (0.1, 0.2, 0.4, 0.8, 1.6 and 4.0 m). Fine tiers are used for close inspection; coarse tiers are reserved for zoomed-out views where their projected footprint is small. On the narrow-ridge fixture, maximum SDF error was 0.38 m at step 2, 0.98 m at step 4, 1.19 m at step 8 and 1.28 m at step 40. The viewer limits visible candidates to 1800 and retains at most 2400 cached chunks. The LOD regression executable measures SDF reconstruction error, checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction at runtime and legacy LOD steps.
 
 Run locally:
 
