@@ -124,6 +124,14 @@ internal sealed class VoxelChunkBuildInput
         return Materials[x + y * Cells + z * Cells * Cells];
     }
 
+    public ushort GetMaterialAtWorldPosition(float x, float y, float z)
+    {
+        int localX = (int)MathF.Floor((x - OriginX) / Step);
+        int localY = (int)MathF.Floor((y - OriginY) / Step);
+        int localZ = (int)MathF.Floor((z - OriginZ) / Step);
+        return GetMaterialId(localX, localY, localZ);
+    }
+
     public float SampleDensity(float x, float y, float z)
     {
         float sx = (x - OriginX) / Step + 1f;
@@ -171,7 +179,7 @@ internal static class VoxelChunkMesher
     private const int SampleSide = CellsPerAxis + 3;
     private const int SamplePlane = SampleSide * SampleSide;
     private const int SampleCount = SampleSide * SampleSide * SampleSide;
-    private const int MaximumVerticesPerMesh = 60_000;
+    private const int MaximumVerticesPerMesh = 6_000;
 
     private static readonly int[] CornerX = { 0, 1, 1, 0, 0, 1, 1, 0 };
     private static readonly int[] CornerY = { 0, 0, 1, 1, 0, 0, 1, 1 };
@@ -278,6 +286,21 @@ internal static class VoxelChunkMesher
         return Upload(BuildSurfaceData(input, palette));
     }
 
+    public static Mesh UploadOne(VoxelMeshData source)
+    {
+        Mesh mesh = new(source.VertexCount, source.TriangleCount);
+        mesh.AllocVertices();
+        mesh.AllocNormals();
+        mesh.AllocColors();
+        mesh.AllocIndices();
+        source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
+        source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
+        source.Colors.CopyTo(mesh.ColorsAs<byte>());
+        source.Indices.CopyTo(mesh.IndicesAs<ushort>());
+        UploadMesh(ref mesh, false);
+        return mesh;
+    }
+
     public static Mesh[] Upload(VoxelMeshData[] data)
     {
         if (data.Length == 0)
@@ -289,18 +312,7 @@ internal static class VoxelChunkMesher
         {
             for (; uploaded < data.Length; uploaded++)
             {
-                VoxelMeshData source = data[uploaded];
-                Mesh mesh = new(source.VertexCount, source.TriangleCount);
-                mesh.AllocVertices();
-                mesh.AllocNormals();
-                mesh.AllocColors();
-                mesh.AllocIndices();
-                source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
-                source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
-                source.Colors.CopyTo(mesh.ColorsAs<byte>());
-                source.Indices.CopyTo(mesh.IndicesAs<ushort>());
-                UploadMesh(ref mesh, false);
-                meshes[uploaded] = mesh;
+                meshes[uploaded] = UploadOne(data[uploaded]);
             }
             return meshes;
         }
