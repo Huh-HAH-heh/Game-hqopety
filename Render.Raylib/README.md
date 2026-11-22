@@ -37,7 +37,11 @@ The data remains at 0.1 m resolution. The renderer changes only its sampling ste
 | Far | 1.0 m |
 | Very far | 4.0 m |
 
-Chunk meshes are cached in 3D coordinates. A local edit dirties only intersecting chunks and neighbours whose sampling halo overlaps the edit. Mesh builds and cut-cap refreshes have per-frame budgets; the renderer keeps the sparse source data independent from visual LOD.
+Chunk meshes are cached in 3D coordinates and each LOD tier is retained independently. A local edit dirties only intersecting chunks and neighbours whose sampling halo overlaps the edit.
+
+**Meshing pipeline:** the render thread incrementally captures at most 0.25 ms of live voxel samples per frame. The immutable chunk snapshot is processed by up to two cancellable CPU workers; detached-fragment meshes use one additional serialized worker. Workers produce only vertex/normal/color/index arrays and never call Raylib or OpenGL. Stale results are cancelled or discarded using per-chunk request revisions.
+
+The render thread uploads completed mesh packets in chunks of at most 6,000 vertices, with a target total GPU-upload budget of 0.55 ms per frame (shared with detached-fragment meshes). The old valid mesh remains visible until every replacement packet has been uploaded, then the renderer swaps the mesh set atomically. The pending queue is capped at 48 requests and prioritizes chunks nearest the camera. HUD reports CPU capture time, GPU upload time, active workers and queued jobs. The upload target is measured at runtime; a single GPU-driver upload call cannot be preempted once submitted, so the HUD is used to detect hardware-specific overruns.
 
 ## Terrain editing
 
