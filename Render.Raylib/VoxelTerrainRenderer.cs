@@ -545,7 +545,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ProcessCaptureJobs(field);
         StartQueuedBuilds(field);
 
-        if (_chunks.Count > MaximumCachedChunks)
+        // Cache pruning is deliberately infrequent. Chunks from the
+        // previous camera position remain reusable for four seconds.
+        if (_chunks.Count > MaximumCachedChunks && (_frame % 30) == 0)
             EvictUnusedChunks();
 
         _dynamicFragments.ReleaseBakedBodies(
@@ -598,8 +600,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count;
 
-        if ((_frame % 90) == 0 && _chunks.Count > MaximumCachedChunks / 2)
-            EvictUnusedChunks();
+
     }
 
     public int DetachLooseFragments(
@@ -1121,33 +1122,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
-        // The previous implementation used the 1,800 entry value only as a
-        // trigger for age-based eviction. Recent chunks from multiple LOD tiers
-        // could therefore grow without bound (e.g. 2,851 cached chunks). Enforce
-        // the actual budget with LRU eviction while pinning everything drawn.
-        if (_chunks.Count <= MaximumCachedChunks)
-            return;
-
-        List<(ChunkKey Key, long LastSeen)> candidates = new();
-        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
-        {
-            // The 1,800 value is a soft cache target. Pending work is more
-            // valuable than a strict count: evicting it creates endless
-            // recapture/rebuild loops and can leave the initial frame blank.
-            if (!protectedKeys.Contains(key) && !HasPendingWork(entry))
-                candidates.Add((key, entry.LastSeenFrame));
-        }
-
-        candidates.Sort(static (a, b) => a.LastSeen.CompareTo(b.LastSeen));
-        int removeCount = _chunks.Count - MaximumCachedChunks;
-        for (int i = 0; i < candidates.Count && removeCount > 0; i++)
-        {
-            ChunkKey key = candidates[i].Key;
-            if (!_chunks.Remove(key, out ChunkEntry? entry))
-                continue;
-            entry.Dispose();
-            removeCount--;
-        }
+        // MaximumCachedChunks is a high-water target, not a hard limit.
+        // Recently visible LODs stay cached to avoid regenerating them during
+        // ordinary zoom and pan reversals. Cold entries are removed above.
     }
 
     private void PrepareAdjacentLodCache(
