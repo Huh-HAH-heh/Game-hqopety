@@ -571,7 +571,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     public void BeginVoxelEdit() => _dynamicFragments.BeginEdit();
 
-    public void EndVoxelEdit() => _dynamicFragments.EndEdit();
+    public void EndVoxelEdit(bool commit) => _dynamicFragments.EndEdit(commit);
 
     public void UndoVoxelEdit() => _dynamicFragments.UndoLastEdit();
 
