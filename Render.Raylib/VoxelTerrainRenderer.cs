@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Numerics;
 using Core.Map;
@@ -130,6 +131,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required int CutLayer { get; init; }
         public required TerrainPalette Palette { get; init; }
         public Task<VoxelMeshBuildResult>? Task { get; set; }
+        public CancellationTokenSource Cancellation { get; } = new();
     }
 
     private readonly record struct VoxelMeshBuildResult(
@@ -771,13 +773,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.RunningBuild = request;
             request.Task = Task.Run(() =>
             {
+                CancellationToken token = request.Cancellation.Token;
                 VoxelMeshData[] surface =
-                    VoxelChunkMesher.BuildSurfaceData(request.Input, request.Palette);
+                    VoxelChunkMesher.BuildSurfaceData(
+                        request.Input, request.Palette, token);
                 VoxelMeshData[] cutCap = request.BuildCutCap
                     ? VoxelChunkMesher.BuildCutCapData(
                         request.Input,
                         request.CutLayer * SparseVoxelField.VoxelSizeMeters,
-                        request.Palette)
+                        request.Palette,
+                        token)
                     : Array.Empty<VoxelMeshData>();
                 return new VoxelMeshBuildResult(
                     surface, cutCap, request.BuildCutCap, request.CutLayer);
@@ -799,6 +804,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             _runningBuilds.RemoveAt(i);
             _activeMeshWorkers--;
+            request.Cancellation.Dispose();
             ChunkEntry entry = request.Entry;
             if (ReferenceEquals(entry.RunningBuild, request))
                 entry.RunningBuild = null;
@@ -927,6 +933,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static void InvalidatePendingBuild(ChunkEntry entry)
     {
+        entry.RunningBuild?.Cancellation.Cancel();
         if (entry.Capture != null)
         {
             entry.Capture = null;
