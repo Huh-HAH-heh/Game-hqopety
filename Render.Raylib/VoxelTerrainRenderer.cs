@@ -660,20 +660,23 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int step)
     {
         int span = ChunkCells * step;
-        int minX = bounds.MinX / span;
-        int minY = bounds.MinY / span;
-        int minZ = bounds.MinZ / span;
-        int maxX = Math.Max(minX, (Math.Max(bounds.MinX, bounds.MaxX - 1)) / span);
-        int maxY = Math.Max(minY, (Math.Max(bounds.MinY, bounds.MaxY - 1)) / span);
-        int maxZ = Math.Max(minZ, (Math.Max(bounds.MinZ, bounds.MaxZ - 1)) / span);
-
-        for (int z = minZ; z <= maxZ; z++)
-        for (int y = minY; y <= maxY; y++)
-        for (int x = minX; x <= maxX; x++)
+        foreach ((ChunkKey key, ChunkEntry entry) in _visible)
         {
-            ChunkKey key = new(step, x, y, z);
-            if (_chunks.TryGetValue(key, out ChunkEntry? entry) &&
-                !IsCurrentMeshReady(entry, field))
+            if (key.Step != step)
+                continue;
+
+            int minX = key.X * span;
+            int minY = key.Y * span;
+            int minZ = key.Z * span;
+            int maxX = minX + span;
+            int maxY = minY + span;
+            int maxZ = minZ + span;
+
+            bool overlaps =
+                minX < bounds.MaxX && bounds.MinX < maxX &&
+                minY < bounds.MaxY && bounds.MinY < maxY &&
+                minZ < bounds.MaxZ && bounds.MinZ < maxZ;
+            if (overlaps && !IsCurrentMeshReady(entry, field))
                 return false;
         }
 
