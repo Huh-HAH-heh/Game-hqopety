@@ -1625,22 +1625,22 @@ public sealed class SparseVoxelField
         const int scanStep = 2;
         const int minimumCoarseCells = 48;
         const int maximumCoarseCells = 12_000;
-        const int maximumScanCells = 500_000;
+        const int maximumScanCells = 180_000;
         const int maximumSnapshotSamples = 2_000_000;
         maximumFragments = Math.Min(maximumFragments, 2);
 
         int minX = Math.Clamp(
             (int)MathF.Floor((centerMeters.X - halfExtentsMeters.X) /
                 (VoxelSizeMeters * scanStep)) * scanStep,
-            0, Width - 1);
+            0, Math.Max(0, Width - scanStep));
         int minY = Math.Clamp(
             (int)MathF.Floor((centerMeters.Y - halfExtentsMeters.Y) /
                 (VoxelSizeMeters * scanStep)) * scanStep,
-            0, Height - 1);
+            0, Math.Max(0, Height - scanStep));
         int minZ = Math.Clamp(
             (int)MathF.Floor((centerMeters.Z - halfExtentsMeters.Z) /
                 (VoxelSizeMeters * scanStep)) * scanStep,
-            0, Depth - 1);
+            0, Math.Max(0, Depth - scanStep));
         int maxX = Math.Clamp(
             (int)MathF.Ceiling((centerMeters.X + halfExtentsMeters.X) /
                 (VoxelSizeMeters * scanStep)) * scanStep,
