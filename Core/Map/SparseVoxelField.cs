@@ -103,6 +103,57 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         public long EstimatedBytes { get; init; }
     }
 
+
+    /// <summary>
+    /// Incremental bake of a settled dynamic fragment into the authoritative
+    /// world lattice. The field is modified in bounded batches; one Changed
+    /// event and one undo record are emitted only after the complete merge.
+    /// </summary>
+    public sealed class FragmentMergeJob
+    {
+        internal readonly SparseVoxelField Owner;
+        internal readonly VoxelFragmentSnapshot Fragment;
+        internal readonly Vector3 BodyPosition;
+        internal readonly Quaternion InverseRotation;
+        internal readonly HashSet<ChunkCoordinate> Touched = new();
+        internal readonly IDisposable HistoryScope;
+        internal readonly long TotalSamples;
+        internal long Cursor;
+        internal long Revision;
+        internal int MinX, MinY, MinZ;
+        internal int MaxX, MaxY, MaxZ;
+        public VoxelBounds Bounds { get; }
+        public bool IsCompleted { get; internal set; }
+        public long ProcessedSamples => Cursor;
+        public long Total => TotalSamples;
+
+        internal FragmentMergeJob(
+            SparseVoxelField owner,
+            VoxelFragmentSnapshot fragment,
+            Vector3 bodyPosition,
+            Quaternion inverseRotation,
+            VoxelBounds bounds,
+            IDisposable historyScope)
+        {
+            Owner = owner;
+            Fragment = fragment;
+            BodyPosition = bodyPosition;
+            InverseRotation = inverseRotation;
+            Bounds = bounds;
+            HistoryScope = historyScope;
+            TotalSamples = (long)(bounds.MaxX - bounds.MinX) *
+                (bounds.MaxY - bounds.MinY) *
+                (bounds.MaxZ - bounds.MinZ);
+            Revision = owner.Version + 1;
+            MinX = owner.Width;
+            MinY = owner.Height;
+            MinZ = owner.Depth;
+            MaxX = 0;
+            MaxY = 0;
+            MaxZ = 0;
+        }
+    }
+
     private sealed class UndoScope : IDisposable
     {
         private SparseVoxelField? _owner;
@@ -1958,6 +2009,161 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         VoxelBounds bounds = new(minX, minY, minZ, maxX, maxY, maxZ);
         IncludeHistoryBounds(bounds);
         Changed?.Invoke(bounds);
+    }
+
+    /// <summary>
+    /// Starts returning a fragment to the main planet grid. The input transform
+    /// is the body's current world transform, not its original detach position.
+    /// Its rotated bounds are converted to global sample indices with a one-cell
+    /// interpolation halo, so negative and positive world coordinates cannot
+    /// accumulate local fragment offsets.
+    /// </summary>
+    public FragmentMergeJob BeginFragmentMerge(
+        VoxelFragmentSnapshot fragment,
+        Vector3 bodyPositionMeters,
+        Quaternion bodyRotation)
+    {
+        ArgumentNullException.ThrowIfNull(fragment);
+        if (!IsFinite(bodyPositionMeters) ||
+            !float.IsFinite(bodyRotation.X) ||
+            !float.IsFinite(bodyRotation.Y) ||
+            !float.IsFinite(bodyRotation.Z) ||
+            !float.IsFinite(bodyRotation.W) ||
+            bodyRotation.LengthSquared() < 0.000001f)
+            throw new ArgumentOutOfRangeException(nameof(bodyRotation));
+
+        bodyRotation = Quaternion.Normalize(bodyRotation);
+        Vector3 axisX = Vector3.Transform(Vector3.UnitX, bodyRotation);
+        Vector3 axisY = Vector3.Transform(Vector3.UnitY, bodyRotation);
+        Vector3 axisZ = Vector3.Transform(Vector3.UnitZ, bodyRotation);
+        Vector3 half = fragment.HalfExtentsMeters;
+        Vector3 worldHalf = new(
+            MathF.Abs(axisX.X) * half.X + MathF.Abs(axisY.X) * half.Y + MathF.Abs(axisZ.X) * half.Z,
+            MathF.Abs(axisX.Y) * half.X + MathF.Abs(axisY.Y) * half.Y + MathF.Abs(axisZ.Y) * half.Z,
+            MathF.Abs(axisX.Z) * half.X + MathF.Abs(axisY.Z) * half.Y + MathF.Abs(axisZ.Z) * half.Z);
+        worldHalf += new Vector3(VoxelSizeMeters * 1.5f);
+
+        static int MinSample(float value) =>
+            (int)MathF.Floor(value / VoxelSizeMeters - 0.5f) - 1;
+        static int MaxSample(float value) =>
+            (int)MathF.Ceiling(value / VoxelSizeMeters - 0.5f) + 2;
+
+        int minX = Math.Clamp(MinSample(bodyPositionMeters.X - worldHalf.X), 0, Width);
+        int minY = Math.Clamp(MinSample(bodyPositionMeters.Y - worldHalf.Y), 0, Height);
+        int minZ = Math.Clamp(MinSample(bodyPositionMeters.Z - worldHalf.Z), 0, Depth);
+        int maxX = Math.Clamp(MaxSample(bodyPositionMeters.X + worldHalf.X), minX, Width);
+        int maxY = Math.Clamp(MaxSample(bodyPositionMeters.Y + worldHalf.Y), minY, Height);
+        int maxZ = Math.Clamp(MaxSample(bodyPositionMeters.Z + worldHalf.Z), minZ, Depth);
+
+        VoxelBounds bounds = new(minX, minY, minZ, maxX, maxY, maxZ);
+        long sampleCount = (long)(maxX - minX) *
+            (maxY - minY) * (maxZ - minZ);
+        if (sampleCount <= 0 || sampleCount > 12_000_000)
+            throw new InvalidOperationException(
+                "Settled fragment is outside the supported merge volume.");
+
+        IDisposable historyScope = BeginUndoableEdit();
+        return new FragmentMergeJob(
+            this,
+            fragment,
+            bodyPositionMeters,
+            Quaternion.Inverse(bodyRotation),
+            bounds,
+            historyScope);
+    }
+
+    /// <summary>
+    /// Bakes at most maximumSamples target lattice positions. Density is
+    /// resampled in fragment-local coordinates, then combined with the world
+    /// using an SDF union (max). This preserves existing terrain and avoids
+    /// replacing the planet with a fragment's local bounding-box field.
+    /// </summary>
+    public bool ProcessFragmentMerge(
+        FragmentMergeJob job,
+        int maximumSamples = 12_000)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        if (!ReferenceEquals(job.Owner, this))
+            throw new ArgumentException("Merge job belongs to another voxel field.", nameof(job));
+        if (maximumSamples <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumSamples));
+        if (job.IsCompleted)
+            return true;
+
+        int width = job.Bounds.MaxX - job.Bounds.MinX;
+        int height = job.Bounds.MaxY - job.Bounds.MinY;
+        long plane = (long)width * height;
+        int processed = 0;
+        long revision = Version + 1;
+
+        while (job.Cursor < job.TotalSamples && processed < maximumSamples)
+        {
+            long linear = job.Cursor++;
+            int x = job.Bounds.MinX + (int)(linear % width);
+            int y = job.Bounds.MinY + (int)(linear / width % height);
+            int z = job.Bounds.MinZ + (int)(linear / plane);
+            processed++;
+
+            Vector3 worldSamplePosition = new(
+                (x + 0.5f) * VoxelSizeMeters,
+                (y + 0.5f) * VoxelSizeMeters,
+                (z + 0.5f) * VoxelSizeMeters);
+            Vector3 fragmentLocalPosition =
+                Vector3.Transform(
+                    worldSamplePosition - job.BodyPosition,
+                    job.InverseRotation) +
+                job.Fragment.LocalPivotMeters;
+
+            float fragmentDensity =
+                job.Fragment.SampleDensityLocal(fragmentLocalPosition);
+            float oldDensity = GetDensity(x, y, z);
+            float mergedDensity = MathF.Max(oldDensity, fragmentDensity);
+            if (Quantize(mergedDensity) == Quantize(oldDensity))
+                continue;
+
+            SetDensityOverride(
+                x, y, z,
+                mergedDensity,
+                oldDensity,
+                revision,
+                job.Touched);
+
+            ushort materialId = mergedDensity > 0f &&
+                fragmentDensity > oldDensity
+                    ? job.Fragment.GetMaterialAtLocalPosition(fragmentLocalPosition)
+                    : GetMaterialId(x, y, z);
+            if (mergedDensity > 0f && materialId == 0)
+                materialId = 1;
+            if (mergedDensity <= 0f)
+                materialId = 0;
+
+            SetMaterialOverride(
+                x, y, z, materialId, revision, job.Touched);
+
+            job.MinX = Math.Min(job.MinX, x);
+            job.MinY = Math.Min(job.MinY, y);
+            job.MinZ = Math.Min(job.MinZ, z);
+            job.MaxX = Math.Max(job.MaxX, x + 1);
+            job.MaxY = Math.Max(job.MaxY, y + 1);
+            job.MaxZ = Math.Max(job.MaxZ, z + 1);
+        }
+
+        if (job.Cursor < job.TotalSamples)
+            return false;
+
+        if (job.Touched.Count > 0)
+        {
+            Version = revision;
+            VoxelBounds changedBounds = new(
+                job.MinX, job.MinY, job.MinZ,
+                job.MaxX, job.MaxY, job.MaxZ);
+            IncludeHistoryBounds(changedBounds);
+            Changed?.Invoke(changedBounds);
+        }
+
+        job.HistoryScope.Dispose();
+        job.IsCompleted = true;
+        return true;
     }
 
     private void SetDensityOverride(
