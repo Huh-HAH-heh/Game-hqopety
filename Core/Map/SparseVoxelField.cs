@@ -1897,6 +1897,66 @@ public sealed class SparseVoxelField
         return fragments;
     }
 
+    /// <summary>
+    /// Restores a detached fragment to the static field when the dynamic-body
+    /// budget is full or its mesh cannot be built.
+    /// </summary>
+    public void RestoreFragment(VoxelFragmentSnapshot fragment)
+    {
+        ArgumentNullException.ThrowIfNull(fragment);
+        int originX = (int)MathF.Round(fragment.OriginMeters.X / VoxelSizeMeters);
+        int originY = (int)MathF.Round(fragment.OriginMeters.Y / VoxelSizeMeters);
+        int originZ = (int)MathF.Round(fragment.OriginMeters.Z / VoxelSizeMeters);
+        ReadOnlySpan<float> density = fragment.DensitySamples;
+        ReadOnlySpan<ushort> materials = fragment.MaterialSamples;
+        int plane = fragment.Width * fragment.Height;
+
+        long revision = Version + 1;
+        HashSet<ChunkCoordinate> touched = new();
+        int minX = Width, minY = Height, minZ = Depth;
+        int maxX = 0, maxY = 0, maxZ = 0;
+
+        for (int z = 1; z < fragment.Depth - 1; z++)
+        for (int y = 1; y < fragment.Height - 1; y++)
+        for (int x = 1; x < fragment.Width - 1; x++)
+        {
+            int sourceIndex = x + y * fragment.Width + z * plane;
+            float nextDensity = density[sourceIndex];
+            if (nextDensity <= 0f)
+                continue;
+
+            int targetX = originX + x;
+            int targetY = originY + y;
+            int targetZ = originZ + z;
+            if (!IsInsideCell(targetX, targetY, targetZ))
+                continue;
+
+            float oldDensity = GetDensity(targetX, targetY, targetZ);
+            SetDensityOverride(
+                targetX, targetY, targetZ,
+                nextDensity, oldDensity, revision, touched);
+            SetMaterialOverride(
+                targetX, targetY, targetZ,
+                materials[sourceIndex] == 0 ? (ushort)1 : materials[sourceIndex],
+                revision, touched);
+
+            minX = Math.Min(minX, targetX);
+            minY = Math.Min(minY, targetY);
+            minZ = Math.Min(minZ, targetZ);
+            maxX = Math.Max(maxX, targetX + 1);
+            maxY = Math.Max(maxY, targetY + 1);
+            maxZ = Math.Max(maxZ, targetZ + 1);
+        }
+
+        if (touched.Count == 0)
+            return;
+
+        Version = revision;
+        VoxelBounds bounds = new(minX, minY, minZ, maxX, maxY, maxZ);
+        IncludeHistoryBounds(bounds);
+        Changed?.Invoke(bounds);
+    }
+
     private void SetDensityOverride(
         int x, int y, int z,
         float density,
