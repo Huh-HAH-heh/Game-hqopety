@@ -725,16 +725,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private static int SelectLod(float cameraDistance, int currentStep)
     {
         // Small dead bands stop the mesh tier from oscillating around thresholds.
+        // Keep 0.4 m sampling for genuinely distant views only. The
+        // measured narrow-ridge fixture loses ~0.98 m of SDF detail at step 4
+        // versus ~0.38 m at step 2.
         return currentStep switch
         {
             1 => cameraDistance < 30f ? 1 :
-                 cameraDistance < 115f ? 2 : 4,
+                 cameraDistance < 450f ? 2 : 4,
             2 => cameraDistance < 25f ? 1 :
-                 cameraDistance < 105f ? 2 : 4,
+                 cameraDistance < 400f ? 2 : 4,
             4 => cameraDistance < 25f ? 1 :
-                 cameraDistance < 92f ? 2 : 4,
+                 cameraDistance < 360f ? 2 : 4,
             _ => cameraDistance < 27f ? 1 :
-                 cameraDistance < 100f ? 2 : 4
+                 cameraDistance < 400f ? 2 : 4
         };
     }
 
@@ -1393,10 +1396,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             if (distance <= 35f)
                 return 1;
-            return distance >= 88f ? 4 : 0;
+            return distance >= 360f ? 4 : 0;
         }
 
-        if (currentStep == 4 && distance <= 105f)
+        if (currentStep == 4 && distance <= 410f)
             return 2;
 
         return 0;
