@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading.Tasks;
 using System.Numerics;
 using Core.Map;
 using Raylib_cs;
@@ -82,17 +84,61 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public long LastSeenFrame;
         public bool Built;
 
+        public int RequestRevision;
+        public int FailedRevision = int.MinValue;
+        public int CaptureRevision;
+        public int CapturePaletteVersion;
+        public long CaptureBaseVersion;
+        public bool CaptureCutCap;
+        public int CaptureCutLayer = int.MinValue;
+        public bool BuildQueued;
+        public VoxelChunkBuildInput? Capture;
+        public BuildRequest? RunningBuild;
+        public VoxelMeshBuildResult? ReadyBuild;
+        public List<Mesh> UploadingSurface = new();
+        public List<Mesh> UploadingCutCap = new();
+        public int SurfaceUploadIndex;
+        public int CutUploadIndex;
+
         public void Dispose()
         {
             foreach (Mesh mesh in Surface)
                 UnloadMesh(mesh);
             foreach (Mesh mesh in CutCap)
                 UnloadMesh(mesh);
+            foreach (Mesh mesh in UploadingSurface)
+                UnloadMesh(mesh);
+            foreach (Mesh mesh in UploadingCutCap)
+                UnloadMesh(mesh);
             Surface = Array.Empty<Mesh>();
             CutCap = Array.Empty<Mesh>();
+            UploadingSurface.Clear();
+            UploadingCutCap.Clear();
+            Capture = null;
+            ReadyBuild = null;
             Built = false;
         }
     }
+
+    private sealed class BuildRequest
+    {
+        public required ChunkKey Key { get; init; }
+        public required ChunkEntry Entry { get; init; }
+        public required VoxelChunkBuildInput Input { get; init; }
+        public required int RequestRevision { get; init; }
+        public required int PaletteVersion { get; init; }
+        public required long BaseVersion { get; init; }
+        public required bool BuildCutCap { get; init; }
+        public required int CutLayer { get; init; }
+        public required TerrainPalette Palette { get; init; }
+        public Task<VoxelMeshBuildResult>? Task { get; set; }
+    }
+
+    private readonly record struct VoxelMeshBuildResult(
+        VoxelMeshData[] Surface,
+        VoxelMeshData[] CutCap,
+        bool HasCutCap,
+        int CutLayer);
 
     private readonly record struct Candidate(
         ChunkKey Key,
@@ -101,6 +147,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float DistanceSquared);
 
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
+    private readonly Queue<BuildRequest> _buildQueue = new();
+    private readonly List<BuildRequest> _runningBuilds = new();
+    private const int MaximumMeshWorkers = 2;
+    private const double CaptureBudgetMilliseconds = 0.35;
+    private const double GpuUploadBudgetMilliseconds = 0.65;
+    private int _activeMeshWorkers;
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
@@ -135,6 +187,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int RebuiltChunks { get; private set; }
     public int RebuiltCutCaps { get; private set; }
     public int LodPrewarmBuilds { get; private set; }
+    public double CpuCaptureMillisecondsLastFrame { get; private set; }
+    public double GpuUploadMillisecondsLastFrame { get; private set; }
+    public int RunningMeshJobs => _activeMeshWorkers;
+    public int PendingMeshJobs => _buildQueue.Count + _chunks.Values.Count(static e => e.Capture != null);
     public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
     public int CachedChunks => _chunks.Count;
     public int DynamicFragmentCount => _dynamicFragments.Count;
