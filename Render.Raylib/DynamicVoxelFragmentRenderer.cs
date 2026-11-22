@@ -62,14 +62,30 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         _pendingEdit = new List<Body>(1);
     }
 
-    public void EndEdit()
+    public void EndEdit(bool commit)
     {
         ThrowIfDisposed();
         if (_pendingEdit == null)
             return;
 
-        _undoEdits.Add(_pendingEdit.ToArray());
+        Body[] created = _pendingEdit.ToArray();
         _pendingEdit = null;
+        if (!commit)
+        {
+            foreach (Body body in created)
+            {
+                if (body.Active)
+                {
+                    body.Active = false;
+                    _activeBodyCount--;
+                }
+                body.Dispose();
+                _bodies.Remove(body);
+            }
+            return;
+        }
+
+        _undoEdits.Add(created);
         ClearRedoEdits();
 
         while (_undoEdits.Count > 16)
