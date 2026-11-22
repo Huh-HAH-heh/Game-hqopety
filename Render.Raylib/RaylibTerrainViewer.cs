@@ -456,6 +456,7 @@ public static class RaylibTerrainViewer
                                     hitNormal * voxelBrushRadiusMeters * 0.2f;
                                 if (voxelEditMode == VoxelEditMode.CarveCapsule)
                                 {
+                                    long editVersionBefore = worldMap.Voxels.Version;
                                     renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
@@ -470,10 +471,11 @@ public static class RaylibTerrainViewer
                                         LogDetachedFragments(renderer.DetachLooseFragments(
                                             worldMap.Voxels, fragmentCenter, fragmentHalfExtents));
                                     }
-                                    renderer.EndVoxelEdit();
+                                    renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                                 else if (voxelEditMode == VoxelEditMode.AddCapsule)
                                 {
+                                    long editVersionBefore = worldMap.Voxels.Version;
                                     renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
@@ -483,7 +485,7 @@ public static class RaylibTerrainViewer
                                             voxelBrushRadiusMeters,
                                             voxelBrushMaterial);
                                     }
-                                    renderer.EndVoxelEdit();
+                                    renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                                 else if (voxelEditMode is VoxelEditMode.CarveBox or VoxelEditMode.AddBox)
                                 {
@@ -502,6 +504,7 @@ public static class RaylibTerrainViewer
                                         maximum.Y += voxelBrushRadiusMeters;
                                     }
 
+                                    long editVersionBefore = worldMap.Voxels.Version;
                                     renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
@@ -520,10 +523,11 @@ public static class RaylibTerrainViewer
                                                 minimum, maximum, voxelBrushMaterial);
                                         }
                                     }
-                                    renderer.EndVoxelEdit();
+                                    renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                                 else if (voxelEditMode is VoxelEditMode.CarveRamp or VoxelEditMode.AddRamp)
                                 {
+                                    long editVersionBefore = worldMap.Voxels.Version;
                                     renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
@@ -551,7 +555,7 @@ public static class RaylibTerrainViewer
                                                 voxelBrushMaterial);
                                         }
                                     }
-                                    renderer.EndVoxelEdit();
+                                    renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                             }
                             voxelStrokeActive = false;
@@ -712,6 +716,7 @@ public static class RaylibTerrainViewer
         float radiusMeters,
         ushort materialId)
     {
+        long editVersionBefore = worldMap.Voxels.Version;
         renderer.BeginVoxelEdit();
         try
         {
@@ -753,7 +758,7 @@ public static class RaylibTerrainViewer
         }
         finally
         {
-            renderer.EndVoxelEdit();
+            renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
         }
     }
 
