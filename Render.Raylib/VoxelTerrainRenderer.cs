@@ -103,6 +103,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
+    private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
     private readonly Material _material;
     private readonly Shader _shader;
     private readonly int _cutEnabledLocation;
@@ -272,6 +273,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             a.DistanceSquared.CompareTo(b.DistanceSquared));
 
         _visible.Clear();
+        _visibleCandidateKeys.Clear();
         HashSet<ChunkKey> visibleKeys = new();
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
             new(candidates.Count);
@@ -321,6 +323,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach (Candidate candidate in candidates)
         {
             ChunkKey key = candidate.Key;
+            _visibleCandidateKeys.Add(key);
             if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
             {
                 entry = new ChunkEntry();
@@ -660,7 +663,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int step)
     {
         int span = ChunkCells * step;
-        foreach ((ChunkKey key, ChunkEntry entry) in _visible)
+        foreach (ChunkKey key in _visibleCandidateKeys)
         {
             if (key.Step != step)
                 continue;
@@ -671,12 +674,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int maxX = minX + span;
             int maxY = minY + span;
             int maxZ = minZ + span;
-
             bool overlaps =
                 minX < bounds.MaxX && bounds.MinX < maxX &&
                 minY < bounds.MaxY && bounds.MinY < maxY &&
                 minZ < bounds.MaxZ && bounds.MinZ < maxZ;
-            if (overlaps && !IsCurrentMeshReady(entry, field))
+            if (!overlaps)
+                continue;
+
+            if (!_chunks.TryGetValue(key, out ChunkEntry? entry) ||
+                !IsCurrentMeshReady(entry, field))
                 return false;
         }
 
