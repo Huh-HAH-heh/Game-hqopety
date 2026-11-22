@@ -867,10 +867,6 @@ public static class RaylibTerrainViewer
             if (settings.TerrainMode == TerrainRenderMode.Voxel)
             {
                 lines.Add((
-                    $"CPU CAPTURE {renderer.VoxelCpuCaptureMilliseconds:0.00} ms | GPU UPLOAD {renderer.VoxelGpuUploadMilliseconds:0.00} ms",
-                    13f,
-                    Color.LightGray));
-                lines.Add((
                     $"CPU CAPTURE {renderer.VoxelCpuCaptureMilliseconds:0.00} ms | CPU BUILD {renderer.VoxelWorkerBuildMilliseconds:0.00} ms | GPU UPLOAD {renderer.VoxelGpuUploadMilliseconds:0.00} ms",
                     13f,
                     Color.LightGray));
