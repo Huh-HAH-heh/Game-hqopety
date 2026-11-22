@@ -173,7 +173,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _paletteVersion;
     private long _frame;
     private bool _disposed;
-    private int _activeStep = 40;
+    private int _activeStep = 8;
     private int _requestedCutLayer = int.MinValue;
     private int _stableCutLayer = int.MinValue;
     private int _cutLayerStableFrames;
@@ -185,7 +185,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     public int ActiveRenderCellSize => _activeStep;
     public float ActiveVoxelSizeMeters => _activeStep * SparseVoxelField.VoxelSizeMeters;
-    public bool IsUsingCoarseLod => _activeStep >= 40;
+    public bool IsUsingCoarseLod => _activeStep >= 8;
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleChunksLastFrame { get; private set; }
     public int RebuiltChunks { get; private set; }
@@ -653,21 +653,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // Small dead bands stop the mesh tier from oscillating around thresholds.
         return currentStep switch
         {
-            1 => cameraDistance < 28f ? 1 :
-                 cameraDistance < 105f ? 5 :
-                 cameraDistance < 450f ? 10 : 40,
-            5 => cameraDistance < 24f ? 1 :
-                 cameraDistance < 105f ? 5 :
-                 cameraDistance < 450f ? 10 : 40,
-            10 => cameraDistance < 24f ? 1 :
-                  cameraDistance < 90f ? 5 :
-                  cameraDistance < 450f ? 10 : 40,
-            40 => cameraDistance < 24f ? 1 :
-                  cameraDistance < 90f ? 5 :
-                  cameraDistance < 390f ? 10 : 40,
-            _ => cameraDistance < 26f ? 1 :
-                 cameraDistance < 95f ? 5 :
-                 cameraDistance < 420f ? 10 : 40
+            1 => cameraDistance < 30f ? 1 :
+                 cameraDistance < 115f ? 2 :
+                 cameraDistance < 420f ? 4 : 8,
+            2 => cameraDistance < 25f ? 1 :
+                 cameraDistance < 105f ? 2 :
+                 cameraDistance < 420f ? 4 : 8,
+            4 => cameraDistance < 25f ? 1 :
+                 cameraDistance < 92f ? 2 :
+                 cameraDistance < 420f ? 4 : 8,
+            8 => cameraDistance < 25f ? 1 :
+                 cameraDistance < 92f ? 2 :
+                 cameraDistance < 380f ? 4 : 8,
+            _ => cameraDistance < 27f ? 1 :
+                 cameraDistance < 100f ? 2 :
+                 cameraDistance < 400f ? 4 : 8
         };
     }
 
@@ -1000,16 +1000,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float minimum = step switch
         {
             1 => 8f,
-            5 => 30f,
-            10 => 90f,
-            _ => 300f
+            2 => 20f,
+            4 => 55f,
+            _ => 150f
         };
         float multiplier = step switch
         {
             1 => 0.9f,
-            5 => 1.0f,
-            10 => 1.15f,
-            _ => 1.4f
+            2 => 1.0f,
+            4 => 1.1f,
+            _ => 1.25f
         };
 
         return Math.Clamp(
@@ -1212,27 +1212,27 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private static int GetAdjacentPrewarmStep(int currentStep, float distance)
     {
         if (currentStep == 1)
-            return distance >= 20f ? 5 : 0;
+            return distance >= 26f ? 2 : 0;
 
-        if (currentStep == 5)
+        if (currentStep == 2)
         {
-            if (distance <= 32f)
+            if (distance <= 35f)
                 return 1;
-            return distance >= 82f ? 10 : 0;
+            return distance >= 88f ? 4 : 0;
         }
 
-        if (currentStep == 10)
+        if (currentStep == 4)
         {
             if (distance <= 105f)
-                return 5;
-            return distance >= 370f ? 40 : 0;
+                return 2;
+            return distance >= 350f ? 8 : 0;
         }
 
-        if (currentStep == 40)
+        if (currentStep == 8)
         {
-            if (distance <= 32f)
+            if (distance <= 30f)
                 return 1;
-            return distance <= 450f ? 10 : 0;
+            return distance <= 430f ? 4 : 0;
         }
 
         return 0;
