@@ -845,7 +845,7 @@ public static class RaylibTerrainViewer
                 13f,
                 Color.LightGray));
             lines.Add((
-                $"BASE MESH BUILDS {renderer.RebuiltRegions}   CUT CAP UPDATES {renderer.CutSurfaceRebuilds}",
+                $"MESH BUILDS/FRAME {renderer.RebuiltRegions}   CUT CAPS/FRAME {renderer.CutSurfaceRebuilds}",
                 13f,
                 Color.LightGray));
         }
