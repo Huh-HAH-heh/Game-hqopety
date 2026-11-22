@@ -431,13 +431,22 @@ public sealed class WorldMap
     /// </summary>
     public int CompactHierarchicalBlockVolumes(int minimumBlockSize = 32)
     {
-        if (!UsesDiscreteBlockTerrain)
-            throw new InvalidOperationException("Discrete block terrain is not enabled.");
-        if (minimumBlockSize < 2 ||
-            (minimumBlockSize & (minimumBlockSize - 1)) != 0)
-            throw new ArgumentOutOfRangeException(nameof(minimumBlockSize));
+        _voxelBaseSamplerLock.EnterWriteLock();
+        try
+        {
+            if (!UsesDiscreteBlockTerrain)
+                throw new InvalidOperationException("Discrete block terrain is not enabled.");
+            if (minimumBlockSize < 2 ||
+                (minimumBlockSize & (minimumBlockSize - 1)) != 0)
+                throw new ArgumentOutOfRangeException(nameof(minimumBlockSize));
 
-        return Blocks.Volumes.Compact();
+            return Blocks.Volumes.Compact();
+        
+        }
+        finally
+        {
+            _voxelBaseSamplerLock.ExitWriteLock();
+        }
     }
 
     public int CompactUniformBlockVolumes(int minimumBlockSize = 32) =>
