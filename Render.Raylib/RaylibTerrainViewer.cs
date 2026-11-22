@@ -861,9 +861,20 @@ public static class RaylibTerrainViewer
             }
 
             lines.Add((
-                $"MESH BUILDS/FRAME {renderer.RebuiltRegions}   CUT CAPS/FRAME {renderer.CutSurfaceRebuilds}",
+                $"MESH SWAPS/FRAME {renderer.RebuiltRegions} | CUT CAPS {renderer.CutSurfaceRebuilds}",
                 13f,
                 Color.LightGray));
+            if (settings.TerrainMode == TerrainRenderMode.Voxel)
+            {
+                lines.Add((
+                    $"CPU CAPTURE {renderer.VoxelCpuCaptureMilliseconds:0.00} ms | GPU UPLOAD {renderer.VoxelGpuUploadMilliseconds:0.00} ms",
+                    13f,
+                    Color.LightGray));
+                lines.Add((
+                    $"MESH WORKERS {renderer.VoxelMeshWorkers} | QUEUED {renderer.VoxelPendingMeshJobs}",
+                    13f,
+                    Color.LightGray));
+            }
         }
 
         if (settings.ShowControls)
