@@ -427,6 +427,7 @@ public static class RaylibTerrainViewer
                                 {
                                     ApplyVoxelBrush(
                                         worldMap,
+                                        renderer,
                                         voxelEditMode,
                                         hitPosition,
                                         hitNormal,
@@ -457,6 +458,12 @@ public static class RaylibTerrainViewer
                                             voxelStrokeStart,
                                             end,
                                             voxelBrushRadiusMeters);
+                                        Vector3 fragmentCenter = (voxelStrokeStart + end) * 0.5f;
+                                        Vector3 fragmentHalfExtents =
+                                            Vector3.Abs(end - voxelStrokeStart) * 0.5f +
+                                            new Vector3(voxelBrushRadiusMeters + 1f);
+                                        LogDetachedFragments(renderer.DetachLooseFragments(
+                                            worldMap.Voxels, fragmentCenter, fragmentHalfExtents));
                                     }
                                 }
                                 else if (voxelEditMode == VoxelEditMode.AddCapsule)
@@ -490,10 +497,19 @@ public static class RaylibTerrainViewer
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
                                         if (voxelEditMode == VoxelEditMode.CarveBox)
+                                        {
                                             worldMap.CarveVoxelBox(minimum, maximum);
+                                            Vector3 fragmentCenter = (minimum + maximum) * 0.5f;
+                                            Vector3 fragmentHalfExtents =
+                                                (maximum - minimum) * 0.5f + Vector3.One;
+                                            LogDetachedFragments(renderer.DetachLooseFragments(
+                                                worldMap.Voxels, fragmentCenter, fragmentHalfExtents));
+                                        }
                                         else
+                                        {
                                             worldMap.AddVoxelBox(
                                                 minimum, maximum, voxelBrushMaterial);
+                                        }
                                     }
                                 }
                                 else if (voxelEditMode is VoxelEditMode.CarveRamp or VoxelEditMode.AddRamp)
@@ -501,18 +517,28 @@ public static class RaylibTerrainViewer
                                     using (worldMap.Voxels.BeginUndoableEdit())
                                     {
                                         if (voxelEditMode == VoxelEditMode.CarveRamp)
+                                        {
                                             worldMap.CarveVoxelRamp(
                                                 voxelStrokeStart,
                                                 hitPosition,
                                                 voxelBrushRadiusMeters * 2f,
                                                 voxelBrushRadiusMeters);
+                                            Vector3 fragmentCenter = (voxelStrokeStart + hitPosition) * 0.5f;
+                                            Vector3 fragmentHalfExtents =
+                                                Vector3.Abs(hitPosition - voxelStrokeStart) * 0.5f +
+                                                new Vector3(voxelBrushRadiusMeters + 1f);
+                                            LogDetachedFragments(renderer.DetachLooseFragments(
+                                                worldMap.Voxels, fragmentCenter, fragmentHalfExtents));
+                                        }
                                         else
+                                        {
                                             worldMap.AddVoxelRamp(
                                                 voxelStrokeStart,
                                                 hitPosition,
                                                 voxelBrushRadiusMeters * 2f,
                                                 voxelBrushRadiusMeters,
                                                 voxelBrushMaterial);
+                                        }
                                     }
                                 }
                             }
@@ -635,6 +661,12 @@ public static class RaylibTerrainViewer
         return Path.Combine(root, "RimClone", "voxel-terrain.rvx");
     }
 
+    private static void LogDetachedFragments(int detachedCount)
+    {
+        if (detachedCount > 0)
+            Console.WriteLine($"[Voxel] Detached dynamic rock fragments: {detachedCount}");
+    }
+
     private static string GetVoxelToolStatus(
         VoxelEditMode mode,
         float radiusMeters,
@@ -661,6 +693,7 @@ public static class RaylibTerrainViewer
 
     private static void ApplyVoxelBrush(
         WorldMap worldMap,
+        RaylibTerrainRenderer renderer,
         VoxelEditMode mode,
         Vector3 hitPosition,
         Vector3 hitNormal,
@@ -673,6 +706,10 @@ public static class RaylibTerrainViewer
         {
             case VoxelEditMode.CarveSphere:
                 worldMap.CarveVoxelSphere(carveCenter, radiusMeters);
+                LogDetachedFragments(renderer.DetachLooseFragments(
+                    worldMap.Voxels,
+                    hitPosition,
+                    new Vector3(radiusMeters + 2f)));
                 break;
 
             case VoxelEditMode.AddSphere:
