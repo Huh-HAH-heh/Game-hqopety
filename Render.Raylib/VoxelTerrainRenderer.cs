@@ -100,6 +100,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float DistanceSquared);
 
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
+    private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
     private readonly Material _material;
@@ -184,6 +185,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(field);
         EnsureFieldSubscription(field);
+
+        _dynamicFragments.Update(field, GetFrameTime());
 
         _frame++;
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
@@ -506,6 +509,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
+        _dynamicFragments.Draw(_material);
+
         if (cutEnabled)
         {
             SetCutShader(enabled: false, cutHeightMeters);
@@ -529,6 +534,43 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if ((_frame % 90) == 0 && _chunks.Count > MaximumCachedChunks / 2)
             EvictUnusedChunks();
+    }
+
+    public int DetachLooseFragments(
+        SparseVoxelField field,
+        Vector3 centerMeters,
+        Vector3 halfExtentsMeters)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(field);
+        if (_dynamicFragments.AvailableSlots == 0)
+            return 0;
+
+        List<VoxelFragmentSnapshot> fragments = field.DetachLooseComponents(
+            centerMeters,
+            halfExtentsMeters,
+            maximumFragments: 1);
+
+        int detached = 0;
+        foreach (VoxelFragmentSnapshot fragment in fragments)
+        {
+            if (_dynamicFragments.TryAdd(fragment, centerMeters, _palette))
+            {
+                detached++;
+            }
+            else
+            {
+                field.RestoreFragment(fragment);
+            }
+        }
+
+        return detached;
+    }
+
+    public void ClearDynamicFragments()
+    {
+        ThrowIfDisposed();
+        _dynamicFragments.Clear();
     }
 
     private static int SelectLod(float cameraDistance, int currentStep)
@@ -707,6 +749,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach (ChunkEntry entry in _chunks.Values)
             entry.Dispose();
+        _dynamicFragments.Dispose();
         _chunks.Clear();
         // UnloadMaterial also releases the non-default shader assigned to it.
         UnloadMaterial(_material);
