@@ -40,6 +40,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         public bool Sleeping;
         public bool Active = true;
         public bool Baked;
+        public bool MergeRejected;
         public SparseVoxelField.FragmentMergeJob? MergeJob;
         public SparseVoxelField.VoxelBounds BakedBounds;
 
@@ -259,12 +260,22 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             if (!body.Active)
                 continue;
 
-            if (body.Sleeping && body.MergeJob == null && !body.Baked)
+            if (body.Sleeping && body.MergeJob == null &&
+                !body.Baked && !body.MergeRejected)
             {
-                body.MergeJob = staticField.BeginFragmentMerge(
-                    body.Snapshot,
-                    body.Position,
-                    body.Rotation);
+                try
+                {
+                    body.MergeJob = staticField.BeginFragmentMerge(
+                        body.Snapshot,
+                        body.Position,
+                        body.Rotation);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Keep the fragment as a sleeping dynamic object rather
+                    // than dropping or corrupting it when a merge cannot start.
+                    body.MergeRejected = true;
+                }
             }
 
             if (body.MergeJob == null)
