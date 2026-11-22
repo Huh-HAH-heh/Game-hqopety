@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Core.Map;
 using RimClone.Render.Raylib;
 
 internal static class Program
