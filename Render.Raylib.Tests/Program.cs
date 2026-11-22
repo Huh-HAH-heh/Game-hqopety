@@ -112,7 +112,7 @@ internal static class Program
         SyntheticTerrainField field = new(1024, 1024, 1024);
         TerrainPalette palette = new();
         Console.WriteLine("=== CPU mesh benchmark (no GPU upload) ===");
-        Console.WriteLine("LOD | cell size | capture median/p95 ms | build median/p95 ms | vertices | triangles | alloc MiB | max SDF error");
+        Console.WriteLine("LOD | cell size | capture median/p95 ms | build median/p95 ms | vertices | triangles | alloc MiB | max SDF error (m)");
 
         foreach (int step in Lods)
         {
