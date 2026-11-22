@@ -102,6 +102,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         public void Dispose()
         {
+            RunningBuild?.Cancellation.Cancel();
             foreach (Mesh mesh in Surface)
                 UnloadMesh(mesh);
             foreach (Mesh mesh in CutCap)
