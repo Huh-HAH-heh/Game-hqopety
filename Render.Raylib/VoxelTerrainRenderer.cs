@@ -78,6 +78,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public int PaletteVersion = int.MinValue;
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
+        public float PriorityDistanceSquared = float.PositiveInfinity;
         public bool Built;
 
         public int RequestRevision;
@@ -147,9 +148,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Queue<BuildRequest> _buildQueue = new();
     private readonly List<BuildRequest> _runningBuilds = new();
     private const int MaximumMeshWorkers = 2;
-    private const double CaptureBudgetMilliseconds = 0.35;
-    private const double GpuUploadBudgetMilliseconds = 0.65;
+    private const int MaximumPendingMeshJobs = 48;
+    private const double CaptureBudgetMilliseconds = 0.25;
+    private const double GpuUploadBudgetMilliseconds = 0.55;
     private int _activeMeshWorkers;
+    private int _pendingCaptures;
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
@@ -189,7 +192,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int RunningMeshJobs => _activeMeshWorkers;
     public double CpuCaptureMilliseconds => CpuCaptureMillisecondsLastFrame;
     public double GpuUploadMilliseconds => GpuUploadMillisecondsLastFrame;
-    public int PendingMeshJobs => _buildQueue.Count + _chunks.Values.Count(static e => e.Capture != null);
+    public int PendingMeshJobs => _buildQueue.Count + _pendingCaptures;
     public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
     public int CachedChunks => _chunks.Count;
     public int DynamicFragmentCount => _dynamicFragments.Count;
@@ -387,6 +390,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
 
             entry.LastSeenFrame = _frame;
+            entry.PriorityDistanceSquared = candidate.DistanceSquared;
             bool surfaceStale = !entry.Built ||
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
@@ -665,7 +669,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.Capture != null ||
             entry.BuildQueued ||
             entry.ReadyBuild.HasValue ||
-            entry.FailedRevision == entry.RequestRevision)
+            entry.FailedRevision == entry.RequestRevision ||
+            _pendingCaptures + _buildQueue.Count >= MaximumPendingMeshJobs)
             return;
 
         entry.Capture = new VoxelChunkBuildInput(
@@ -675,6 +680,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.CaptureBaseVersion = field.BaseVersion;
         entry.CaptureCutCap = buildCutCap;
         entry.CaptureCutLayer = buildCutCap ? cutLayer : int.MinValue;
+        _pendingCaptures++;
     }
 
     private void ProcessCaptureJobs(SparseVoxelField field)
@@ -689,7 +695,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 pending.Add(entry);
         }
         pending.Sort(static (a, b) =>
-            b.LastSeenFrame.CompareTo(a.LastSeenFrame));
+            a.PriorityDistanceSquared.CompareTo(b.PriorityDistanceSquared));
 
         foreach (ChunkEntry entry in pending)
         {
@@ -705,6 +711,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.CaptureBaseVersion != field.BaseVersion)
             {
                 entry.Capture = null;
+                _pendingCaptures--;
                 continue;
             }
 
@@ -733,6 +740,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Palette = _palette
             };
             entry.Capture = null;
+            _pendingCaptures--;
             entry.BuildQueued = true;
             _buildQueue.Enqueue(request);
         }
@@ -919,7 +927,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static void InvalidatePendingBuild(ChunkEntry entry)
     {
-        entry.Capture = null;
+        if (entry.Capture != null)
+        {
+            entry.Capture = null;
+            _pendingCaptures = Math.Max(0, _pendingCaptures - 1);
+        }
         entry.BuildQueued = false;
         entry.ReadyBuild = null;
         entry.ReadyRequest = null;
@@ -1167,6 +1179,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
 
             entry.LastSeenFrame = _frame;
+            entry.PriorityDistanceSquared = candidate.DistanceSquared;
             bool stale = !entry.Built ||
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
