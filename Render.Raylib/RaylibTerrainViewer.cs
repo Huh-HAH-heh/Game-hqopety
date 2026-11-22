@@ -807,7 +807,7 @@ public static class RaylibTerrainViewer
                 Color.RayWhite));
             lines.Add((
                 settings.TerrainMode == TerrainRenderMode.Voxel
-                    ? $"VOXEL MESH {renderer.ActiveVoxelSizeMeters:0.0}m | FIELD 0.1m | CHUNKS {renderer.CachedVoxelChunks}"
+                    ? $"VOXEL MESH {renderer.ActiveVoxelSizeMeters:0.0}m | FIELD 0.1m | CHUNKS {renderer.CachedVoxelChunks} | ROCK FRAGMENTS {renderer.DynamicFragmentCount}"
                     : $"HEIGHTMAP CELL {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m",
                 17f,
                 Color.LightGray));
