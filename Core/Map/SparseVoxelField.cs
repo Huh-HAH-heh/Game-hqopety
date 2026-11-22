@@ -1598,6 +1598,305 @@ public sealed class SparseVoxelField
         CompleteEdit(bounds, revision, touched);
     }
 
+    /// <summary>
+    /// Detaches compact, fully enclosed solid components from the static field.
+    /// Connectivity is tested on a conservative 0.2 m occupancy grid (a coarse
+    /// cell is occupied when any of its eight source samples is solid). The
+    /// exact 0.1 m density/material samples are copied only for accepted bodies.
+    /// Components touching the scan boundary remain static because they may
+    /// still be connected to terrain outside the local analysis window.
+    /// </summary>
+    public List<VoxelFragmentSnapshot> DetachLooseComponents(
+        Vector3 centerMeters,
+        Vector3 halfExtentsMeters,
+        int maximumFragments = 1)
+    {
+        List<VoxelFragmentSnapshot> fragments = new();
+        if (!IsFinite(centerMeters) || !IsFinite(halfExtentsMeters) ||
+            halfExtentsMeters.X <= 0f ||
+            halfExtentsMeters.Y <= 0f ||
+            halfExtentsMeters.Z <= 0f ||
+            halfExtentsMeters.X > 6f ||
+            halfExtentsMeters.Y > 6f ||
+            halfExtentsMeters.Z > 6f ||
+            maximumFragments <= 0)
+            return fragments;
+
+        const int scanStep = 2;
+        const int minimumCoarseCells = 48;
+        const int maximumCoarseCells = 12_000;
+        const int maximumScanCells = 500_000;
+        const int maximumSnapshotSamples = 2_000_000;
+        maximumFragments = Math.Min(maximumFragments, 2);
+
+        int minX = Math.Clamp(
+            (int)MathF.Floor((centerMeters.X - halfExtentsMeters.X) /
+                (VoxelSizeMeters * scanStep)) * scanStep,
+            0, Width - 1);
+        int minY = Math.Clamp(
+            (int)MathF.Floor((centerMeters.Y - halfExtentsMeters.Y) /
+                (VoxelSizeMeters * scanStep)) * scanStep,
+            0, Height - 1);
+        int minZ = Math.Clamp(
+            (int)MathF.Floor((centerMeters.Z - halfExtentsMeters.Z) /
+                (VoxelSizeMeters * scanStep)) * scanStep,
+            0, Depth - 1);
+        int maxX = Math.Clamp(
+            (int)MathF.Ceiling((centerMeters.X + halfExtentsMeters.X) /
+                (VoxelSizeMeters * scanStep)) * scanStep,
+            minX + scanStep, Width);
+        int maxY = Math.Clamp(
+            (int)MathF.Ceiling((centerMeters.Y + halfExtentsMeters.Y) /
+                (VoxelSizeMeters * scanStep)) * scanStep,
+            minY + scanStep, Height);
+        int maxZ = Math.Clamp(
+            (int)MathF.Ceiling((centerMeters.Z + halfExtentsMeters.Z) /
+                (VoxelSizeMeters * scanStep)) * scanStep,
+            minZ + scanStep, Depth);
+
+        int nx = (maxX - minX) / scanStep;
+        int ny = (maxY - minY) / scanStep;
+        int nz = (maxZ - minZ) / scanStep;
+        if (nx < 3 || ny < 3 || nz < 3)
+            return fragments;
+
+        int scanCount = checked(nx * ny * nz);
+        if (scanCount > maximumScanCells)
+            return fragments;
+
+        byte[] occupied = new byte[scanCount];
+        byte[] visited = new byte[scanCount];
+        byte[] componentMask = new byte[scanCount];
+        int[] queue = new int[scanCount];
+
+        for (int cz = 0; cz < nz; cz++)
+        for (int cy = 0; cy < ny; cy++)
+        for (int cx = 0; cx < nx; cx++)
+        {
+            int sx = minX + cx * scanStep;
+            int sy = minY + cy * scanStep;
+            int sz = minZ + cz * scanStep;
+            bool solid = false;
+
+            for (int dz = 0; dz < scanStep && !solid; dz++)
+            for (int dy = 0; dy < scanStep && !solid; dy++)
+            for (int dx = 0; dx < scanStep; dx++)
+            {
+                if (GetDensity(sx + dx, sy + dy, sz + dz) > 0f)
+                {
+                    solid = true;
+                    break;
+                }
+            }
+
+            if (solid)
+                occupied[cx + cy * nx + cz * nx * ny] = 1;
+        }
+
+        long revision = Version + 1;
+        HashSet<ChunkCoordinate> touched = new();
+        int changedMinX = Width;
+        int changedMinY = Height;
+        int changedMinZ = Depth;
+        int changedMaxX = 0;
+        int changedMaxY = 0;
+        int changedMaxZ = 0;
+
+        for (int seed = 0; seed < scanCount && fragments.Count < maximumFragments; seed++)
+        {
+            if (occupied[seed] == 0 || visited[seed] != 0)
+                continue;
+
+            int head = 0;
+            int tail = 0;
+            queue[tail++] = seed;
+            visited[seed] = 1;
+            bool touchesBoundary = false;
+            int componentMinX = nx;
+            int componentMinY = ny;
+            int componentMinZ = nz;
+            int componentMaxX = -1;
+            int componentMaxY = -1;
+            int componentMaxZ = -1;
+
+            while (head < tail)
+            {
+                int current = queue[head++];
+                int cx = current % nx;
+                int cy = current / nx % ny;
+                int cz = current / (nx * ny);
+
+                touchesBoundary |=
+                    cx == 0 || cy == 0 || cz == 0 ||
+                    cx == nx - 1 || cy == ny - 1 || cz == nz - 1;
+
+                componentMinX = Math.Min(componentMinX, cx);
+                componentMinY = Math.Min(componentMinY, cy);
+                componentMinZ = Math.Min(componentMinZ, cz);
+                componentMaxX = Math.Max(componentMaxX, cx);
+                componentMaxY = Math.Max(componentMaxY, cy);
+                componentMaxZ = Math.Max(componentMaxZ, cz);
+
+                if (cx > 0)
+                {
+                    int next = current - 1;
+                    if (occupied[next] != 0 && visited[next] == 0)
+                    {
+                        visited[next] = 1;
+                        queue[tail++] = next;
+                    }
+                }
+                if (cx + 1 < nx)
+                {
+                    int next = current + 1;
+                    if (occupied[next] != 0 && visited[next] == 0)
+                    {
+                        visited[next] = 1;
+                        queue[tail++] = next;
+                    }
+                }
+                if (cy > 0)
+                {
+                    int next = current - nx;
+                    if (occupied[next] != 0 && visited[next] == 0)
+                    {
+                        visited[next] = 1;
+                        queue[tail++] = next;
+                    }
+                }
+                if (cy + 1 < ny)
+                {
+                    int next = current + nx;
+                    if (occupied[next] != 0 && visited[next] == 0)
+                    {
+                        visited[next] = 1;
+                        queue[tail++] = next;
+                    }
+                }
+                if (cz > 0)
+                {
+                    int next = current - nx * ny;
+                    if (occupied[next] != 0 && visited[next] == 0)
+                    {
+                        visited[next] = 1;
+                        queue[tail++] = next;
+                    }
+                }
+                if (cz + 1 < nz)
+                {
+                    int next = current + nx * ny;
+                    if (occupied[next] != 0 && visited[next] == 0)
+                    {
+                        visited[next] = 1;
+                        queue[tail++] = next;
+                    }
+                }
+            }
+
+            if (touchesBoundary || tail < minimumCoarseCells ||
+                tail > maximumCoarseCells)
+                continue;
+
+            for (int i = 0; i < tail; i++)
+                componentMask[queue[i]] = 1;
+
+            int fineMinX = minX + componentMinX * scanStep;
+            int fineMinY = minY + componentMinY * scanStep;
+            int fineMinZ = minZ + componentMinZ * scanStep;
+            int fineMaxX = Math.Min(Width, minX + (componentMaxX + 1) * scanStep);
+            int fineMaxY = Math.Min(Height, minY + (componentMaxY + 1) * scanStep);
+            int fineMaxZ = Math.Min(Depth, minZ + (componentMaxZ + 1) * scanStep);
+            int fragmentWidth = fineMaxX - fineMinX + 2;
+            int fragmentHeight = fineMaxY - fineMinY + 2;
+            int fragmentDepth = fineMaxZ - fineMinZ + 2;
+            long snapshotSampleCount =
+                (long)fragmentWidth * fragmentHeight * fragmentDepth;
+
+            if (snapshotSampleCount <= maximumSnapshotSamples)
+            {
+                float[] density = new float[(int)snapshotSampleCount];
+                ushort[] materials = new ushort[(int)snapshotSampleCount];
+                Array.Fill(density, -1f);
+
+                int solidSamples = 0;
+                float massKg = 0f;
+
+                for (int z = fineMinZ; z < fineMaxZ; z++)
+                for (int y = fineMinY; y < fineMaxY; y++)
+                for (int x = fineMinX; x < fineMaxX; x++)
+                {
+                    int coarseX = (x - minX) / scanStep;
+                    int coarseY = (y - minY) / scanStep;
+                    int coarseZ = (z - minZ) / scanStep;
+                    int coarseIndex = coarseX + coarseY * nx + coarseZ * nx * ny;
+                    if (componentMask[coarseIndex] == 0)
+                        continue;
+
+                    float oldDensity = GetDensity(x, y, z);
+                    if (oldDensity <= 0f)
+                        continue;
+
+                    int localX = x - fineMinX + 1;
+                    int localY = y - fineMinY + 1;
+                    int localZ = z - fineMinZ + 1;
+                    int localIndex = localX +
+                        localY * fragmentWidth +
+                        localZ * fragmentWidth * fragmentHeight;
+
+                    ushort materialId = GetMaterialId(x, y, z);
+                    if (materialId == 0)
+                        materialId = 1;
+
+                    density[localIndex] = oldDensity;
+                    materials[localIndex] = materialId;
+                    massKg += VoxelMaterialCatalog.Get(materialId).MassPerVoxelKg;
+                    solidSamples++;
+
+                    SetDensityOverride(
+                        x, y, z, -1f, oldDensity, revision, touched);
+                    SetMaterialOverride(x, y, z, 0, revision, touched);
+
+                    changedMinX = Math.Min(changedMinX, x);
+                    changedMinY = Math.Min(changedMinY, y);
+                    changedMinZ = Math.Min(changedMinZ, z);
+                    changedMaxX = Math.Max(changedMaxX, x + 1);
+                    changedMaxY = Math.Max(changedMaxY, y + 1);
+                    changedMaxZ = Math.Max(changedMaxZ, z + 1);
+                }
+
+                if (solidSamples >= minimumCoarseCells * 4 && massKg > 0f)
+                {
+                    fragments.Add(new VoxelFragmentSnapshot(
+                        density,
+                        materials,
+                        fragmentWidth,
+                        fragmentHeight,
+                        fragmentDepth,
+                        new Vector3(
+                            (fineMinX - 1) * VoxelSizeMeters,
+                            (fineMinY - 1) * VoxelSizeMeters,
+                            (fineMinZ - 1) * VoxelSizeMeters),
+                        massKg));
+                }
+            }
+
+            for (int i = 0; i < tail; i++)
+                componentMask[queue[i]] = 0;
+        }
+
+        if (touched.Count > 0)
+        {
+            Version = revision;
+            VoxelBounds changedBounds = new(
+                changedMinX, changedMinY, changedMinZ,
+                changedMaxX, changedMaxY, changedMaxZ);
+            IncludeHistoryBounds(changedBounds);
+            Changed?.Invoke(changedBounds);
+        }
+
+        return fragments;
+    }
+
     private void SetDensityOverride(
         int x, int y, int z,
         float density,
