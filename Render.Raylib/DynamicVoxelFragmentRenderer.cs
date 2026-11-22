@@ -163,7 +163,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             for (int x = 0; x < chunksX; x++)
             {
                 Mesh[] chunkMeshes = VoxelChunkMesher.BuildSurface(
-                    localField, x, y, z, step: 1, palette);
+                    localField, x, y, z, step: 1, palette: palette);
                 meshes.AddRange(chunkMeshes);
             }
 
@@ -373,8 +373,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 bottom,
                 searchBelow,
                 0.2f,
-                minimumBodyClearanceMeters: 0f,
-                minimumUpNormal: 0.35f,
+                0f,
+                0.35f,
                 out SparseVoxelField.WalkableSurface support) &&
             bottom <= support.HeightMeters)
         {
