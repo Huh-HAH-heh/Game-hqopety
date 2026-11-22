@@ -128,7 +128,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required TerrainPalette Palette { get; init; }
         public Task<VoxelMeshBuildResult>? Task { get; set; }
         public long EnqueuedTimestamp { get; init; }
-        public bool IsPrewarm { get; init; }
         public CancellationTokenSource Cancellation { get; } = new();
     }
 
@@ -166,7 +165,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumPendingMeshJobs = 128;
     private const double GpuUploadBudgetMilliseconds = 3.0;
     private int _activeMeshWorkers;
-    private int _pendingCaptures;
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
     private readonly TerrainPipelineLogger _logger;
     private readonly Dictionary<BuildIdentity, int> _completedBuildCounts = new();
@@ -496,8 +494,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry,
                     surfaceStale,
                     needsCutCap,
-                    cutLayer,
-                    isPrewarm: false);
+                    cutLayer);
             }
 
             if (!cutEnabled && entry.CutCap.Length > 0)
@@ -535,11 +532,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if ((_frame % 120) == 0)
         {
             string summary =
-                $"frame={_frame} lod={step} frustumCandidates={FrustumCandidatesLastFrame} selected={_visibleCandidateKeys.Count} overflow={CandidateOverflowLastFrame} visible={_visible.Count} cache={_chunks.Count} emptyChunks={_totalEmptyChunks} " +
+                $"frame={_frame} fixedStep={step} frustumCandidates={FrustumCandidatesLastFrame} selected={_visibleCandidateKeys.Count} overflow={CandidateOverflowLastFrame} visible={_visible.Count} cache={_chunks.Count} emptyChunks={_totalEmptyChunks} " +
                 $"snapshotMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
                 $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
-                $"workers={_activeMeshWorkers} pending={_buildQueue.Count + _pendingCaptures} " +
+                $"workers={_activeMeshWorkers} pending={_buildQueue.Count} " +
                 $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
                 $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
                 $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
@@ -650,7 +647,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         bool buildSurface,
         bool buildCutCap,
         int cutLayer,
-        bool isPrewarm)
+        int cutLayer)
     {
         if (entry.FailedRevision == entry.RequestRevision)
             return;
@@ -688,7 +685,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             CutLayer = buildCutCap ? cutLayer : int.MinValue,
             Palette = _palette,
             EnqueuedTimestamp = Stopwatch.GetTimestamp(),
-            IsPrewarm = false
         };
 
         entry.BuildQueued = true;
@@ -865,7 +861,28 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             LastBuildTriangles = build.TriangleCount;
             _logger.Write(
                 "MESH_BUILT",
-                $"kind={(request.IsPrewarm ? "prewarm" : "visible")} surface={request.BuildSurface} cutCap={request.BuildCutCap} cutLayer={request.CutLayer} step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount}");
+                $"kind=visible surface={request.BuildSurface} cutCap={request.BuildCutCap} cutLayer={request.CutLayer} step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount}");
+
+            if (build.SurfaceWasEmpty)
+            {
+                foreach (Mesh mesh in entry.Surface)
+                    UnloadMesh(mesh);
+                entry.Surface = Array.Empty<Mesh>();
+                entry.BaseVersion = request.BaseVersion;
+                entry.PaletteVersion = request.PaletteVersion;
+                entry.SurfaceDirty = false;
+                entry.Built = true;
+                _totalEmptyChunks++;
+                RebuiltChunks++;
+            }
+
+            if (!build.HasSurface && !build.HasCutCap)
+            {
+                _logger.Write(
+                    "MESH_EMPTY",
+                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) base={request.BaseVersion}");
+                continue;
+            }
 
             entry.ReadyBuild = build;
             entry.ReadyRequest = request;
@@ -976,8 +993,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 RebuiltCutCaps++;
             }
 
-            if (result.HasSurface && request.IsPrewarm)
-                LodPrewarmBuilds++;
 
             entry.ReadyBuild = null;
             entry.ReadyRequest = null;
