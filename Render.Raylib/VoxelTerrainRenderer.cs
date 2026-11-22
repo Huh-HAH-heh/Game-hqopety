@@ -939,7 +939,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
     }
 
-    private static void InvalidatePendingBuild(ChunkEntry entry)
+    private void InvalidatePendingBuild(ChunkEntry entry)
     {
         entry.RunningBuild?.Cancellation.Cancel();
         if (entry.Capture != null)
