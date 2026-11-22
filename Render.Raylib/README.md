@@ -72,11 +72,28 @@ The separate Heightmap fallback remains available from the terrain settings.
 
 The Raylib viewer restores edited voxel chunks at startup and autosaves after a short idle period, with a final save on exit. Default file: `%LOCALAPPDATA%\\RimClone\\voxel-terrain.rvx`. Override it with `RIMCLONE_VOXEL_SAVE_PATH`. The file contains sparse edit chunks only and is versioned against a fingerprint of the generated base terrain; a mismatched base world is rejected before edits are applied.
 
+### Dynamic detached rock
+
+Carving sphere, capsule, box or ramp tools now runs a bounded local connected-component scan after the edit.
+
+- Connectivity is checked on a conservative 0.2 m occupancy grid; accepted fragment geometry is copied from the exact 0.1 m density/material field.
+- Components that touch the analysis-window boundary are treated as still attached and remain static.
+- A detached component becomes one rigid body, not thousands of voxel bodies. The pool is limited to 16 active fragments and each body is limited to 64 mesh chunks.
+- Moving-fragment render meshes use a 0.2 m sampling step. The static terrain keeps the full 0.1 m source field.
+- Bodies receive gravity, angular motion, approximate terrain support and approximate body-to-body contacts. Slow grounded bodies sleep.
+- F7/F8 also deactivate/reactivate fragment bodies in the same in-session edit history as the voxel carve.
+
+This is a bounded first implementation, not a full rigid-body fracture solver: there is no stress-based breakage, wall/edge collision or debris cascade. The fragment mesh is currently built when the rock detaches, and dynamic body state is not yet written to the voxel edit save. Those are separate follow-up tasks.
+
+### Cutaway rebuild behavior
+
+Moving the horizontal slice still updates the GPU clip plane immediately. The cap mesh waits until the selected 0.1 m layer has remained unchanged for 8 frames, then rebuilds. This avoids rebuilding cut caps for every intermediate slider/key step. HUD mesh-build counters are per-frame counters.
+
 ## Important integration boundaries
 
 The Raylib terrain viewer is still an isolated presentation path. Edited regions now use `VoxelNavigationSystem`: it extracts multiple upward-facing support surfaces at 0.5 m intervals and routes in `(X,Y,floor)` space. Movement keeps the selected floor and rejects steps where the SDF vertical capsule intersects solid terrain. Untouched terrain remains on the compact legacy XY route grid. Navigation between distinct 128 m voxel regions and vertical gravity/fall response are not complete. Pawn-to-pawn separation is still the horizontal crowd solver.
 
-Voxel edit chunks are serialized with a compressed, versioned format. The viewer loads the edit file after deterministic base-world generation, autosaves changes and writes a final save on exit. The edit set supports sphere/capsule/box CSG, local smoothing, material paint and plane flattening. Undo/redo and campaign save-slot integration are not yet implemented.
+Voxel edit chunks are serialized with a compressed, versioned format. The viewer loads the edit file after deterministic base-world generation, autosaves changes and writes a final save on exit. The edit set supports sphere/capsule/box/ramp CSG, local smoothing, material paint and plane flattening. Voxel and detached-fragment undo/redo are in-session; campaign save-slot integration and persistence of dynamic body state are not yet implemented.
 
 Performance budgets and sparse allocation are implemented in source, but the new renderer has not yet been benchmarked on target hardware. Do not treat the configured per-frame budgets as measured FPS.
 
