@@ -17,6 +17,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 {
     private const int MaximumBodies = 16;
     private const int MaximumChunksPerBody = 64;
+    private const long MaximumDynamicSnapshotBytes = 32L * 1024 * 1024;
     private const int DynamicMeshStep = 2;
     private const float Gravity = 9.81f;
     private const float MaximumFallSpeed = 45f;
@@ -27,6 +28,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     private sealed class Body : IDisposable
     {
         public required Mesh[] Meshes { get; init; }
+        public required VoxelFragmentSnapshot Snapshot { get; init; }
         public required Vector3 Position { get; set; }
         public required Vector3 HalfExtents { get; init; }
         public required Vector3 LocalPivot { get; init; }
@@ -50,10 +52,12 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     private readonly List<Body[]> _redoEdits = new();
     private List<Body>? _pendingEdit;
     private int _activeBodyCount;
+    private long _snapshotBytes;
     private bool _disposed;
 
     public int Count => _activeBodyCount;
     public int AvailableSlots => Math.Max(0, MaximumBodies - _activeBodyCount);
+    public bool IsMerging => _bodies.Exists(static body => body.MergeJob != null);
 
     public void BeginEdit()
     {
@@ -143,14 +147,14 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(palette);
-        if (AvailableSlots == 0)
+        if (AvailableSlots == 0 ||
+            _snapshotBytes + snapshot.EstimatedBytes > MaximumDynamicSnapshotBytes)
             return false;
 
-        SparseVoxelField localField = snapshot.CreateField();
         int chunkSpan = SparseVoxelField.ChunkSize * DynamicMeshStep;
-        int chunksX = (localField.Width + chunkSpan - 1) / chunkSpan;
-        int chunksY = (localField.Height + chunkSpan - 1) / chunkSpan;
-        int chunksZ = (localField.Depth + chunkSpan - 1) / chunkSpan;
+        int chunksX = (snapshot.Width + chunkSpan - 1) / chunkSpan;
+        int chunksY = (snapshot.Height + chunkSpan - 1) / chunkSpan;
+        int chunksZ = (snapshot.Depth + chunkSpan - 1) / chunkSpan;
         if ((long)chunksX * chunksY * chunksZ > MaximumChunksPerBody)
             return false;
 
@@ -162,7 +166,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             for (int x = 0; x < chunksX; x++)
             {
                 Mesh[] chunkMeshes = VoxelChunkMesher.BuildSurface(
-                    localField, x, y, z, step: DynamicMeshStep, palette: palette);
+                    snapshot, x, y, z, step: DynamicMeshStep, palette: palette);
                 meshes.AddRange(chunkMeshes);
             }
 
@@ -196,6 +200,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             Body body = new()
             {
                 Meshes = meshes.ToArray(),
+                Snapshot = snapshot,
                 Position = position,
                 HalfExtents = snapshot.HalfExtentsMeters,
                 LocalPivot = snapshot.LocalPivotMeters,
@@ -205,6 +210,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             };
             _bodies.Add(body);
             _activeBodyCount++;
+            _snapshotBytes += snapshot.EstimatedBytes;
             _pendingEdit?.Add(body);
             return true;
         }
@@ -268,6 +274,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         _redoEdits.Clear();
         _pendingEdit = null;
         _activeBodyCount = 0;
+        _snapshotBytes = 0;
     }
 
     private bool MakeRoomForBody()
@@ -281,6 +288,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 
         Body expired = _bodies[inactiveIndex];
         expired.Dispose();
+        _snapshotBytes -= expired.Snapshot.EstimatedBytes;
         _bodies.RemoveAt(inactiveIndex);
         RemoveFromHistory(expired);
         return true;
@@ -346,7 +354,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         body.Velocity.Y = MathF.Max(
             -MaximumFallSpeed,
             body.Velocity.Y - Gravity * deltaTime);
-        body.Position += body.Velocity * deltaTime;
+        body.Position = body.Position + body.Velocity * deltaTime;
 
         float angularSpeed = body.AngularVelocity.Length();
         if (angularSpeed > 0.0001f)
@@ -380,7 +388,10 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             float penetration = support.HeightMeters - bottom;
             if (penetration <= 2.5f)
             {
-                body.Position.Y += penetration;
+                body.Position = new Vector3(
+                    body.Position.X,
+                    body.Position.Y + penetration,
+                    body.Position.Z);
                 float impactSpeed = -body.Velocity.Y;
                 body.Velocity.Y = impactSpeed > 1.5f
                     ? impactSpeed * 0.16f
@@ -440,8 +451,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 float firstShare = second.MassKg / totalMass;
                 float secondShare = first.MassKg / totalMass;
 
-                first.Position -= normal * (penetration * firstShare);
-                second.Position += normal * (penetration * secondShare);
+                first.Position = first.Position - normal * (penetration * firstShare);
+                second.Position = second.Position + normal * (penetration * secondShare);
 
                 Vector3 relativeVelocity = second.Velocity - first.Velocity;
                 float closingSpeed = Vector3.Dot(relativeVelocity, normal);
