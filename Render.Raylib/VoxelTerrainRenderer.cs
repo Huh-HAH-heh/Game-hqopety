@@ -274,7 +274,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _logger = new TerrainPipelineLogger();
         _logger.Write(
             "RENDERER_START",
-            "lodSteps=1,2,4,8;workers=2;captureBudgetMs=0.25;gpuUploadBudgetMs=0.55");
+            "lodSteps=1,2,4;legacyQualityProbes=8,40;workers=2;captureBudgetMs=0.25;gpuUploadBudgetMs=0.55");
         Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
