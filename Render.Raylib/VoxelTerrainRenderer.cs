@@ -18,8 +18,9 @@ namespace RimClone.Render.Raylib;
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
     private const int ChunkCells = SparseVoxelField.ChunkSize;
-    private const int MaximumCachedChunks = 1800;
-    private const int MaximumLodPrewarmBuildsPerFrame = 2;
+    private const int MaximumCachedChunks = 2400;
+    private const int MaximumVisibleCandidates = 1800;
+    private const int MaximumLodPrewarmBuildsPerFrame = 1;
 
     private const string VertexShader = """
         #version 330
@@ -171,8 +172,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly List<BuildRequest> _runningBuilds = new();
     private const int MaximumMeshWorkers = 2;
     private const int MaximumPendingMeshJobs = 48;
-    private const double CaptureBudgetMilliseconds = 0.25;
-    private const double GpuUploadBudgetMilliseconds = 0.55;
+    private const double CaptureBudgetMilliseconds = 1.25;
+    private const double GpuUploadBudgetMilliseconds = 1.0;
     private int _activeMeshWorkers;
     private int _pendingCaptures;
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
@@ -188,6 +189,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalQueueSaturated;
     private long _totalRepeatedBuilds;
     private long _totalGpuUploads;
+    private long _totalEmptyChunks;
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
     private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
@@ -203,7 +205,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _paletteVersion;
     private long _frame;
     private bool _disposed;
-    private int _activeStep = 4;
+    private int _activeStep = 40;
     private int _requestedCutLayer = int.MinValue;
     private int _stableCutLayer = int.MinValue;
     private int _cutLayerStableFrames;
@@ -215,7 +217,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     public int ActiveRenderCellSize => _activeStep;
     public float ActiveVoxelSizeMeters => _activeStep * SparseVoxelField.VoxelSizeMeters;
-    public bool IsUsingCoarseLod => _activeStep >= 4;
+    public bool IsUsingCoarseLod => _activeStep >= 8;
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleChunksLastFrame { get; private set; }
     public int RebuiltChunks { get; private set; }
@@ -245,6 +247,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public long TotalQueueSaturated => _totalQueueSaturated;
     public long TotalRepeatedBuilds => _totalRepeatedBuilds;
     public long TotalGpuUploads => _totalGpuUploads;
+    public long TotalEmptyChunks => _totalEmptyChunks;
+    public int FrustumCandidatesLastFrame { get; private set; }
+    public int CandidateOverflowLastFrame { get; private set; }
     public string DiagnosticsLogPath => _logger.LogPath;
     public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
     public int CachedChunks => _chunks.Count;
@@ -724,20 +729,39 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static int SelectLod(float cameraDistance, int currentStep)
     {
-        // Small dead bands stop the mesh tier from oscillating around thresholds.
-        // Keep 0.4 m sampling for genuinely distant views only. The
-        // measured narrow-ridge fixture loses ~0.98 m of SDF detail at step 4
-        // versus ~0.38 m at step 2.
+        // LOD follows the screen footprint. A full 2.3 km overview cannot use
+        // 0.2-0.4 m chunks: that produces hundreds of thousands of 3D candidates.
         return currentStep switch
         {
             1 => cameraDistance < 30f ? 1 :
-                 cameraDistance < 450f ? 2 : 4,
-            2 => cameraDistance < 25f ? 1 :
-                 cameraDistance < 400f ? 2 : 4,
-            4 => cameraDistance < 25f ? 1 :
-                 cameraDistance < 360f ? 2 : 4,
-            _ => cameraDistance < 27f ? 1 :
-                 cameraDistance < 400f ? 2 : 4
+                 cameraDistance < 80f ? 2 :
+                 cameraDistance < 180f ? 4 :
+                 cameraDistance < 520f ? 8 :
+                 cameraDistance < 1250f ? 16 : 40,
+            2 => cameraDistance < 24f ? 1 :
+                 cameraDistance < 90f ? 2 :
+                 cameraDistance < 190f ? 4 :
+                 cameraDistance < 540f ? 8 :
+                 cameraDistance < 1280f ? 16 : 40,
+            4 => cameraDistance < 60f ? 2 :
+                 cameraDistance < 205f ? 4 :
+                 cameraDistance < 560f ? 8 :
+                 cameraDistance < 1320f ? 16 : 40,
+            8 => cameraDistance < 155f ? 4 :
+                 cameraDistance < 590f ? 8 :
+                 cameraDistance < 1380f ? 16 : 40,
+            16 => cameraDistance < 500f ? 8 :
+                  cameraDistance < 1450f ? 16 : 40,
+            40 => cameraDistance < 1100f ? 16 :
+                  cameraDistance < 430f ? 8 :
+                  cameraDistance < 180f ? 4 :
+                  cameraDistance < 80f ? 2 :
+                  cameraDistance < 24f ? 1 : 40,
+            _ => cameraDistance < 30f ? 1 :
+                 cameraDistance < 90f ? 2 :
+                 cameraDistance < 205f ? 4 :
+                 cameraDistance < 590f ? 8 :
+                 cameraDistance < 1450f ? 16 : 40
         };
     }
 
@@ -1178,15 +1202,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float minimum = step switch
         {
             1 => 8f,
-            2 => 20f,
-            4 => 55f,
-            _ => 150f
+            2 => 16f,
+            4 => 32f,
+            8 => 60f,
+            16 => 120f,
+            _ => 250f
         };
         float multiplier = step switch
         {
             1 => 0.9f,
-            2 => 1.0f,
-            4 => 1.1f,
+            2 => 0.95f,
+            4 => 1.0f,
+            8 => 1.05f,
+            16 => 1.15f,
             _ => 1.25f
         };
 
@@ -1394,13 +1422,30 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (currentStep == 2)
         {
-            if (distance <= 35f)
-                return 1;
-            return distance >= 360f ? 4 : 0;
+            if (distance <= 35f) return 1;
+            return distance >= 85f ? 4 : 0;
         }
 
-        if (currentStep == 4 && distance <= 410f)
-            return 2;
+        if (currentStep == 4)
+        {
+            if (distance <= 65f) return 2;
+            return distance >= 190f ? 8 : 0;
+        }
+
+        if (currentStep == 8)
+        {
+            if (distance <= 160f) return 4;
+            return distance >= 550f ? 16 : 0;
+        }
+
+        if (currentStep == 16)
+        {
+            if (distance <= 470f) return 8;
+            return distance >= 1300f ? 40 : 0;
+        }
+
+        if (currentStep == 40 && distance <= 1150f)
+            return 16;
 
         return 0;
     }
