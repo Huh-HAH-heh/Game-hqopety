@@ -90,6 +90,17 @@ This is a bounded first implementation, not a full rigid-body fracture solver: t
 
 **Streaming boundary:** the renderer evicts distant GPU meshes from its bounded cache, but edited CPU voxel chunks are still retained by the main field in memory. A higher-level flat-planet region pager (active sector set around the camera/units, compressed inactive sector pages, and deterministic reload by global sector coordinates) is not implemented yet. The fragment-to-master-grid merge above is implemented independently of that future pager.
 
+### LOD mesh cache and transition
+
+The voxel renderer keeps a separate cached mesh for each chunk key and LOD step (1, 5, 10 and 40 source voxels). Changing camera zoom does not invalidate the other LOD tiers.
+
+- The adjacent LOD tier is prewarmed around the camera target before the hysteresis threshold is crossed, at a maximum of two additional mesh builds per frame.
+- During a transition, ready meshes from the previous tier remain drawable until replacement chunks are ready.
+- The mesh cache has a target capacity of 1,800 entries. LRU eviction protects meshes currently being drawn; if the visible set itself exceeds the target, the cache may temporarily exceed it rather than remove visible geometry.
+- HUD reports total cached voxel chunks, visible voxel chunks, adjacent-LOD prewarm builds and actual voxel mesh builds per frame.
+
+CPU meshing and GPU upload still run on the render thread, but each frame has bounded build budgets. A worker-thread CPU mesh build / render-thread GPU upload pipeline remains a separate optimization.
+
 ### Cutaway rebuild behavior
 
 Moving the horizontal slice still updates the GPU clip plane immediately. The cap mesh waits until the selected 0.1 m layer has remained unchanged for 8 frames, then rebuilds. This avoids rebuilding cut caps for every intermediate slider/key step. HUD mesh-build counters are per-frame counters.
