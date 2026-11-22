@@ -277,6 +277,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                     _snapshotBytes -= body.Snapshot.EstimatedBytes;
                     _activeBodyCount--;
                     body.Active = false;
+                    _bodies.Remove(body);
+                    RemoveFromHistory(body);
                     body.Dispose();
                     body.SourceField.RestoreFragment(body.Snapshot);
                     continue;
@@ -305,6 +307,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 _snapshotBytes -= body.Snapshot.EstimatedBytes;
                 _activeBodyCount--;
                 body.Active = false;
+                _bodies.Remove(body);
+                RemoveFromHistory(body);
                 body.Dispose();
                 body.SourceField.RestoreFragment(body.Snapshot);
                 continue;
