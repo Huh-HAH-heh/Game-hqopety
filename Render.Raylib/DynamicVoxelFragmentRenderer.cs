@@ -66,6 +66,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     }
 
     private readonly List<Body> _bodies = new(MaximumBodies);
+    private readonly SemaphoreSlim _meshBuildSemaphore = new(1, 1);
     private readonly List<Body[]> _undoEdits = new();
     private readonly List<Body[]> _redoEdits = new();
     private List<Body>? _pendingEdit;
@@ -213,28 +214,35 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         };
 
         CancellationToken meshToken = body.MeshBuildCancellation.Token;
-        body.MeshBuildTask = Task.Run(() =>
+        body.MeshBuildTask = Task.Run(async () =>
         {
-            List<VoxelMeshData> result = new();
-            CancellationToken token = meshToken;
-            for (int z = 0; z < chunksZ; z++)
-            for (int y = 0; y < chunksY; y++)
-            for (int x = 0; x < chunksX; x++)
+            await _meshBuildSemaphore.WaitAsync(meshToken).ConfigureAwait(false);
+            try
             {
-                token.ThrowIfCancellationRequested();
-                VoxelChunkBuildInput input = new(
-                    snapshot, x, y, z, DynamicMeshStep);
-                while (!input.IsComplete)
+                List<VoxelMeshData> result = new();
+                for (int z = 0; z < chunksZ; z++)
+                for (int y = 0; y < chunksY; y++)
+                for (int x = 0; x < chunksX; x++)
                 {
-                    token.ThrowIfCancellationRequested();
-                    input.CaptureNext(snapshot, input.CaptureCount);
+                    meshToken.ThrowIfCancellationRequested();
+                    VoxelChunkBuildInput input = new(
+                        snapshot, x, y, z, DynamicMeshStep);
+                    while (!input.IsComplete)
+                    {
+                        meshToken.ThrowIfCancellationRequested();
+                        input.CaptureNext(snapshot, input.CaptureCount);
+                    }
+
+                    result.AddRange(VoxelChunkMesher.BuildSurfaceData(
+                        input, palette, meshToken));
                 }
 
-                result.AddRange(VoxelChunkMesher.BuildSurfaceData(
-                    input, palette, token));
+                return result.ToArray();
             }
-
-            return result.ToArray();
+            finally
+            {
+                _meshBuildSemaphore.Release();
+            }
         }, body.MeshBuildCancellation.Token);
 
         _bodies.Add(body);
