@@ -1082,9 +1082,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.CutDirty = true;
     }
 
+    private static bool HasPendingWork(ChunkEntry entry) =>
+        entry.RunningBuild != null ||
+        entry.NeedsCapture ||
+        entry.Capture != null ||
+        entry.BuildQueued ||
+        entry.ReadyBuild.HasValue ||
+        entry.UploadingSurface.Count > 0 ||
+        entry.UploadingCutCap.Count > 0;
+
     private void EvictUnusedChunks()
     {
-        HashSet<ChunkKey> protectedKeys = new();
+        // Protect every chunk requested by the current view, not only
+        // meshes that have already reached DrawMesh. Otherwise startup can
+        // evict its own capture/worker jobs before the first mesh is uploaded.
+        HashSet<ChunkKey> protectedKeys = new(_visibleCandidateKeys);
         foreach ((ChunkKey key, ChunkEntry _) in _visible)
             protectedKeys.Add(key);
 
@@ -1094,9 +1106,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
             if (protectedKeys.Contains(key) || entry.LastSeenFrame >= threshold ||
-                entry.RunningBuild != null || entry.NeedsCapture ||
-                entry.Capture != null || entry.BuildQueued ||
-                entry.ReadyBuild.HasValue)
+                HasPendingWork(entry))
                 continue;
             (remove ??= new List<ChunkKey>()).Add(key);
         }
@@ -1120,7 +1130,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         List<(ChunkKey Key, long LastSeen)> candidates = new();
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (!protectedKeys.Contains(key))
+            // The 1,800 value is a soft cache target. Pending work is more
+            // valuable than a strict count: evicting it creates endless
+            // recapture/rebuild loops and can leave the initial frame blank.
+            if (!protectedKeys.Contains(key) && !HasPendingWork(entry))
                 candidates.Add((key, entry.LastSeenFrame));
         }
 
