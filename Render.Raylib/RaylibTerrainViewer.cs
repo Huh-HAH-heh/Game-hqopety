@@ -387,7 +387,7 @@ public static class RaylibTerrainViewer
                             voxelBrushRadiusMeters = Math.Min(
                                 4f, voxelBrushRadiusMeters + 0.25f);
 
-                        if (IsKeyPressed(KeyboardKey.F7))
+                        if (IsKeyPressed(KeyboardKey.F7) && !renderer.IsMergingFragments)
                         {
                             if (worldMap.Voxels.Undo())
                                 renderer.UndoVoxelEdit();
@@ -395,7 +395,7 @@ public static class RaylibTerrainViewer
                                 Console.WriteLine("[Voxel] Nothing to undo.");
                         }
 
-                        if (IsKeyPressed(KeyboardKey.F8))
+                        if (IsKeyPressed(KeyboardKey.F8) && !renderer.IsMergingFragments)
                         {
                             if (worldMap.Voxels.Redo())
                                 renderer.RedoVoxelEdit();
@@ -404,6 +404,7 @@ public static class RaylibTerrainViewer
                         }
 
                         if (voxelEditMode != VoxelEditMode.Off &&
+                            !renderer.IsMergingFragments &&
                             IsMouseButtonPressed(MouseButton.Left) &&
                             !layerPanel.IsPointerOverPanel(GetMousePosition()))
                         {
@@ -441,7 +442,11 @@ public static class RaylibTerrainViewer
                             }
                         }
 
+                        if (renderer.IsMergingFragments)
+                            voxelStrokeActive = false;
+
                         if (voxelStrokeActive &&
+                            !renderer.IsMergingFragments &&
                             IsMouseButtonReleased(MouseButton.Left))
                         {
                             Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
