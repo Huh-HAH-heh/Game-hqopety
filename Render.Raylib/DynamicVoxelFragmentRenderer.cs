@@ -41,6 +41,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         public bool Active = true;
         public bool Baked;
         public SparseVoxelField.FragmentMergeJob? MergeJob;
+        public SparseVoxelField.VoxelBounds BakedBounds;
 
         public void Dispose()
         {
@@ -268,10 +269,12 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             if (body.MergeJob == null)
                 continue;
 
+            SparseVoxelField.FragmentMergeJob mergeJob = body.MergeJob;
             if (staticField.ProcessFragmentMerge(
-                    body.MergeJob,
+                    mergeJob,
                     maximumSamples: 12_000))
             {
+                body.BakedBounds = mergeJob.Bounds;
                 body.Baked = true;
                 body.MergeJob = null;
             }
