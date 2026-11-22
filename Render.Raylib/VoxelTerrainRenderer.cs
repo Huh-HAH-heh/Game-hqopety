@@ -879,9 +879,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             {
                 Stopwatch workerTimer = Stopwatch.StartNew();
                 CancellationToken token = request.Cancellation.Token;
-                VoxelMeshData[] surface =
-                    VoxelChunkMesher.BuildSurfaceData(
-                        request.Input, request.Palette, token);
+                VoxelMeshData[] surface = request.BuildSurface
+                    ? VoxelChunkMesher.BuildSurfaceData(
+                        request.Input, request.Palette, token)
+                    : Array.Empty<VoxelMeshData>();
                 VoxelMeshData[] cutCap = request.BuildCutCap
                     ? VoxelChunkMesher.BuildCutCapData(
                         request.Input,
@@ -898,6 +899,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 return new VoxelMeshBuildResult(
                     surface,
                     cutCap,
+                    request.BuildSurface,
                     request.BuildCutCap,
                     request.CutLayer,
                     workerTimer.Elapsed.TotalMilliseconds,
@@ -967,7 +969,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 request.Key,
                 request.RequestRevision,
                 request.BaseVersion,
-                request.PaletteVersion);
+                request.PaletteVersion,
+                request.BuildSurface,
+                request.BuildCutCap,
+                request.CutLayer);
             int sameRevisionBuilds = _completedBuildCounts.TryGetValue(
                 identity, out int previousBuilds)
                     ? previousBuilds + 1
@@ -997,7 +1002,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             LastBuildTriangles = build.TriangleCount;
             _logger.Write(
                 "MESH_BUILT",
-                $"kind={(request.IsPrewarm ? "prewarm" : "visible")} step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount}");
+                $"kind={(request.IsPrewarm ? "prewarm" : "visible")} surface={request.BuildSurface} cutCap={request.BuildCutCap} cutLayer={request.CutLayer} step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount}");
 
             entry.ReadyBuild = build;
             entry.ReadyRequest = request;
