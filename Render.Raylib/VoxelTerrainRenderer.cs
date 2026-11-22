@@ -95,6 +95,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public VoxelChunkBuildInput? Capture;
         public BuildRequest? RunningBuild;
         public VoxelMeshBuildResult? ReadyBuild;
+        public BuildRequest? ReadyRequest;
         public List<Mesh> UploadingSurface = new();
         public List<Mesh> UploadingCutCap = new();
         public int SurfaceUploadIndex;
@@ -653,6 +654,286 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                  cameraDistance < 95f ? 5 :
                  cameraDistance < 420f ? 10 : 40
         };
+    }
+
+    private void RequestBuild(
+        SparseVoxelField field,
+        ChunkKey key,
+        ChunkEntry entry,
+        bool buildCutCap,
+        int cutLayer)
+    {
+        if (entry.RunningBuild != null ||
+            entry.Capture != null ||
+            entry.BuildQueued ||
+            entry.ReadyBuild.HasValue ||
+            entry.FailedRevision == entry.RequestRevision)
+            return;
+
+        entry.Capture = new VoxelChunkBuildInput(
+            field, key.X, key.Y, key.Z, key.Step);
+        entry.CaptureRevision = entry.RequestRevision;
+        entry.CapturePaletteVersion = _paletteVersion;
+        entry.CaptureBaseVersion = field.BaseVersion;
+        entry.CaptureCutCap = buildCutCap;
+        entry.CaptureCutLayer = buildCutCap ? cutLayer : int.MinValue;
+    }
+
+    private void ProcessCaptureJobs(SparseVoxelField field)
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        CpuCaptureMillisecondsLastFrame = 0d;
+
+        List<ChunkEntry> pending = new();
+        foreach (ChunkEntry entry in _chunks.Values)
+        {
+            if (entry.Capture != null)
+                pending.Add(entry);
+        }
+        pending.Sort(static (a, b) =>
+            b.LastSeenFrame.CompareTo(a.LastSeenFrame));
+
+        foreach (ChunkEntry entry in pending)
+        {
+            if (timer.Elapsed.TotalMilliseconds >= CaptureBudgetMilliseconds)
+                break;
+
+            VoxelChunkBuildInput? input = entry.Capture;
+            if (input == null)
+                continue;
+
+            if (entry.CaptureRevision != entry.RequestRevision ||
+                entry.CapturePaletteVersion != _paletteVersion ||
+                entry.CaptureBaseVersion != field.BaseVersion)
+            {
+                entry.Capture = null;
+                continue;
+            }
+
+            // Check the clock every 16 samples. Field sampling is the only
+            // render-thread CPU work in this stage; it is deliberately sliced
+            // across frames and never starts a complete chunk capture at once.
+            while (!input.IsComplete &&
+                timer.Elapsed.TotalMilliseconds < CaptureBudgetMilliseconds)
+            {
+                input.CaptureNext(field, 16);
+            }
+
+            if (!input.IsComplete)
+                continue;
+
+            BuildRequest request = new()
+            {
+                Key = new ChunkKey(input.Step, input.ChunkX, input.ChunkY, input.ChunkZ),
+                Entry = entry,
+                Input = input,
+                RequestRevision = entry.CaptureRevision,
+                PaletteVersion = entry.CapturePaletteVersion,
+                BaseVersion = entry.CaptureBaseVersion,
+                BuildCutCap = entry.CaptureCutCap,
+                CutLayer = entry.CaptureCutLayer,
+                Palette = _palette
+            };
+            entry.Capture = null;
+            entry.BuildQueued = true;
+            _buildQueue.Enqueue(request);
+        }
+
+        CpuCaptureMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
+    }
+
+    private void StartQueuedBuilds(SparseVoxelField field)
+    {
+        while (_activeMeshWorkers < MaximumMeshWorkers &&
+            _buildQueue.Count > 0)
+        {
+            BuildRequest request = _buildQueue.Dequeue();
+            ChunkEntry entry = request.Entry;
+            if (!entry.BuildQueued ||
+                entry.RequestRevision != request.RequestRevision ||
+                entry.CapturePaletteVersion != request.PaletteVersion ||
+                entry.CaptureBaseVersion != request.BaseVersion ||
+                !_chunks.TryGetValue(request.Key, out ChunkEntry? current) ||
+                !ReferenceEquals(current, entry))
+                continue;
+
+            entry.BuildQueued = false;
+            if (request.BaseVersion != field.BaseVersion ||
+                request.PaletteVersion != _paletteVersion)
+                continue;
+
+            entry.RunningBuild = request;
+            request.Task = Task.Run(() =>
+            {
+                VoxelMeshData[] surface =
+                    VoxelChunkMesher.BuildSurfaceData(request.Input, request.Palette);
+                VoxelMeshData[] cutCap = request.BuildCutCap
+                    ? VoxelChunkMesher.BuildCutCapData(
+                        request.Input,
+                        request.CutLayer * SparseVoxelField.VoxelSizeMeters,
+                        request.Palette)
+                    : Array.Empty<VoxelMeshData>();
+                return new VoxelMeshBuildResult(
+                    surface, cutCap, request.BuildCutCap, request.CutLayer);
+            });
+
+            _runningBuilds.Add(request);
+            _activeMeshWorkers++;
+        }
+    }
+
+    private void CollectCompletedBuilds(SparseVoxelField field)
+    {
+        for (int i = _runningBuilds.Count - 1; i >= 0; i--)
+        {
+            BuildRequest request = _runningBuilds[i];
+            Task<VoxelMeshBuildResult>? task = request.Task;
+            if (task == null || !task.IsCompleted)
+                continue;
+
+            _runningBuilds.RemoveAt(i);
+            _activeMeshWorkers--;
+            ChunkEntry entry = request.Entry;
+            if (ReferenceEquals(entry.RunningBuild, request))
+                entry.RunningBuild = null;
+
+            if (task.IsFaulted || task.IsCanceled)
+            {
+                if (request.RequestRevision == entry.RequestRevision)
+                    entry.FailedRevision = request.RequestRevision;
+                continue;
+            }
+
+            if (!_chunks.TryGetValue(request.Key, out ChunkEntry? current) ||
+                !ReferenceEquals(current, entry) ||
+                request.RequestRevision != entry.RequestRevision ||
+                request.PaletteVersion != _paletteVersion ||
+                request.BaseVersion != field.BaseVersion)
+                continue;
+
+            entry.ReadyBuild = task.GetAwaiter().GetResult();
+            entry.ReadyRequest = request;
+            entry.SurfaceUploadIndex = 0;
+            entry.CutUploadIndex = 0;
+            entry.UploadingSurface.Clear();
+            entry.UploadingCutCap.Clear();
+        }
+    }
+
+    private void UploadReadyMeshes()
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        GpuUploadMillisecondsLastFrame = 0d;
+
+        // Visible chunks are uploaded before speculative prewarm chunks.
+        List<ChunkEntry> ready = new();
+        HashSet<ChunkEntry> seen = new();
+        foreach ((ChunkKey _, ChunkEntry entry) in _visible)
+        {
+            if (entry.ReadyBuild.HasValue && seen.Add(entry))
+                ready.Add(entry);
+        }
+        foreach (ChunkEntry entry in _chunks.Values)
+        {
+            if (entry.ReadyBuild.HasValue && seen.Add(entry))
+                ready.Add(entry);
+        }
+
+        foreach (ChunkEntry entry in ready)
+        {
+            VoxelMeshBuildResult result = entry.ReadyBuild!.Value;
+            BuildRequest? request = entry.ReadyRequest;
+            if (request == null ||
+                request.RequestRevision != entry.RequestRevision ||
+                request.PaletteVersion != _paletteVersion)
+            {
+                InvalidatePendingBuild(entry);
+                continue;
+            }
+
+            while (entry.SurfaceUploadIndex < result.Surface.Length)
+            {
+                Mesh mesh = VoxelChunkMesher.UploadOne(
+                    result.Surface[entry.SurfaceUploadIndex++]);
+                entry.UploadingSurface.Add(mesh);
+                if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                    break;
+            }
+
+            if (entry.SurfaceUploadIndex < result.Surface.Length ||
+                timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                break;
+
+            if (result.HasCutCap)
+            {
+                while (entry.CutUploadIndex < result.CutCap.Length)
+                {
+                    Mesh mesh = VoxelChunkMesher.UploadOne(
+                        result.CutCap[entry.CutUploadIndex++]);
+                    entry.UploadingCutCap.Add(mesh);
+                    if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                        break;
+                }
+
+                if (entry.CutUploadIndex < result.CutCap.Length ||
+                    timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                    break;
+            }
+
+            Mesh[] previousSurface = entry.Surface;
+            entry.Surface = entry.UploadingSurface.ToArray();
+            entry.UploadingSurface.Clear();
+            foreach (Mesh mesh in previousSurface)
+                UnloadMesh(mesh);
+
+            entry.BaseVersion = request.BaseVersion;
+            entry.PaletteVersion = request.PaletteVersion;
+            entry.SurfaceDirty = false;
+            entry.Built = true;
+
+            if (result.HasCutCap)
+            {
+                Mesh[] previousCut = entry.CutCap;
+                entry.CutCap = entry.UploadingCutCap.ToArray();
+                entry.UploadingCutCap.Clear();
+                foreach (Mesh mesh in previousCut)
+                    UnloadMesh(mesh);
+
+                entry.CutLayer = result.CutLayer;
+                entry.CutDirty = false;
+                RebuiltCutCaps++;
+            }
+
+            RebuiltChunks++;
+            if (request.Key.Step != _activeStep)
+                LodPrewarmBuilds++;
+            entry.ReadyBuild = null;
+            entry.ReadyRequest = null;
+            entry.SurfaceUploadIndex = 0;
+            entry.CutUploadIndex = 0;
+
+            if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                break;
+        }
+
+        GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
+    }
+
+    private static void InvalidatePendingBuild(ChunkEntry entry)
+    {
+        entry.Capture = null;
+        entry.BuildQueued = false;
+        entry.ReadyBuild = null;
+        entry.ReadyRequest = null;
+        entry.SurfaceUploadIndex = 0;
+        entry.CutUploadIndex = 0;
+
+        foreach (Mesh mesh in entry.UploadingSurface)
+            UnloadMesh(mesh);
+        foreach (Mesh mesh in entry.UploadingCutCap)
+            UnloadMesh(mesh);
+        entry.UploadingSurface.Clear();
+        entry.UploadingCutCap.Clear();
     }
 
     private bool IsCurrentMeshReady(ChunkEntry entry, SparseVoxelField field) =>
