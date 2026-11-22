@@ -217,7 +217,7 @@ internal static class VoxelChunkMesher
     private const int SampleSide = CellsPerAxis + 3;
     private const int SamplePlane = SampleSide * SampleSide;
     private const int SampleCount = SampleSide * SampleSide * SampleSide;
-    private const int MaximumVerticesPerMesh = 3_000;
+    private const int MaximumVerticesPerMesh = 60_000;
 
     private static readonly int[] CornerX = { 0, 1, 1, 0, 0, 1, 1, 0 };
     private static readonly int[] CornerY = { 0, 0, 1, 1, 0, 0, 1, 1 };
