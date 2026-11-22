@@ -125,8 +125,18 @@ internal sealed class VoxelChunkBuildInput
                 int worldZ = SparseVoxelField.GetChunkSampleCoordinate(ChunkZ, z, Step);
                 float density = field.GetDensity(worldX, worldY, worldZ);
                 DensitySamples[index] = density;
-                _minimumDensity = MathF.Min(_minimumDensity, density);
-                _maximumDensity = MathF.Max(_maximumDensity, density);
+
+                // The outer halo (sample indices 0 and 18) exists only for
+                // finite-difference normals. It is not a corner of any cell
+                // meshed by BuildSurfaceData and must not mark a chunk as
+                // containing a surface (world bounds deliberately sample as air).
+                if (x >= 1 && x <= Cells + 1 &&
+                    y >= 1 && y <= Cells + 1 &&
+                    z >= 1 && z <= Cells + 1)
+                {
+                    _minimumDensity = MathF.Min(_minimumDensity, density);
+                    _maximumDensity = MathF.Max(_maximumDensity, density);
+                }
             }
             else
             {
