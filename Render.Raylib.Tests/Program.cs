@@ -109,20 +109,27 @@ internal static class Program
         SyntheticTerrainField field = new(1024, 1024, 1024);
         TerrainPalette palette = new();
         Console.WriteLine("=== CPU mesh benchmark (no GPU upload) ===");
-        Console.WriteLine("LOD | cell size | capture ms | build median ms | build p95 ms | vertices | triangles | alloc MiB | max SDF error");
+        Console.WriteLine("LOD | cell size | capture median/p95 ms | build median/p95 ms | vertices | triangles | alloc MiB | max SDF error");
 
         foreach (int step in Lods)
         {
             int chunkY = GetSurfaceChunkY(step);
-            Stopwatch captureTimer = Stopwatch.StartNew();
-            VoxelChunkBuildInput input = Capture(
-                field, 0, chunkY, 0, step);
-            captureTimer.Stop();
+            const int iterations = 9;
+            double[] captureTimings = new double[iterations];
+            VoxelChunkBuildInput input = null!;
 
-            // JIT warm-up is kept outside the measured samples.
+            for (int i = 0; i < iterations; i++)
+            {
+                Stopwatch captureTimer = Stopwatch.StartNew();
+                input = Capture(field, 0, chunkY, 0, step);
+                captureTimer.Stop();
+                captureTimings[i] = captureTimer.Elapsed.TotalMilliseconds;
+            }
+            Array.Sort(captureTimings);
+
+            // JIT warm-up is kept outside the measured mesh samples.
             _ = VoxelChunkMesher.BuildSurfaceData(input, palette);
 
-            const int iterations = 9;
             double[] timings = new double[iterations];
             long allocationBefore = GC.GetTotalAllocatedBytes(true);
             VoxelMeshData[] last = Array.Empty<VoxelMeshData>();
@@ -143,9 +150,8 @@ internal static class Program
 
             Console.WriteLine(
                 $"{step,3} | {step * 0.1f,9:0.0} m | " +
-                $"{captureTimer.Elapsed.TotalMilliseconds,10:0.000} | " +
-                $"{timings[iterations / 2],16:0.000} | " +
-                $"{timings[iterations - 1],12:0.000} | " +
+                $"{captureTimings[iterations / 2],9:0.000}/{captureTimings[iterations - 1],0:0.000} | " +
+                $"{timings[iterations / 2],9:0.000}/{timings[iterations - 1],0:0.000} | " +
                 $"{vertices,8} | {triangles,9} | " +
                 $"{allocated / (1024d * 1024d),9:0.00} | {maximumError:0.000}");
         }
