@@ -15,6 +15,7 @@ internal static class Program
         Console.WriteLine($"Processor count: {Environment.ProcessorCount}");
 
         Run("LOD chunk borders use identical source samples", TestChunkBorders, ref failures);
+        Run("Uniform chunks skip all material samples", TestDensityOnlySkipsMaterials, ref failures);
         Run("Reduced LOD preserves more SDF detail than legacy 40-step LOD",
             TestLodApproximation, ref failures);
 
@@ -68,6 +69,44 @@ internal static class Program
         }
 
         return (true, "all shared sample planes match for steps 1, 2, 4, 8, 5, 10 and 40");
+    }
+
+    private static (bool Passed, string Detail) TestDensityOnlySkipsMaterials()
+    {
+        SyntheticTerrainField emptyField = new(512, 512, 512);
+        VoxelChunkBuildInput empty = new(emptyField, 0, 0, 0, 1);
+        CaptureDensityAware(emptyField, empty);
+
+        bool emptySkippedMaterials =
+            !empty.HasPotentialSurface &&
+            emptyField.MaterialReadCount == 0 &&
+            empty.IsComplete;
+
+        SyntheticTerrainField surfaceField = new(512, 512, 512);
+        VoxelChunkBuildInput surface = new(surfaceField, 0, 3, 0, 1);
+        CaptureDensityAware(surfaceField, surface);
+
+        bool surfaceRetainedMaterials =
+            surface.HasPotentialSurface &&
+            surfaceField.MaterialReadCount == 4096 &&
+            surface.IsComplete;
+
+        return (
+            emptySkippedMaterials && surfaceRetainedMaterials,
+            $"empty: surface={empty.HasPotentialSurface}, materialReads={emptyField.MaterialReadCount}; " +
+            $"surface: surface={surface.HasPotentialSurface}, materialReads={surfaceField.MaterialReadCount}");
+    }
+
+    private static void CaptureDensityAware(
+        SyntheticTerrainField field,
+        VoxelChunkBuildInput input)
+    {
+        while (!input.IsComplete)
+        {
+            bool captureMaterials =
+                input.DensityCaptureComplete && input.HasPotentialSurface;
+            input.CaptureNext(field, 128, captureMaterials);
+        }
     }
 
     private static (bool Passed, string Detail) TestLodApproximation()
@@ -316,6 +355,7 @@ internal static class Program
         public int Width { get; }
         public int Height { get; }
         public int Depth { get; }
+        public int MaterialReadCount { get; private set; }
 
         public SyntheticTerrainField(int width, int height, int depth)
         {
@@ -343,7 +383,10 @@ internal static class Program
             return SurfaceHeight(x, z) - (y + 0.5f);
         }
 
-        public ushort GetMaterialId(int x, int y, int z) =>
-            GetDensity(x, y, z) > 0f ? (ushort)1 : (ushort)0;
+        public ushort GetMaterialId(int x, int y, int z)
+        {
+            MaterialReadCount++;
+            return GetDensity(x, y, z) > 0f ? (ushort)1 : (ushort)0;
+        }
     }
 }
