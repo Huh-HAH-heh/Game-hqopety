@@ -196,7 +196,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _paletteVersion;
     private long _frame;
     private bool _disposed;
-    private int _activeStep = 8;
+    private int _activeStep = 4;
     private int _requestedCutLayer = int.MinValue;
     private int _stableCutLayer = int.MinValue;
     private int _cutLayerStableFrames;
@@ -208,7 +208,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     public int ActiveRenderCellSize => _activeStep;
     public float ActiveVoxelSizeMeters => _activeStep * SparseVoxelField.VoxelSizeMeters;
-    public bool IsUsingCoarseLod => _activeStep >= 8;
+    public bool IsUsingCoarseLod => _activeStep >= 4;
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleChunksLastFrame { get; private set; }
     public int RebuiltChunks { get; private set; }
@@ -721,20 +721,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return currentStep switch
         {
             1 => cameraDistance < 30f ? 1 :
-                 cameraDistance < 115f ? 2 :
-                 cameraDistance < 420f ? 4 : 8,
+                 cameraDistance < 115f ? 2 : 4,
             2 => cameraDistance < 25f ? 1 :
-                 cameraDistance < 105f ? 2 :
-                 cameraDistance < 420f ? 4 : 8,
+                 cameraDistance < 105f ? 2 : 4,
             4 => cameraDistance < 25f ? 1 :
-                 cameraDistance < 92f ? 2 :
-                 cameraDistance < 420f ? 4 : 8,
-            8 => cameraDistance < 25f ? 1 :
-                 cameraDistance < 92f ? 2 :
-                 cameraDistance < 380f ? 4 : 8,
+                 cameraDistance < 92f ? 2 : 4,
             _ => cameraDistance < 27f ? 1 :
-                 cameraDistance < 100f ? 2 :
-                 cameraDistance < 400f ? 4 : 8
+                 cameraDistance < 100f ? 2 : 4
         };
     }
 
@@ -1376,19 +1369,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             return distance >= 88f ? 4 : 0;
         }
 
-        if (currentStep == 4)
-        {
-            if (distance <= 105f)
-                return 2;
-            return distance >= 350f ? 8 : 0;
-        }
-
-        if (currentStep == 8)
-        {
-            if (distance <= 30f)
-                return 1;
-            return distance <= 430f ? 4 : 0;
-        }
+        if (currentStep == 4 && distance <= 105f)
+            return 2;
 
         return 0;
     }
