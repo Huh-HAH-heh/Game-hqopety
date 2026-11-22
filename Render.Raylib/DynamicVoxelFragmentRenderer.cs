@@ -61,7 +61,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 
     public int Count => _activeBodyCount;
     public int AvailableSlots => Math.Max(0, MaximumBodies - _activeBodyCount);
-    public bool IsMerging => _bodies.Exists(static body => body.MergeJob != null);
+    public bool IsMerging => _bodies.Exists(static body => body.MergeJob != null || body.Baked);
 
     public void BeginEdit()
     {
@@ -507,6 +507,8 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             {
                 Body second = _bodies[j];
                 if (!first.Active || !second.Active ||
+                    first.MergeJob != null || second.MergeJob != null ||
+                    first.Baked || second.Baked ||
                     (first.Sleeping && second.Sleeping))
                     continue;
 
