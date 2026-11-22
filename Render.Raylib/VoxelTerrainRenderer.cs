@@ -133,6 +133,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int RebuiltChunks { get; private set; }
     public int RebuiltCutCaps { get; private set; }
     public int CachedChunks => _chunks.Count;
+    public int DynamicFragmentCount => _dynamicFragments.Count;
 
     public VoxelTerrainRenderer(TerrainPalette palette)
     {
@@ -509,6 +510,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
+        SetCutShader(enabled: false, cutHeightMeters);
         _dynamicFragments.Draw(_material);
 
         if (cutEnabled)
