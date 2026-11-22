@@ -1814,7 +1814,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
             if (snapshotSampleCount <= maximumSnapshotSamples)
             {
-                float[] density = new float[(int)snapshotSampleCount];
+                short[] density = new short[(int)snapshotSampleCount];
                 ushort[] materials = new ushort[(int)snapshotSampleCount];
                 Array.Fill(density, -1f);
 
@@ -1847,7 +1847,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     if (materialId == 0)
                         materialId = 1;
 
-                    density[localIndex] = oldDensity;
+                    density[localIndex] = checked((short)Math.Clamp(
+                        (int)MathF.Round(oldDensity * DensityScale),
+                        short.MinValue,
+                        short.MaxValue));
                     materials[localIndex] = materialId;
                     massKg += VoxelMaterialCatalog.Get(materialId).MassPerVoxelKg;
                     solidSamples++;
