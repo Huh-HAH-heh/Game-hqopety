@@ -765,38 +765,34 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static int SelectLod(float cameraDistance, int currentStep)
     {
-        // LOD follows the screen footprint. A full 2.3 km overview cannot use
-        // 0.2-0.4 m chunks: that produces hundreds of thousands of 3D candidates.
+        // Hysteresis is asymmetric: zooming in refines earlier, while zooming
+        // out waits longer. Coarse tiers keep overview views bounded.
         return currentStep switch
         {
             1 => cameraDistance < 30f ? 1 :
-                 cameraDistance < 80f ? 2 :
-                 cameraDistance < 180f ? 4 :
-                 cameraDistance < 520f ? 8 :
-                 cameraDistance < 1250f ? 16 : 40,
-            2 => cameraDistance < 24f ? 1 :
                  cameraDistance < 90f ? 2 :
                  cameraDistance < 190f ? 4 :
                  cameraDistance < 540f ? 8 :
                  cameraDistance < 1280f ? 16 : 40,
-            4 => cameraDistance < 60f ? 2 :
-                 cameraDistance < 205f ? 4 :
-                 cameraDistance < 560f ? 8 :
-                 cameraDistance < 1320f ? 16 : 40,
-            8 => cameraDistance < 155f ? 4 :
-                 cameraDistance < 590f ? 8 :
-                 cameraDistance < 1380f ? 16 : 40,
-            16 => cameraDistance < 500f ? 8 :
+            2 => cameraDistance < 24f ? 1 :
+                 cameraDistance < 80f ? 2 :
+                 cameraDistance < 180f ? 4 :
+                 cameraDistance < 520f ? 8 :
+                 cameraDistance < 1250f ? 16 : 40,
+            4 => cameraDistance < 55f ? 2 :
+                 cameraDistance < 170f ? 4 :
+                 cameraDistance < 500f ? 8 :
+                 cameraDistance < 1230f ? 16 : 40,
+            8 => cameraDistance < 140f ? 4 :
+                 cameraDistance < 520f ? 8 :
+                 cameraDistance < 1280f ? 16 : 40,
+            16 => cameraDistance < 450f ? 8 :
                   cameraDistance < 1450f ? 16 : 40,
-            40 => cameraDistance < 1100f ? 16 :
-                  cameraDistance < 430f ? 8 :
-                  cameraDistance < 180f ? 4 :
-                  cameraDistance < 80f ? 2 :
-                  cameraDistance < 24f ? 1 : 40,
+            40 => cameraDistance < 1000f ? 16 : 40,
             _ => cameraDistance < 30f ? 1 :
                  cameraDistance < 90f ? 2 :
-                 cameraDistance < 205f ? 4 :
-                 cameraDistance < 590f ? 8 :
+                 cameraDistance < 170f ? 4 :
+                 cameraDistance < 520f ? 8 :
                  cameraDistance < 1450f ? 16 : 40
         };
     }
