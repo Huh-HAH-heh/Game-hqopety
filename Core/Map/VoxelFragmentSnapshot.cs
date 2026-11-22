@@ -4,13 +4,14 @@ using System.Numerics;
 namespace Core.Map;
 
 /// <summary>
-/// Immutable local snapshot of a detached voxel component.
-/// The one-sample air border is included so the normal voxel mesher can build
-/// a closed surface without reading the mutable source world.
+/// Compact immutable local fragment on the world's shared 0.1 m sample grid.
+/// Density is quantized to the same signed 16-bit format as the main field;
+/// material is stored once per sample cell. No secondary SparseVoxelField is
+/// allocated for rendering or simulation.
 /// </summary>
-public sealed class VoxelFragmentSnapshot
+public sealed class VoxelFragmentSnapshot : IVoxelFieldSource
 {
-    private readonly float[] _density;
+    private readonly short[] _density;
     private readonly ushort[] _materials;
 
     public int Width { get; }
@@ -23,10 +24,13 @@ public sealed class VoxelFragmentSnapshot
         (Width - 2) * SparseVoxelField.VoxelSizeMeters * 0.5f,
         (Height - 2) * SparseVoxelField.VoxelSizeMeters * 0.5f,
         (Depth - 2) * SparseVoxelField.VoxelSizeMeters * 0.5f);
+    public int SampleCount => _density.Length;
+    public long EstimatedBytes =>
+        (long)_density.Length * (sizeof(short) + sizeof(ushort));
     public float MassKg { get; }
 
     internal VoxelFragmentSnapshot(
-        float[] density,
+        short[] density,
         ushort[] materials,
         int width,
         int height,
@@ -53,39 +57,78 @@ public sealed class VoxelFragmentSnapshot
         MassKg = MathF.Max(0.01f, massKg);
     }
 
+    public float GetDensity(int x, int y, int z)
+    {
+        if (!IsInside(x, y, z))
+            return -1f;
+
+        return _density[x + y * Width + z * Width * Height] /
+            (float)SparseVoxelField.DensityScale;
+    }
+
+    public ushort GetMaterialId(int x, int y, int z)
+    {
+        if (!IsInside(x, y, z) || GetDensity(x, y, z) <= 0f)
+            return 0;
+
+        return _materials[x + y * Width + z * Width * Height];
+    }
+
     /// <summary>
-    /// Creates an immutable sampling view over this fragment. The local field
-    /// has no allocated edit chunks; all samples come from this owned snapshot.
+    /// Trilinearly samples local metres measured from the fragment's lower
+    /// corner. Source and destination use voxel-centre coordinates.
     /// </summary>
-    internal ReadOnlySpan<float> DensitySamples => _density;
+    public float SampleDensityLocal(Vector3 localPositionMeters)
+    {
+        if (!float.IsFinite(localPositionMeters.X) ||
+            !float.IsFinite(localPositionMeters.Y) ||
+            !float.IsFinite(localPositionMeters.Z))
+            return -1f;
+
+        float sx = localPositionMeters.X / SparseVoxelField.VoxelSizeMeters - 0.5f;
+        float sy = localPositionMeters.Y / SparseVoxelField.VoxelSizeMeters - 0.5f;
+        float sz = localPositionMeters.Z / SparseVoxelField.VoxelSizeMeters - 0.5f;
+        int x0 = (int)MathF.Floor(sx);
+        int y0 = (int)MathF.Floor(sy);
+        int z0 = (int)MathF.Floor(sz);
+        float tx = sx - x0;
+        float ty = sy - y0;
+        float tz = sz - z0;
+
+        float c000 = GetDensity(x0, y0, z0);
+        float c100 = GetDensity(x0 + 1, y0, z0);
+        float c010 = GetDensity(x0, y0 + 1, z0);
+        float c110 = GetDensity(x0 + 1, y0 + 1, z0);
+        float c001 = GetDensity(x0, y0, z0 + 1);
+        float c101 = GetDensity(x0 + 1, y0, z0 + 1);
+        float c011 = GetDensity(x0, y0 + 1, z0 + 1);
+        float c111 = GetDensity(x0 + 1, y0 + 1, z0 + 1);
+
+        float x00 = Lerp(c000, c100, tx);
+        float x10 = Lerp(c010, c110, tx);
+        float x01 = Lerp(c001, c101, tx);
+        float x11 = Lerp(c011, c111, tx);
+        return Lerp(Lerp(x00, x10, ty), Lerp(x01, x11, ty), tz);
+    }
+
+    public ushort GetMaterialAtLocalPosition(Vector3 localPositionMeters)
+    {
+        int x = (int)MathF.Round(
+            localPositionMeters.X / SparseVoxelField.VoxelSizeMeters - 0.5f);
+        int y = (int)MathF.Round(
+            localPositionMeters.Y / SparseVoxelField.VoxelSizeMeters - 0.5f);
+        int z = (int)MathF.Round(
+            localPositionMeters.Z / SparseVoxelField.VoxelSizeMeters - 0.5f);
+        return GetMaterialId(x, y, z);
+    }
+
+    internal ReadOnlySpan<short> DensitySamples => _density;
     internal ReadOnlySpan<ushort> MaterialSamples => _materials;
 
-    internal SparseVoxelField CreateField()
-    {
-        float[] density = _density;
-        ushort[] materials = _materials;
-        int width = Width;
-        int height = Height;
-        int depth = Depth;
-        int plane = width * height;
+    private bool IsInside(int x, int y, int z) =>
+        x >= 0 && y >= 0 && z >= 0 &&
+        x < Width && y < Height && z < Depth;
 
-        return new SparseVoxelField(
-            width,
-            height,
-            depth,
-            (x, y, z) =>
-            {
-                if (x < 0 || y < 0 || z < 0 ||
-                    x >= width || y >= height || z >= depth)
-                    return -1f;
-                return density[x + y * width + z * plane];
-            },
-            (x, y, z) =>
-            {
-                if (x < 0 || y < 0 || z < 0 ||
-                    x >= width || y >= height || z >= depth)
-                    return 0;
-                return materials[x + y * width + z * plane];
-            });
-    }
+    private static float Lerp(float a, float b, float t) =>
+        a + (b - a) * t;
 }
