@@ -1034,6 +1034,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach (ChunkEntry entry in ready)
         {
+            if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                break;
+
             VoxelMeshBuildResult result = entry.ReadyBuild!.Value;
             BuildRequest? request = entry.ReadyRequest;
             if (request == null ||
@@ -1044,20 +1047,23 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
             }
 
-            while (entry.SurfaceUploadIndex < result.Surface.Length)
+            if (result.HasSurface)
             {
-                Mesh mesh = VoxelChunkMesher.UploadOne(
-                    result.Surface[entry.SurfaceUploadIndex++]);
-                entry.UploadingSurface.Add(mesh);
-                GpuUploadsLastFrame++;
-                _totalGpuUploads++;
-                if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                while (entry.SurfaceUploadIndex < result.Surface.Length)
+                {
+                    Mesh mesh = VoxelChunkMesher.UploadOne(
+                        result.Surface[entry.SurfaceUploadIndex++]);
+                    entry.UploadingSurface.Add(mesh);
+                    GpuUploadsLastFrame++;
+                    _totalGpuUploads++;
+                    if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+                        break;
+                }
+
+                if (entry.SurfaceUploadIndex < result.Surface.Length ||
+                    timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                     break;
             }
-
-            if (entry.SurfaceUploadIndex < result.Surface.Length ||
-                timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
-                break;
 
             if (result.HasCutCap)
             {
@@ -1077,16 +1083,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     break;
             }
 
-            Mesh[] previousSurface = entry.Surface;
-            entry.Surface = entry.UploadingSurface.ToArray();
-            entry.UploadingSurface.Clear();
-            foreach (Mesh mesh in previousSurface)
-                UnloadMesh(mesh);
+            // Surface and cut cap are independent products. A cap-only refresh
+            // must never replace or invalidate the already-correct base mesh.
+            if (result.HasSurface)
+            {
+                Mesh[] previousSurface = entry.Surface;
+                entry.Surface = entry.UploadingSurface.ToArray();
+                entry.UploadingSurface.Clear();
+                foreach (Mesh mesh in previousSurface)
+                    UnloadMesh(mesh);
 
-            entry.BaseVersion = request.BaseVersion;
-            entry.PaletteVersion = request.PaletteVersion;
-            entry.SurfaceDirty = false;
-            entry.Built = true;
+                entry.BaseVersion = request.BaseVersion;
+                entry.PaletteVersion = request.PaletteVersion;
+                entry.SurfaceDirty = false;
+                entry.Built = true;
+                RebuiltChunks++;
+            }
 
             if (result.HasCutCap)
             {
@@ -1101,16 +1113,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 RebuiltCutCaps++;
             }
 
-            RebuiltChunks++;
-            if (request.Key.Step != _activeStep)
+            if (result.HasSurface && request.IsPrewarm)
                 LodPrewarmBuilds++;
+
             entry.ReadyBuild = null;
             entry.ReadyRequest = null;
             entry.SurfaceUploadIndex = 0;
             entry.CutUploadIndex = 0;
-
-            if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
-                break;
         }
 
         GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
