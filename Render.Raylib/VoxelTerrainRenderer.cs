@@ -133,6 +133,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required int CutLayer { get; init; }
         public required TerrainPalette Palette { get; init; }
         public Task<VoxelMeshBuildResult>? Task { get; set; }
+        public long EnqueuedTimestamp { get; init; }
+        public bool IsPrewarm { get; init; }
         public CancellationTokenSource Cancellation { get; } = new();
     }
 
@@ -140,7 +142,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         VoxelMeshData[] Surface,
         VoxelMeshData[] CutCap,
         bool HasCutCap,
-        int CutLayer);
+        int CutLayer,
+        double WorkerMilliseconds,
+        int VertexCount,
+        int TriangleCount);
+
+    private readonly record struct BuildIdentity(
+        ChunkKey Key,
+        long BaseVersion,
+        int PaletteVersion);
 
     private readonly record struct Candidate(
         ChunkKey Key,
@@ -158,6 +168,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _activeMeshWorkers;
     private int _pendingCaptures;
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
+    private readonly TerrainPipelineLogger _logger;
+    private readonly Dictionary<BuildIdentity, int> _completedBuildCounts = new();
+    private long _totalBuildRequests;
+    private long _totalBuildStarted;
+    private long _totalBuildCompleted;
+    private long _totalBuildCancelled;
+    private long _totalBuildFailed;
+    private long _totalStaleResults;
+    private long _totalDuplicateRequestAttempts;
+    private long _totalQueueSaturated;
+    private long _totalRepeatedBuilds;
+    private long _totalGpuUploads;
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
     private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
@@ -197,6 +219,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public double CpuCaptureMilliseconds => CpuCaptureMillisecondsLastFrame;
     public double GpuUploadMilliseconds => GpuUploadMillisecondsLastFrame;
     public int PendingMeshJobs => _buildQueue.Count + _pendingCaptures;
+    public double WorkerBuildMillisecondsLastFrame { get; private set; }
+    public double LastWorkerBuildMilliseconds { get; private set; }
+    public double LastWorkerQueueWaitMilliseconds { get; private set; }
+    public int BuildsCompletedLastFrame { get; private set; }
+    public int LastBuildStep { get; private set; }
+    public int LastBuildVertices { get; private set; }
+    public int LastBuildTriangles { get; private set; }
+    public int GpuUploadsLastFrame { get; private set; }
+    public long TotalBuildRequests => _totalBuildRequests;
+    public long TotalBuildStarted => _totalBuildStarted;
+    public long TotalBuildCompleted => _totalBuildCompleted;
+    public long TotalBuildCancelled => _totalBuildCancelled;
+    public long TotalBuildFailed => _totalBuildFailed;
+    public long TotalStaleResults => _totalStaleResults;
+    public long TotalDuplicateRequestAttempts => _totalDuplicateRequestAttempts;
+    public long TotalQueueSaturated => _totalQueueSaturated;
+    public long TotalRepeatedBuilds => _totalRepeatedBuilds;
+    public long TotalGpuUploads => _totalGpuUploads;
+    public string DiagnosticsLogPath => _logger.LogPath;
     public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
     public int CachedChunks => _chunks.Count;
     public int DynamicFragmentCount => _dynamicFragments.Count;
@@ -228,6 +269,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _material = LoadMaterialDefault();
         _material.Shader = _shader;
+
+        _logger = new TerrainPipelineLogger();
+        _logger.Write(
+            "RENDERER_START",
+            "lodSteps=1,2,4,8;workers=2;captureBudgetMs=0.25;gpuUploadBudgetMs=0.55");
+        Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
     public void SetPalette(TerrainPalette palette)
@@ -263,6 +310,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         RebuiltChunks = 0;
         RebuiltCutCaps = 0;
         LodPrewarmBuilds = 0;
+        WorkerBuildMillisecondsLastFrame = 0d;
+        BuildsCompletedLastFrame = 0;
+        GpuUploadsLastFrame = 0;
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
         int previousStep = _activeStep;
         int step = SelectLod(cameraDistance, previousStep);
