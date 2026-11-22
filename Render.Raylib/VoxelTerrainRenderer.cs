@@ -646,7 +646,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ChunkEntry entry,
         bool buildSurface,
         bool buildCutCap,
-        int cutLayer,
         int cutLayer)
     {
         if (entry.FailedRevision == entry.RequestRevision)
@@ -898,7 +897,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         Stopwatch timer = Stopwatch.StartNew();
         GpuUploadMillisecondsLastFrame = 0d;
 
-        // Visible chunks are uploaded before speculative prewarm chunks.
+        // Visible chunks are uploaded first; there is no speculative LOD prewarm.
         List<ChunkEntry> ready = new();
         HashSet<ChunkEntry> seen = new();
         foreach ((ChunkKey _, ChunkEntry entry) in _visible)
