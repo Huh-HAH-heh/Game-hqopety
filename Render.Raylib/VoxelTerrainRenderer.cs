@@ -89,6 +89,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public long CaptureBaseVersion;
         public bool CaptureCutCap;
         public int CaptureCutLayer = int.MinValue;
+        public bool CaptureIsPrewarm;
         public bool BuildQueued;
         public bool NeedsCapture;
         public VoxelChunkBuildInput? Capture;
@@ -820,7 +821,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 BaseVersion = entry.CaptureBaseVersion,
                 BuildCutCap = entry.CaptureCutCap,
                 CutLayer = entry.CaptureCutLayer,
-                Palette = _palette
+                Palette = _palette,
+                EnqueuedTimestamp = Stopwatch.GetTimestamp(),
+                IsPrewarm = entry.CaptureIsPrewarm
             };
             entry.Capture = null;
             entry.NeedsCapture = false;
