@@ -1058,7 +1058,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (protectedKeys.Contains(key) || entry.LastSeenFrame >= threshold)
+            if (protectedKeys.Contains(key) || entry.LastSeenFrame >= threshold ||
+                entry.RunningBuild != null || entry.Capture != null ||
+                entry.ReadyBuild.HasValue)
                 continue;
             (remove ??= new List<ChunkKey>()).Add(key);
         }
@@ -1236,14 +1238,26 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             bool intersectsY = Intersects(firstY, lastY, bounds.MinY, bounds.MaxY);
             bool intersectsZ = Intersects(firstZ, lastZ, bounds.MinZ, bounds.MaxZ);
 
-            if (intersectsX && intersectsY && intersectsZ)
-                entry.SurfaceDirty = true;
-
+            bool surfaceChanged = intersectsX && intersectsY && intersectsZ;
+            bool cutChanged = false;
             if (entry.CutLayer != int.MinValue && intersectsX && intersectsZ)
             {
                 int cutSample = entry.CutLayer - 1;
-                if (bounds.MinY <= cutSample + 1 && bounds.MaxY > cutSample)
+                cutChanged =
+                    bounds.MinY <= cutSample + 1 &&
+                    bounds.MaxY > cutSample;
+            }
+
+            if (surfaceChanged || cutChanged)
+            {
+                if (surfaceChanged)
+                    entry.SurfaceDirty = true;
+                if (cutChanged)
                     entry.CutDirty = true;
+
+                entry.RequestRevision++;
+                entry.FailedRevision = int.MinValue;
+                InvalidatePendingBuild(entry);
             }
         }
     }
