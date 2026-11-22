@@ -94,11 +94,25 @@ This is a bounded first implementation, not a full rigid-body fracture solver: t
 
 **Streaming boundary:** the renderer evicts distant GPU meshes from its bounded cache, but edited CPU voxel chunks are still retained by the main field in memory. A higher-level flat-planet region pager (active sector set around the camera/units, compressed inactive sector pages, and deterministic reload by global sector coordinates) is not implemented yet. The fragment-to-master-grid merge above is implemented independently of that future pager.
 
+### LOD quality and pipeline diagnostics
+
+The voxel surface LOD steps are 1, 2, 4 and 8 source voxels (0.1, 0.2, 0.4 and 0.8 m). The previous 5/10/40 steps sampled at up to 4 m and erased small terrain features. The LOD regression executable measures SDF reconstruction error on a synthetic narrow ridge, checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction at every LOD.
+
+Run locally:
+
+```powershell
+dotnet run --project Render.Raylib.Tests/Render.Raylib.Tests.csproj -c Release
+```
+
+The viewer writes asynchronous diagnostics to `%LOCALAPPDATA%\RimClone\logs\terrain-pipeline.log`. `MESH_BUILT` entries include LOD, chunk coordinates, source revision, worker milliseconds, queue wait, vertices and triangles. `REBUILD_REPEAT` marks a second build of the same chunk at the same source/palette revision. Other event types record cancellations, stale results and worker failures. A `FRAME_SUMMARY` is written every 120 frames with queue depth, worker count, capture/build/upload time and cumulative counters.
+
+The CPU benchmark does not call the GPU. Actual GPU upload timing and packet counts are measured by the running viewer and printed in its HUD/log.
+
 ### LOD mesh cache and transition
 
 The voxel renderer keeps a separate cached mesh for each chunk key and LOD step (1, 5, 10 and 40 source voxels). Changing camera zoom does not invalidate the other LOD tiers.
 
-- The adjacent LOD tier is prewarmed around the camera target before the hysteresis threshold is crossed, at a maximum of two additional mesh builds per frame.
+- The adjacent LOD tier is prewarmed around the camera target before the hysteresis threshold is crossed, through the same asynchronous capture/worker/upload pipeline.
 - During a transition, ready meshes from the previous tier remain drawable until replacement chunks are ready.
 - The cache target is 1,800 entries, not a hard cap. Current frustum candidates and every in-flight capture/build/upload are protected from eviction. Cold chunks are pruned only after 240 frames out of view, and pruning runs every 30 frames. This prevents camera movement from deleting pending work or immediately discarding an LOD that may be needed again.
 - HUD reports cached chunks, current frustum candidates, actually visible chunks, CPU capture time, GPU upload time, active workers and queued work.
