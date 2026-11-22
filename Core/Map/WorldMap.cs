@@ -1030,34 +1030,43 @@ public sealed class WorldMap
         int globalY,
         ReadOnlySpan<TileRange> ranges)
     {
-        if (!IsInside(globalX, globalY))
-            throw new IndexOutOfRangeException();
-
-        GetOrCreateRegion(
-            globalX / TerrainRegion.TilesPerSide,
-            globalY / TerrainRegion.TilesPerSide);
-
-        int index = GetColumnIndex(globalX, globalY);
-        Blocks.Volumes.SetColumnRanges(globalX, globalY, ranges);
-        _rangeCache[index] = null;
-        RecalculateSurfaceHeight(index);
-
-        Vector3 minimum = new(globalX, 0f, globalY);
-        Vector3 maximum = new(globalX + 1f, LayerCount * 0.1f, globalY + 1f);
-        Voxels.CarveBox(minimum, maximum);
-        foreach (TileRange range in ranges)
+        _voxelBaseSamplerLock.EnterWriteLock();
+        try
         {
-            if (range.State != StateSolid || range.MaterialId == 0 ||
-                range.EndZ <= range.StartZ)
-                continue;
+            if (!IsInside(globalX, globalY))
+                throw new IndexOutOfRangeException();
 
-            Voxels.FillBox(
-                new Vector3(globalX, range.StartZ * 0.1f, globalY),
-                new Vector3(globalX + 1f, range.EndZ * 0.1f, globalY + 1f),
-                range.MaterialId);
+            GetOrCreateRegion(
+                globalX / TerrainRegion.TilesPerSide,
+                globalY / TerrainRegion.TilesPerSide);
+
+            int index = GetColumnIndex(globalX, globalY);
+            Blocks.Volumes.SetColumnRanges(globalX, globalY, ranges);
+            _rangeCache[index] = null;
+            RecalculateSurfaceHeight(index);
+
+            Vector3 minimum = new(globalX, 0f, globalY);
+            Vector3 maximum = new(globalX + 1f, LayerCount * 0.1f, globalY + 1f);
+            Voxels.CarveBox(minimum, maximum);
+            foreach (TileRange range in ranges)
+            {
+                if (range.State != StateSolid || range.MaterialId == 0 ||
+                    range.EndZ <= range.StartZ)
+                    continue;
+
+                Voxels.FillBox(
+                    new Vector3(globalX, range.StartZ * 0.1f, globalY),
+                    new Vector3(globalX + 1f, range.EndZ * 0.1f, globalY + 1f),
+                    range.MaterialId);
+            }
+
+            MarkTerrainChanged(globalX, globalY);
+        
         }
-
-        MarkTerrainChanged(globalX, globalY);
+        finally
+        {
+            _voxelBaseSamplerLock.ExitWriteLock();
+        }
     }
 
         public void ClearTileRanges(
