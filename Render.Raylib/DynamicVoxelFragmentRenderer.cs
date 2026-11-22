@@ -88,6 +88,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                     _activeBodyCount--;
                 }
                 body.Dispose();
+                _snapshotBytes -= body.Snapshot.EstimatedBytes;
                 _bodies.Remove(body);
             }
             return;
@@ -400,6 +401,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             if (body.Active)
                 continue;
             body.Dispose();
+            _snapshotBytes -= body.Snapshot.EstimatedBytes;
             _bodies.Remove(body);
             RemoveFromHistory(body);
         }
