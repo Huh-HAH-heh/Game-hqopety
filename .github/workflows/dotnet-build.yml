@@ -51,6 +51,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Run voxel terrain LOD tests and CPU benchmark
+        run: dotnet run --project Render.Raylib.Tests/Render.Raylib.Tests.csproj --configuration Release --no-build
+
       - name: Run simulation self-tests
         run: dotnet run --project App/App.csproj --configuration Release --no-build -- --self-test
 
