@@ -107,6 +107,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public double VoxelGpuUploadMilliseconds => _densityVoxelRenderer?.GpuUploadMilliseconds ?? 0d;
     public int VoxelMeshWorkers => _densityVoxelRenderer?.RunningMeshJobs ?? 0;
     public int VoxelPendingMeshJobs => _densityVoxelRenderer?.PendingMeshJobs ?? 0;
+    public int VoxelVisibleCandidates => _densityVoxelRenderer?.VisibleCandidatesLastFrame ?? 0;
     public int DynamicFragmentCount => _densityVoxelRenderer?.DynamicFragmentCount ?? 0;
     public bool IsMergingFragments => _densityVoxelRenderer?.IsMergingFragments ?? false;
     public bool IsUsingCoarseVoxelLod =>
