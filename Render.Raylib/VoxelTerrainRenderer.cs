@@ -87,6 +87,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public int CaptureRevision;
         public int CapturePaletteVersion;
         public long CaptureBaseVersion;
+        public bool CaptureSurface;
         public bool CaptureCutCap;
         public int CaptureCutLayer = int.MinValue;
         public bool CaptureIsPrewarm;
@@ -130,6 +131,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required int RequestRevision { get; init; }
         public required int PaletteVersion { get; init; }
         public required long BaseVersion { get; init; }
+        public required bool BuildSurface { get; init; }
         public required bool BuildCutCap { get; init; }
         public required int CutLayer { get; init; }
         public required TerrainPalette Palette { get; init; }
@@ -142,6 +144,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly record struct VoxelMeshBuildResult(
         VoxelMeshData[] Surface,
         VoxelMeshData[] CutCap,
+        bool HasSurface,
         bool HasCutCap,
         int CutLayer,
         double WorkerMilliseconds,
@@ -152,7 +155,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ChunkKey Key,
         int RequestRevision,
         long BaseVersion,
-        int PaletteVersion);
+        int PaletteVersion,
+        bool BuildSurface,
+        bool BuildCutCap,
+        int CutLayer);
 
     private readonly record struct Candidate(
         ChunkKey Key,
@@ -457,7 +463,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 (entry.CutLayer != cutLayer || entry.CutDirty);
 
             if (surfaceStale || needsCutCap)
-                RequestBuild(field, key, entry, needsCutCap, cutLayer, isPrewarm: false);
+                RequestBuild(field, key, entry, surfaceStale, needsCutCap, cutLayer, isPrewarm: false);
 
             if (!cutEnabled && entry.CutCap.Length > 0)
                 ClearCutCap(entry);
@@ -736,6 +742,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         SparseVoxelField field,
         ChunkKey key,
         ChunkEntry entry,
+        bool buildSurface,
         bool buildCutCap,
         int cutLayer,
         bool isPrewarm)
@@ -764,6 +771,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.CaptureRevision = entry.RequestRevision;
         entry.CapturePaletteVersion = _paletteVersion;
         entry.CaptureBaseVersion = field.BaseVersion;
+        entry.CaptureSurface = buildSurface;
         entry.CaptureCutCap = buildCutCap;
         entry.CaptureCutLayer = buildCutCap ? cutLayer : int.MinValue;
         entry.CaptureIsPrewarm = isPrewarm;
@@ -829,6 +837,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 RequestRevision = entry.CaptureRevision,
                 PaletteVersion = entry.CapturePaletteVersion,
                 BaseVersion = entry.CaptureBaseVersion,
+                BuildSurface = entry.CaptureSurface,
                 BuildCutCap = entry.CaptureCutCap,
                 CutLayer = entry.CaptureCutLayer,
                 Palette = _palette,
@@ -1356,7 +1365,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (!stale)
                 continue;
 
-            RequestBuild(field, key, entry, buildCutCap: false, cutLayer: -1, isPrewarm: true);
+            RequestBuild(field, key, entry, buildSurface: true, buildCutCap: false, cutLayer: -1, isPrewarm: true);
             builds++;
         }
     }
