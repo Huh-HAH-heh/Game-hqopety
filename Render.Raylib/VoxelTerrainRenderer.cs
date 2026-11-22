@@ -20,6 +20,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumMediumBuildsPerFrame = 5;
     private const int MaximumFineBuildsPerFrame = 2;
     private const int MaximumCutBuildsPerFrame = 20;
+    private const int MaximumLodPrewarmBuildsPerFrame = 2;
 
     private const string VertexShader = """
         #version 330
@@ -133,6 +134,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int VisibleChunksLastFrame { get; private set; }
     public int RebuiltChunks { get; private set; }
     public int RebuiltCutCaps { get; private set; }
+    public int LodPrewarmBuilds { get; private set; }
+    public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
     public int CachedChunks => _chunks.Count;
     public int DynamicFragmentCount => _dynamicFragments.Count;
     public bool IsMergingFragments => _dynamicFragments.IsMerging;
@@ -194,6 +197,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _frame++;
         RebuiltChunks = 0;
         RebuiltCutCaps = 0;
+        LodPrewarmBuilds = 0;
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
         int previousStep = _activeStep;
         int step = SelectLod(cameraDistance, previousStep);
@@ -490,6 +494,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
+        PrepareAdjacentLodCache(
+            field,
+            camera,
+            viewportWidth,
+            viewportHeight,
+            maximumViewDistanceMeters,
+            step,
+            cameraDistance);
+
         if (_chunks.Count > MaximumCachedChunks)
             EvictUnusedChunks();
 
@@ -627,7 +640,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         HashSet<ChunkKey> visibleKeys)
     {
         if (entry.Built && visibleKeys.Add(key))
+        {
+            entry.LastSeenFrame = _frame;
             _visible.Add((key, entry));
+        }
     }
 
     private static float GetViewRadius(
@@ -725,25 +741,175 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void EvictUnusedChunks()
     {
+        HashSet<ChunkKey> protectedKeys = new();
+        foreach ((ChunkKey key, ChunkEntry _) in _visible)
+            protectedKeys.Add(key);
+
         long threshold = _frame - 240;
         List<ChunkKey>? remove = null;
 
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (entry.LastSeenFrame >= threshold)
+            if (protectedKeys.Contains(key) || entry.LastSeenFrame >= threshold)
                 continue;
-
             (remove ??= new List<ChunkKey>()).Add(key);
         }
 
-        if (remove == null)
+        if (remove != null)
+        {
+            foreach (ChunkKey key in remove)
+            {
+                if (_chunks.Remove(key, out ChunkEntry? entry))
+                    entry.Dispose();
+            }
+        }
+
+        // The previous implementation used the 1,800 entry value only as a
+        // trigger for age-based eviction. Recent chunks from multiple LOD tiers
+        // could therefore grow without bound (e.g. 2,851 cached chunks). Enforce
+        // the actual budget with LRU eviction while pinning everything drawn.
+        if (_chunks.Count <= MaximumCachedChunks)
             return;
 
-        foreach (ChunkKey key in remove)
+        List<(ChunkKey Key, long LastSeen)> candidates = new();
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            _chunks[key].Dispose();
-            _chunks.Remove(key);
+            if (!protectedKeys.Contains(key))
+                candidates.Add((key, entry.LastSeenFrame));
         }
+
+        candidates.Sort(static (a, b) => a.LastSeen.CompareTo(b.LastSeen));
+        int removeCount = _chunks.Count - MaximumCachedChunks;
+        for (int i = 0; i < candidates.Count && removeCount > 0; i++)
+        {
+            ChunkKey key = candidates[i].Key;
+            if (!_chunks.Remove(key, out ChunkEntry? entry))
+                continue;
+            entry.Dispose();
+            removeCount--;
+        }
+    }
+
+    private void PrepareAdjacentLodCache(
+        SparseVoxelField field,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        int currentStep,
+        float cameraDistance)
+    {
+        int targetStep = GetAdjacentPrewarmStep(currentStep, cameraDistance);
+        if (targetStep == 0)
+            return;
+
+        float chunkSize = ChunkCells * targetStep * SparseVoxelField.VoxelSizeMeters;
+        int chunksX = DivideRoundUp(field.Width, ChunkCells * targetStep);
+        int chunksY = DivideRoundUp(field.Height, ChunkCells * targetStep);
+        int chunksZ = DivideRoundUp(field.Depth, ChunkCells * targetStep);
+
+        int centerX = (int)MathF.Floor(camera.Target.X / chunkSize);
+        int centerY = (int)MathF.Floor(camera.Target.Y / chunkSize);
+        int centerZ = (int)MathF.Floor(camera.Target.Z / chunkSize);
+
+        List<Candidate> warmCandidates = new(27);
+        for (int z = -1; z <= 1; z++)
+        for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++)
+        {
+            int chunkX = centerX + x;
+            int chunkY = centerY + y;
+            int chunkZ = centerZ + z;
+            if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
+                chunkX >= chunksX || chunkY >= chunksY || chunkZ >= chunksZ)
+                continue;
+
+            Vector3 center = new(
+                (chunkX + 0.5f) * chunkSize,
+                (chunkY + 0.5f) * chunkSize,
+                (chunkZ + 0.5f) * chunkSize);
+            float radius = chunkSize * 0.8660254f;
+            if (!TerrainFrustum.IsSphereVisible(
+                    camera, center, radius,
+                    viewportWidth, viewportHeight,
+                    maximumViewDistanceMeters))
+                continue;
+
+            warmCandidates.Add(new Candidate(
+                new ChunkKey(targetStep, chunkX, chunkY, chunkZ),
+                center,
+                radius,
+                Vector3.DistanceSquared(center, camera.Position)));
+        }
+
+        warmCandidates.Sort(static (a, b) =>
+            a.DistanceSquared.CompareTo(b.DistanceSquared));
+
+        int builds = 0;
+        foreach (Candidate candidate in warmCandidates)
+        {
+            if (builds >= MaximumLodPrewarmBuildsPerFrame)
+                break;
+
+            ChunkKey key = candidate.Key;
+            if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
+            {
+                entry = new ChunkEntry();
+                _chunks.Add(key, entry);
+            }
+
+            entry.LastSeenFrame = _frame;
+            bool stale = !entry.Built ||
+                entry.SurfaceDirty ||
+                entry.BaseVersion != field.BaseVersion ||
+                entry.PaletteVersion != _paletteVersion;
+            if (!stale)
+                continue;
+
+            Mesh[] replacement = VoxelChunkMesher.BuildSurface(
+                field, key.X, key.Y, key.Z, key.Step, _palette);
+            Mesh[] previous = entry.Surface;
+            entry.Surface = replacement;
+            entry.BaseVersion = field.BaseVersion;
+            entry.PaletteVersion = _paletteVersion;
+            entry.SurfaceDirty = false;
+            entry.Built = true;
+            foreach (Mesh mesh in previous)
+                UnloadMesh(mesh);
+
+            RebuiltChunks++;
+            LodPrewarmBuilds++;
+            builds++;
+        }
+    }
+
+    private static int GetAdjacentPrewarmStep(int currentStep, float distance)
+    {
+        if (currentStep == 1)
+            return distance >= 20f ? 5 : 0;
+
+        if (currentStep == 5)
+        {
+            if (distance <= 32f)
+                return 1;
+            return distance >= 82f ? 10 : 0;
+        }
+
+        if (currentStep == 10)
+        {
+            if (distance <= 105f)
+                return 5;
+            return distance >= 370f ? 40 : 0;
+        }
+
+        if (currentStep == 40)
+        {
+            if (distance <= 32f)
+                return 1;
+            return distance <= 450f ? 10 : 0;
+        }
+
+        return 0;
     }
 
     private void EnsureFieldSubscription(SparseVoxelField field)
