@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Threading;
 using Core.Map;
 using Raylib_cs;
 using static Raylib_cs.Raylib;
@@ -326,7 +327,8 @@ internal static class VoxelChunkMesher
 
     public static VoxelMeshData[] BuildSurfaceData(
         VoxelChunkBuildInput input,
-        TerrainPalette palette)
+        TerrainPalette palette,
+        CancellationToken cancellationToken = default)
     {
         int step = input.Step;
         int originX = input.OriginX;
@@ -346,6 +348,9 @@ internal static class VoxelChunkMesher
         for (int y = 0; y < CellsPerAxis; y++)
         for (int x = 0; x < CellsPerAxis; x++)
         {
+            if (x == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
             float minimum = float.PositiveInfinity;
             float maximum = float.NegativeInfinity;
 
@@ -495,7 +500,8 @@ internal static class VoxelChunkMesher
     public static VoxelMeshData[] BuildCutCapData(
         VoxelChunkBuildInput field,
         float cutHeightMeters,
-        TerrainPalette palette)
+        TerrainPalette palette,
+        CancellationToken cancellationToken = default)
     {
         float cutSampleY = cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f;
         if (cutSampleY <= -0.5f || cutSampleY >= field.FieldHeight - 0.5f)
@@ -510,6 +516,7 @@ internal static class VoxelChunkMesher
         for (int z = 0; z < CellsPerAxis; z++)
         for (int x = 0; x < CellsPerAxis; x++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             float x0 = originX + x * step;
             float x1 = x0 + step;
             float z0 = originZ + z * step;
