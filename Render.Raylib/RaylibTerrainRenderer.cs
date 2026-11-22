@@ -401,6 +401,22 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         VisibleRegionsLastFrame = visibleRegionCount;
     }
 
+    public int DetachLooseFragments(
+        Core.Map.SparseVoxelField field,
+        Vector3 centerMeters,
+        Vector3 halfExtentsMeters)
+    {
+        ThrowIfDisposed();
+        return _densityVoxelRenderer?.DetachLooseFragments(
+            field, centerMeters, halfExtentsMeters) ?? 0;
+    }
+
+    public void ClearDynamicFragments()
+    {
+        ThrowIfDisposed();
+        _densityVoxelRenderer?.ClearDynamicFragments();
+    }
+
     private void SetVoxelCutShader(bool enabled, float height)
     {
         if (!_hasVoxelShader)
