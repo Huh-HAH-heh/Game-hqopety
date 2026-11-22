@@ -464,23 +464,34 @@ internal static class VoxelChunkMesher
         int chunkZ,
         int step,
         float cutHeightMeters,
-        TerrainPalette palette) =>
-        Upload(BuildCutCapData(field, chunkX, chunkZ, step, cutHeightMeters, palette));
+        TerrainPalette palette)
+    {
+        int cutSampleY = Math.Clamp(
+            (int)MathF.Floor(cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f),
+            0,
+            field.Height - 1);
+        int chunkY = Math.Clamp(
+            cutSampleY / (CellsPerAxis * step),
+            0,
+            (field.Height - 1) / (CellsPerAxis * step));
+        VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ, step);
+        while (!input.IsComplete)
+            input.CaptureNext(field, input.CaptureCount);
+        return Upload(BuildCutCapData(input, cutHeightMeters, palette));
+    }
 
     public static VoxelMeshData[] BuildCutCapData(
-        SparseVoxelField field,
-        int chunkX,
-        int chunkZ,
-        int step,
+        VoxelChunkBuildInput field,
         float cutHeightMeters,
         TerrainPalette palette)
     {
         float cutSampleY = cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f;
-        if (cutSampleY <= -0.5f || cutSampleY >= field.Height - 0.5f)
-            return Array.Empty<Mesh>();
+        if (cutSampleY <= -0.5f || cutSampleY >= field.FieldHeight - 0.5f)
+            return Array.Empty<VoxelMeshData>();
 
-        int originX = chunkX * CellsPerAxis * step;
-        int originZ = chunkZ * CellsPerAxis * step;
+        int step = field.Step;
+        int originX = field.OriginX;
+        int originZ = field.OriginZ;
         List<VoxelMeshData> output = new(1);
         MeshBatch batch = new(output);
 
@@ -503,10 +514,10 @@ internal static class VoxelChunkMesher
             if (polygonCount < 3)
                 continue;
 
-            ushort materialId = field.GetMaterialId(
-                Math.Clamp((int)MathF.Floor((x0 + x1) * 0.5f), 0, field.Width - 1),
-                Math.Clamp((int)MathF.Floor(cutSampleY), 0, field.Height - 1),
-                Math.Clamp((int)MathF.Floor((z0 + z1) * 0.5f), 0, field.Depth - 1));
+            ushort materialId = field.GetMaterialAtWorldPosition(
+                (x0 + x1) * 0.5f,
+                cutSampleY,
+                (z0 + z1) * 0.5f);
             Color color = GetMaterialColor(palette, materialId);
             SurfaceVertex anchor = new(
                 polygon[0].Position + Vector3.UnitY * 0.006f,
@@ -529,7 +540,7 @@ internal static class VoxelChunkMesher
     }
 
     private static SlicePoint MakeSlicePoint(
-        SparseVoxelField field,
+        VoxelChunkBuildInput field,
         float x,
         float ySample,
         float z,
