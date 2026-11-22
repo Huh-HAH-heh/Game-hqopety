@@ -71,15 +71,17 @@ internal static class Program
     {
         SyntheticTerrainField field = new(1024, 1024, 1024);
         double fineError = MeasureSdfError(field, 2);
-        double acceptedCoarseError = MeasureSdfError(field, 8);
+        double runtimeCoarseError = MeasureSdfError(field, 4);
+        double legacyStep8Error = MeasureSdfError(field, 8);
         double legacyCoarseError = MeasureSdfError(field, 40);
 
-        bool passed = acceptedCoarseError < legacyCoarseError &&
-            acceptedCoarseError < fineError * 20d;
+        bool passed = runtimeCoarseError < legacyStep8Error &&
+            runtimeCoarseError < legacyCoarseError &&
+            fineError < runtimeCoarseError;
 
         return (passed,
-            $"max SDF error: step2={fineError:0.000}, step8={acceptedCoarseError:0.000}, " +
-            $"legacy step40={legacyCoarseError:0.000}");
+            $"max SDF error: runtime step2={fineError:0.000}, runtime step4={runtimeCoarseError:0.000}, " +
+            $"legacy step8={legacyStep8Error:0.000}, legacy step40={legacyCoarseError:0.000}");
     }
 
     private static double MeasureSdfError(SyntheticTerrainField field, int step)
