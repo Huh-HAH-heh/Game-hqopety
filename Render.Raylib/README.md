@@ -100,10 +100,10 @@ The voxel renderer keeps a separate cached mesh for each chunk key and LOD step 
 
 - The adjacent LOD tier is prewarmed around the camera target before the hysteresis threshold is crossed, at a maximum of two additional mesh builds per frame.
 - During a transition, ready meshes from the previous tier remain drawable until replacement chunks are ready.
-- The mesh cache has a target capacity of 1,800 entries. LRU eviction protects meshes currently being drawn; if the visible set itself exceeds the target, the cache may temporarily exceed it rather than remove visible geometry.
-- HUD reports total cached voxel chunks, visible voxel chunks, adjacent-LOD prewarm builds and actual voxel mesh builds per frame.
+- The cache target is 1,800 entries, not a hard cap. Current frustum candidates and every in-flight capture/build/upload are protected from eviction. Cold chunks are pruned only after 240 frames out of view, and pruning runs every 30 frames. This prevents camera movement from deleting pending work or immediately discarding an LOD that may be needed again.
+- HUD reports cached chunks, current frustum candidates, actually visible chunks, CPU capture time, GPU upload time, active workers and queued work.
 
-CPU meshing and GPU upload still run on the render thread, but each frame has bounded build budgets. A worker-thread CPU mesh build / render-thread GPU upload pipeline remains a separate optimization.
+CPU surface extraction runs on two cancellable background workers. The render thread only captures a small immutable input in bounded slices and uploads finished mesh packets. Old geometry remains available until the replacement is complete.
 
 ### Cutaway rebuild behavior
 
