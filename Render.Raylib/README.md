@@ -28,20 +28,13 @@ The same density field is used by:
 - material painting and local smoothing;
 - horizontal cut-plane intersections and cut caps.
 
-The data remains at 0.1 m resolution. The renderer changes only its sampling step with distance:
+The source field and edit operations retain **0.1 m voxel spacing**. The Raylib surface renderer now uses one fixed **0.4 m sampling step** at every camera distance. It does not switch mesh resolution when zooming, keep parallel LOD caches or prewarm another tier. This keeps the same geometry density during camera movement. The fixed render step is a presentation sampling choice; it does not change the authoritative 0.1 m field or the resolution of voxel edits.
 
-| Render step | Source-field samples |
-|---|---:|
-| Close | 0.1 m |
-| Medium | 0.5 m |
-| Far | 1.0 m |
-| Very far | 4.0 m |
+Chunk meshes are cached in 3D coordinates. A local edit dirties only intersecting chunks and neighbours whose sampling halo overlaps the edit.
 
-Chunk meshes are cached in 3D coordinates and each LOD tier is retained independently. A local edit dirties only intersecting chunks and neighbours whose sampling halo overlaps the edit.
+**Meshing pipeline:** the render thread copies only the sparse edited storage chunks needed by a render chunk into an immutable source snapshot. Density sampling, material capture, empty-chunk detection and surface extraction then run together on up to six cancellable CPU workers (the limit leaves two logical processors available to the application). Workers produce only vertex/normal/color/index arrays and never call Raylib or OpenGL. This removes the old 1.25 ms-per-frame capture stage that serialized the pipeline before workers could begin. Stale results are cancelled or discarded using per-chunk request revisions.
 
-**Meshing pipeline:** the render thread incrementally captures at most 0.25 ms of live voxel samples per frame. The immutable chunk snapshot is processed by up to two cancellable CPU workers; detached-fragment meshes use one additional serialized worker. Workers produce only vertex/normal/color/index arrays and never call Raylib or OpenGL. Stale results are cancelled or discarded using per-chunk request revisions.
-
-The render thread uploads completed mesh packets in chunks of at most 3,000 vertices, with a target total GPU-upload budget of 0.55 ms per frame (shared with detached-fragment meshes). The old valid mesh remains visible until every replacement packet has been uploaded, then the renderer swaps the mesh set atomically. The pending queue is capped at 48 requests and prioritizes chunks nearest the camera. HUD reports CPU capture time, GPU upload time, active workers and queued jobs. The upload target is measured at runtime; a single GPU-driver upload call cannot be preempted once submitted, so the HUD is used to detect hardware-specific overruns.
+The render thread uploads completed mesh packets in chunks of at most 3,000 vertices, with a 3.0 ms upload target per frame (shared with detached-fragment meshes). The old valid mesh remains visible until every replacement packet has been uploaded, then the renderer swaps the mesh set atomically. The pending queue holds up to 128 jobs and candidates are selected nearest the terrain focus. HUD reports snapshot-copy time, worker build time, GPU upload time, active workers and queued jobs. A GPU upload call cannot be preempted once submitted, so actual upload time must be checked on the target GPU.
 
 ## Terrain editing
 
@@ -94,9 +87,11 @@ This is a bounded first implementation, not a full rigid-body fracture solver: t
 
 **Streaming boundary:** the renderer evicts distant GPU meshes from its bounded cache, but edited CPU voxel chunks are still retained by the main field in memory. A higher-level flat-planet region pager (active sector set around the camera/units, compressed inactive sector pages, and deterministic reload by global sector coordinates) is not implemented yet. The fragment-to-master-grid merge above is implemented independently of that future pager.
 
-### LOD quality and pipeline diagnostics
+### Fixed-resolution mesh cache and diagnostics
 
-Runtime voxel surface LOD uses six screen-space tiers: 1, 2, 4, 8, 16 and 40 source voxels (0.1, 0.2, 0.4, 0.8, 1.6 and 4.0 m). Fine tiers are used for close inspection; coarse tiers are reserved for zoomed-out views where their projected footprint is small. On the narrow-ridge fixture, maximum SDF error was 0.38 m at step 2, 0.98 m at step 4, 1.19 m at step 8 and 1.28 m at step 40. The viewer limits visible candidates to 1800 and retains at most 2400 cached chunks. The LOD regression executable measures SDF reconstruction error, checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction at runtime and legacy LOD steps.
+The active viewer mesh step is always 4 source voxels (0.4 m); zooming does not change it. The renderer selects at most 4,096 frustum candidates, retains up to 6,000 chunk entries and queues up to 128 mesh jobs. The view radius is bounded to keep candidate discovery and the local editable scene predictable. The geometry is sampled from the authoritative 0.1 m signed-distance field, and the edit field itself is never downsampled or rewritten.
+
+The mesher test executable still compares multiple sampling steps as a quality regression tool. On the narrow-ridge fixture, maximum SDF error was 0.38 m at step 2, 0.98 m at step 4, 1.19 m at step 8 and 1.28 m at step 40. It also checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction. These are test probes, not runtime camera LOD tiers.
 
 Run locally:
 
@@ -104,20 +99,15 @@ Run locally:
 dotnet run --project Render.Raylib.Tests/Render.Raylib.Tests.csproj -c Release
 ```
 
-The viewer writes asynchronous diagnostics to `%LOCALAPPDATA%\RimClone\logs\terrain-pipeline.log`. `MESH_BUILT` entries include LOD, chunk coordinates, source revision, worker milliseconds, queue wait, vertices and triangles. `REBUILD_REPEAT` marks a second build of the same chunk at the same source/palette revision. Other event types record cancellations, stale results and worker failures. A `FRAME_SUMMARY` is written every 120 frames with queue depth, worker count, capture/build/upload time and cumulative counters.
+The viewer writes asynchronous diagnostics to `%LOCALAPPDATA%\RimClone\logs\terrain-pipeline.log`. `MESH_BUILT` entries include LOD, chunk coordinates, source revision, worker milliseconds, queue wait, vertices and triangles. `REBUILD_REPEAT` marks a second build of the same chunk at the same source/palette revision. Other event types record cancellations, stale results and worker failures. A `FRAME_SUMMARY` is written every 120 frames with queue depth, worker count, snapshot/build/upload time and cumulative counters.
 
 The CPU benchmark does not call the GPU. Actual GPU upload timing and packet counts are measured by the running viewer and printed in its HUD/log.
 
-### LOD mesh cache and transition
+### Fixed-resolution mesh streaming
 
-The voxel renderer keeps a separate cached mesh for each chunk key and LOD step (1, 5, 10 and 40 source voxels). Changing camera zoom does not invalidate the other LOD tiers.
+Every rendered terrain chunk uses the same 0.4 m sampling step. Camera zoom changes only the visible chunk set, not mesh density. There are no adjacent-tier prewarm jobs and no parent/child LOD fallback transitions.
 
-- The adjacent LOD tier is prewarmed around the camera target before the hysteresis threshold is crossed, through the same asynchronous capture/worker/upload pipeline.
-- During a transition, ready meshes from the previous tier remain drawable until replacement chunks are ready.
-- The cache target is 1,800 entries, not a hard cap. Current frustum candidates and every in-flight capture/build/upload are protected from eviction. Cold chunks are pruned only after 240 frames out of view, and pruning runs every 30 frames. This prevents camera movement from deleting pending work or immediately discarding an LOD that may be needed again.
-- HUD reports cached chunks, current frustum candidates, actually visible chunks, CPU capture time, GPU upload time, active workers and queued work.
-
-CPU surface extraction runs on two cancellable background workers. The render thread only captures a small immutable input in bounded slices and uploads finished mesh packets. Old geometry remains available until the replacement is complete.
+Chunk source snapshots are created from the sparse edited-chunk store on the render thread, then workers perform density capture, material sampling, empty-chunk rejection and triangle extraction. Completed packets are uploaded on the render thread; the previous valid surface remains visible until a replacement is complete. The worker pool is sized from the available logical processor count, with a maximum of six workers.
 
 Cutaway cap updates are independent from the base surface. If only the cut plane changes, the worker request has `surface=false, cutCap=true`; it extracts and uploads only the horizontal cap. The existing base terrain mesh is neither regenerated nor swapped. A voxel edit that affects the base surface requests `surface=true`, and requests a cap as well only if the edit intersects the active cut plane.
 
