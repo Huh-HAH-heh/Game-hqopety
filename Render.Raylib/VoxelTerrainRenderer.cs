@@ -150,6 +150,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private readonly record struct BuildIdentity(
         ChunkKey Key,
+        int RequestRevision,
         long BaseVersion,
         int PaletteVersion);
 
@@ -954,7 +955,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             VoxelMeshBuildResult build = task.GetAwaiter().GetResult();
             BuildIdentity identity = new(
-                request.Key, request.BaseVersion, request.PaletteVersion);
+                request.Key,
+                request.RequestRevision,
+                request.BaseVersion,
+                request.PaletteVersion);
             int sameRevisionBuilds = _completedBuildCounts.TryGetValue(
                 identity, out int previousBuilds)
                     ? previousBuilds + 1
