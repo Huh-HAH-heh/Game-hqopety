@@ -841,14 +841,25 @@ public static class RaylibTerrainViewer
                     : $"HEIGHTMAP CELL {renderer.ActiveRenderCellSize}x{renderer.ActiveRenderCellSize} m",
                 17f,
                 Color.LightGray));
-            lines.Add((
-                $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
-                13f,
-                Color.LightGray));
-            lines.Add((
-                $"VISIBLE VOXEL CHUNKS {renderer.VisibleRegionsLastFrame}   DRAWS {renderer.DrawCallsLastFrame}",
-                13f,
-                Color.LightGray));
+            if (settings.TerrainMode == TerrainRenderMode.Voxel)
+            {
+                lines.Add((
+                    $"LOD CACHE {renderer.CachedVoxelChunks}/1800 | VISIBLE {renderer.VisibleRegionsLastFrame} | PREWARM {renderer.VoxelLodPrewarmBuilds}/FRAME",
+                    13f,
+                    Color.LightGray));
+            }
+            else
+            {
+                lines.Add((
+                    $"RENDER REGIONS {terrain.RegionsX}x{terrain.RegionsY} @ {terrain.RegionSize}x{terrain.RegionSize}",
+                    13f,
+                    Color.LightGray));
+                lines.Add((
+                    $"VISIBLE REGIONS {renderer.VisibleRegionsLastFrame}   DRAWS {renderer.DrawCallsLastFrame}",
+                    13f,
+                    Color.LightGray));
+            }
+
             lines.Add((
                 $"MESH BUILDS/FRAME {renderer.RebuiltRegions}   CUT CAPS/FRAME {renderer.CutSurfaceRebuilds}",
                 13f,
