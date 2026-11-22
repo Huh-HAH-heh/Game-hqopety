@@ -64,7 +64,13 @@ internal sealed class VoxelChunkBuildInput
     public int FieldDepth { get; }
     public int CaptureCursor { get; private set; }
     public int CaptureCount => SampleCount + CellCount;
+    public bool DensityCaptureComplete => CaptureCursor >= SampleCount;
     public bool IsComplete => CaptureCursor >= CaptureCount;
+    public bool HasPotentialSurface =>
+        _minimumDensity <= 0f && _maximumDensity >= 0f;
+
+    private float _minimumDensity = float.PositiveInfinity;
+    private float _maximumDensity = float.NegativeInfinity;
 
     public VoxelChunkBuildInput(
         IVoxelFieldSource field,
@@ -85,9 +91,26 @@ internal sealed class VoxelChunkBuildInput
         FieldDepth = field.Depth;
     }
 
-    public int CaptureNext(IVoxelFieldSource field, int maximumValues)
+    public int CaptureNext(IVoxelFieldSource field, int maximumValues) =>
+        CaptureNext(field, maximumValues, captureMaterials: true);
+
+    public int CaptureNext(
+        IVoxelFieldSource field,
+        int maximumValues,
+        bool captureMaterials)
     {
-        int end = Math.Min(CaptureCount, CaptureCursor + maximumValues);
+        if (maximumValues <= 0 || IsComplete)
+            return 0;
+
+        if (CaptureCursor >= SampleCount && !captureMaterials)
+        {
+            CaptureCursor = CaptureCount;
+            return 0;
+        }
+
+        int end = captureMaterials
+            ? Math.Min(CaptureCount, CaptureCursor + maximumValues)
+            : Math.Min(SampleCount, CaptureCursor + maximumValues);
         int captured = 0;
         while (CaptureCursor < end)
         {
@@ -100,7 +123,10 @@ internal sealed class VoxelChunkBuildInput
                 int worldX = SparseVoxelField.GetChunkSampleCoordinate(ChunkX, x, Step);
                 int worldY = SparseVoxelField.GetChunkSampleCoordinate(ChunkY, y, Step);
                 int worldZ = SparseVoxelField.GetChunkSampleCoordinate(ChunkZ, z, Step);
-                DensitySamples[index] = field.GetDensity(worldX, worldY, worldZ);
+                float density = field.GetDensity(worldX, worldY, worldZ);
+                DensitySamples[index] = density;
+                _minimumDensity = MathF.Min(_minimumDensity, density);
+                _maximumDensity = MathF.Max(_maximumDensity, density);
             }
             else
             {
@@ -115,6 +141,10 @@ internal sealed class VoxelChunkBuildInput
             }
             captured++;
         }
+
+        if (CaptureCursor >= SampleCount && !captureMaterials)
+            CaptureCursor = CaptureCount;
+
         return captured;
     }
 
