@@ -124,6 +124,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public long VoxelTotalQueueSaturated => _densityVoxelRenderer?.TotalQueueSaturated ?? 0;
     public string VoxelDiagnosticsLogPath => _densityVoxelRenderer?.DiagnosticsLogPath ?? string.Empty;
     public int VoxelVisibleCandidates => _densityVoxelRenderer?.VisibleCandidatesLastFrame ?? 0;
+    public int VoxelFrustumCandidates => _densityVoxelRenderer?.FrustumCandidatesLastFrame ?? 0;
+    public int VoxelCandidateOverflow => _densityVoxelRenderer?.CandidateOverflowLastFrame ?? 0;
+    public long VoxelEmptyChunks => _densityVoxelRenderer?.TotalEmptyChunks ?? 0;
     public int DynamicFragmentCount => _densityVoxelRenderer?.DynamicFragmentCount ?? 0;
     public bool IsMergingFragments => _densityVoxelRenderer?.IsMergingFragments ?? false;
     public bool IsUsingCoarseVoxelLod =>
