@@ -844,7 +844,7 @@ public static class RaylibTerrainViewer
             if (settings.TerrainMode == TerrainRenderMode.Voxel)
             {
                 lines.Add((
-                    $"LOD CACHE {renderer.CachedVoxelChunks}/2400 | FRUSTUM {renderer.VoxelFrustumCandidates} | SELECTED {renderer.VoxelVisibleCandidates}",
+                    $"VOXEL CACHE {renderer.CachedVoxelChunks}/6000 | FRUSTUM {renderer.VoxelFrustumCandidates} | SELECTED {renderer.VoxelVisibleCandidates}",
                     13f,
                     Color.LightGray));
                 lines.Add((
