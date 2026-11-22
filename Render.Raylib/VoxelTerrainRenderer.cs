@@ -134,6 +134,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int RebuiltCutCaps { get; private set; }
     public int CachedChunks => _chunks.Count;
     public int DynamicFragmentCount => _dynamicFragments.Count;
+    public bool IsMergingFragments => _dynamicFragments.IsMerging;
 
     public VoxelTerrainRenderer(TerrainPalette palette)
     {
@@ -489,6 +490,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_chunks.Count > MaximumCachedChunks)
             EvictUnusedChunks();
 
+        _dynamicFragments.ReleaseBakedBodies(
+            bounds => AreCachedMeshesCurrent(bounds, field, step));
+
         SetLighting();
         SetCutShader(cutEnabled, effectiveCutHeight);
 
@@ -648,6 +652,32 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             MathF.Max(minimum, cameraDistance * multiplier),
             chunkSizeMeters * 2f,
             Math.Clamp(maximumViewDistanceMeters, minimum, 18000f));
+    }
+
+    private bool AreCachedMeshesCurrent(
+        SparseVoxelField.VoxelBounds bounds,
+        SparseVoxelField field,
+        int step)
+    {
+        int span = ChunkCells * step;
+        int minX = bounds.MinX / span;
+        int minY = bounds.MinY / span;
+        int minZ = bounds.MinZ / span;
+        int maxX = Math.Max(minX, (Math.Max(bounds.MinX, bounds.MaxX - 1)) / span);
+        int maxY = Math.Max(minY, (Math.Max(bounds.MinY, bounds.MaxY - 1)) / span);
+        int maxZ = Math.Max(minZ, (Math.Max(bounds.MinZ, bounds.MaxZ - 1)) / span);
+
+        for (int z = minZ; z <= maxZ; z++)
+        for (int y = minY; y <= maxY; y++)
+        for (int x = minX; x <= maxX; x++)
+        {
+            ChunkKey key = new(step, x, y, z);
+            if (_chunks.TryGetValue(key, out ChunkEntry? entry) &&
+                !IsCurrentMeshReady(entry, field))
+                return false;
+        }
+
+        return true;
     }
 
     private static int DivideRoundUp(int value, int divisor) =>
