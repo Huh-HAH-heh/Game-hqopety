@@ -78,12 +78,17 @@ Carving sphere, capsule, box or ramp tools now runs a bounded local connected-co
 
 - Connectivity is checked on a conservative 0.2 m occupancy grid; accepted fragment geometry is copied from the exact 0.1 m density/material field.
 - Components that touch the analysis-window boundary are treated as still attached and remain static.
-- A detached component becomes one rigid body, not thousands of voxel bodies. The pool is limited to 16 active fragments and each body is limited to 64 mesh chunks.
+- A detached component becomes one rigid body, not thousands of voxel bodies. The pool is limited to 16 active fragments, 64 mesh chunks per body and 32 MiB of fragment snapshots.
+- A fragment snapshot stores signed density as `short` and material as `ushort` (4 bytes per sample/cell), and the mesher reads it directly through `IVoxelFieldSource`. No second `SparseVoxelField` is allocated for a moving rock.
 - Moving-fragment render meshes use a 0.2 m sampling step. The static terrain keeps the full 0.1 m source field.
 - Bodies receive gravity, angular motion, approximate terrain support and approximate body-to-body contacts. Slow grounded bodies sleep.
+- A settled fragment is incrementally resampled back into the one authoritative `WorldMap.Voxels` grid. Its current position and rotation are inverted to find source samples; density is merged with an SDF union. The job processes at most 12,000 world-grid samples per frame and emits one terrain change/undo record when complete.
+- The detached mesh remains visible until all visible overlapping static terrain meshes have been rebuilt, then its GPU meshes and snapshot are released.
 - F7/F8 also deactivate/reactivate fragment bodies in the same in-session edit history as the voxel carve.
 
-This is a bounded first implementation, not a full rigid-body fracture solver: there is no stress-based breakage, wall/edge collision or debris cascade. The fragment mesh is currently built when the rock detaches, and dynamic body state is not yet written to the voxel edit save. Those are separate follow-up tasks.
+This is a bounded first implementation, not a full rigid-body fracture solver: there is no stress-based breakage, wall/edge collision or debris cascade. Dynamic bodies that have not settled are not yet included in the voxel edit save; once merged into the master field, their terrain is saved normally.
+
+**Streaming boundary:** the renderer evicts distant GPU meshes from its bounded cache, but edited CPU voxel chunks are still retained by the main field in memory. A higher-level flat-planet region pager (active sector set around the camera/units, compressed inactive sector pages, and deterministic reload by global sector coordinates) is not implemented yet. The fragment-to-master-grid merge above is implemented independently of that future pager.
 
 ### Cutaway rebuild behavior
 
