@@ -464,6 +464,15 @@ internal static class VoxelChunkMesher
         int chunkZ,
         int step,
         float cutHeightMeters,
+        TerrainPalette palette) =>
+        Upload(BuildCutCapData(field, chunkX, chunkZ, step, cutHeightMeters, palette));
+
+    public static VoxelMeshData[] BuildCutCapData(
+        SparseVoxelField field,
+        int chunkX,
+        int chunkZ,
+        int step,
+        float cutHeightMeters,
         TerrainPalette palette)
     {
         float cutSampleY = cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f;
@@ -472,7 +481,7 @@ internal static class VoxelChunkMesher
 
         int originX = chunkX * CellsPerAxis * step;
         int originZ = chunkZ * CellsPerAxis * step;
-        List<Mesh> output = new(1);
+        List<VoxelMeshData> output = new(1);
         MeshBatch batch = new(output);
 
         for (int z = 0; z < CellsPerAxis; z++)
