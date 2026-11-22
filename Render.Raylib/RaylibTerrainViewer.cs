@@ -871,7 +871,23 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"MESH WORKERS {renderer.VoxelMeshWorkers} | QUEUED {renderer.VoxelPendingMeshJobs}",
+                    $"CPU CAPTURE {renderer.VoxelCpuCaptureMilliseconds:0.00} ms | CPU BUILD {renderer.VoxelWorkerBuildMilliseconds:0.00} ms | GPU UPLOAD {renderer.VoxelGpuUploadMilliseconds:0.00} ms",
+                    13f,
+                    Color.LightGray));
+                lines.Add((
+                    $"WORKERS {renderer.VoxelMeshWorkers} | QUEUED {renderer.VoxelPendingMeshJobs} | BUILT {renderer.VoxelBuildsCompletedLastFrame}/FRAME | GPU PACKETS {renderer.VoxelGpuUploadsLastFrame}",
+                    13f,
+                    Color.LightGray));
+                lines.Add((
+                    $"LAST MESH LOD {renderer.VoxelLastBuildStep} | VERTICES {renderer.VoxelLastBuildVertices} | TRIANGLES {renderer.VoxelLastBuildTriangles} | BUILD {renderer.VoxelLastWorkerBuildMilliseconds:0.00} ms | WAIT {renderer.VoxelLastQueueWaitMilliseconds:0.00} ms",
+                    13f,
+                    Color.LightGray));
+                lines.Add((
+                    $"TOTAL BUILDS {renderer.VoxelTotalBuildCompleted} | REPEATS {renderer.VoxelTotalRepeatedBuilds} | CANCEL {renderer.VoxelTotalBuildCancelled} | STALE {renderer.VoxelTotalStaleResults} | FAIL {renderer.VoxelTotalBuildFailed}",
+                    13f,
+                    Color.LightGray));
+                lines.Add((
+                    $"DUP REQUESTS {renderer.VoxelTotalDuplicateRequests} | QUEUE FULL {renderer.VoxelTotalQueueSaturated}",
                     13f,
                     Color.LightGray));
             }
