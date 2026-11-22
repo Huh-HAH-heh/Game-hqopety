@@ -1867,7 +1867,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             {
                 short[] density = new short[(int)snapshotSampleCount];
                 ushort[] materials = new ushort[(int)snapshotSampleCount];
-                Array.Fill(density, -1f);
+                Array.Fill(density, checked((short)-DensityScale));
 
                 int solidSamples = 0;
                 float massKg = 0f;
@@ -1961,7 +1961,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int originX = (int)MathF.Round(fragment.OriginMeters.X / VoxelSizeMeters);
         int originY = (int)MathF.Round(fragment.OriginMeters.Y / VoxelSizeMeters);
         int originZ = (int)MathF.Round(fragment.OriginMeters.Z / VoxelSizeMeters);
-        ReadOnlySpan<float> density = fragment.DensitySamples;
+        ReadOnlySpan<short> density = fragment.DensitySamples;
         ReadOnlySpan<ushort> materials = fragment.MaterialSamples;
         int plane = fragment.Width * fragment.Height;
 
@@ -1975,7 +1975,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         for (int x = 1; x < fragment.Width - 1; x++)
         {
             int sourceIndex = x + y * fragment.Width + z * plane;
-            float nextDensity = density[sourceIndex];
+            float nextDensity = density[sourceIndex] / (float)DensityScale;
             if (nextDensity <= 0f)
                 continue;
 
