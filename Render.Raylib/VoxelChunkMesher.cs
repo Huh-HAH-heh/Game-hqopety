@@ -142,9 +142,6 @@ internal sealed class VoxelChunkBuildInput
             captured++;
         }
 
-        if (CaptureCursor >= SampleCount && !captureMaterials)
-            CaptureCursor = CaptureCount;
-
         return captured;
     }
 
