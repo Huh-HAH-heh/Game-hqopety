@@ -96,7 +96,7 @@ This is a bounded first implementation, not a full rigid-body fracture solver: t
 
 ### LOD quality and pipeline diagnostics
 
-The voxel surface LOD steps are 1, 2, 4 and 8 source voxels (0.1, 0.2, 0.4 and 0.8 m). The previous 5/10/40 steps sampled at up to 4 m and erased small terrain features. The LOD regression executable measures SDF reconstruction error on a synthetic narrow ridge, checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction at every LOD.
+Runtime voxel surface LOD steps are 1, 2 and 4 source voxels (0.1, 0.2 and 0.4 m). Steps 8 and 40 remain benchmark-only quality probes: on the narrow-ridge fixture, step 8 lost substantially more SDF detail than step 4, while step 40 was worse again. The previous 5/10/40 runtime tiers sampled at up to 4 m. The LOD regression executable measures SDF reconstruction error, checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction at runtime and legacy LOD steps.
 
 Run locally:
 
