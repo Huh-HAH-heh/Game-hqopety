@@ -217,7 +217,10 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         {
             float step = MathF.Min(fixedStep, remaining);
             for (int i = 0; i < _bodies.Count; i++)
-                Integrate(_bodies[i], staticField, step);
+            {
+                if (_bodies[i].Active)
+                    Integrate(_bodies[i], staticField, step);
+            }
             ResolveBodyContacts();
             remaining -= step;
         }
