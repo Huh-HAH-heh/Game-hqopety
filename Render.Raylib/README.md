@@ -119,6 +119,8 @@ The voxel renderer keeps a separate cached mesh for each chunk key and LOD step 
 
 CPU surface extraction runs on two cancellable background workers. The render thread only captures a small immutable input in bounded slices and uploads finished mesh packets. Old geometry remains available until the replacement is complete.
 
+Cutaway cap updates are independent from the base surface. If only the cut plane changes, the worker request has `surface=false, cutCap=true`; it extracts and uploads only the horizontal cap. The existing base terrain mesh is neither regenerated nor swapped. A voxel edit that affects the base surface requests `surface=true`, and requests a cap as well only if the edit intersects the active cut plane.
+
 ### Cutaway rebuild behavior
 
 Moving the horizontal slice still updates the GPU clip plane immediately. The cap mesh waits until the selected 0.1 m layer has remained unchanged for 8 frames, then rebuilds. This avoids rebuilding cut caps for every intermediate slider/key step. HUD mesh-build counters are per-frame counters.
