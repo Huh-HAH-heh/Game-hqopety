@@ -57,6 +57,9 @@ public sealed class VoxelFragmentSnapshot
     /// Creates an immutable sampling view over this fragment. The local field
     /// has no allocated edit chunks; all samples come from this owned snapshot.
     /// </summary>
+    internal ReadOnlySpan<float> DensitySamples => _density;
+    internal ReadOnlySpan<ushort> MaterialSamples => _materials;
+
     internal SparseVoxelField CreateField()
     {
         float[] density = _density;
