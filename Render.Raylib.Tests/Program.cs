@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using Core.Map;
 using RimClone.Render.Raylib;
 
@@ -163,6 +164,7 @@ internal static class Program
     {
         const int step = 2;
         const int chunkCount = 8;
+        const int iterations = 5;
         SyntheticTerrainField field = new(1024, 1024, 1024);
         TerrainPalette palette = new();
         int chunkY = GetSurfaceChunkY(step);
@@ -177,62 +179,117 @@ internal static class Program
         }
         captureTimer.Stop();
 
-        // Warm JIT and static initialization before timing either schedule.
+        // Warm the mesher JIT and both ThreadPool workers before collecting data.
         _ = VoxelChunkMesher.BuildSurfaceData(inputs[0], palette);
+        Task warmA = Task.Run(() => VoxelChunkMesher.BuildSurfaceData(inputs[0], palette));
+        Task warmB = Task.Run(() => VoxelChunkMesher.BuildSurfaceData(inputs[1], palette));
+        Task.WaitAll(warmA, warmB);
 
+        double[] sequentialTimes = new double[iterations];
+        double[] oneWorkerTimes = new double[iterations];
+        double[] twoWorkerTimes = new double[iterations];
         int sequentialVertices = 0;
         int sequentialTriangles = 0;
-        Stopwatch sequentialTimer = Stopwatch.StartNew();
-        foreach (VoxelChunkBuildInput input in inputs)
-        {
-            VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, palette);
-            sequentialVertices += meshes.Sum(static mesh => mesh.VertexCount);
-            sequentialTriangles += meshes.Sum(static mesh => mesh.TriangleCount);
-        }
-        sequentialTimer.Stop();
+        int oneWorkerVertices = 0;
+        int oneWorkerTriangles = 0;
+        int twoWorkerVertices = 0;
+        int twoWorkerTriangles = 0;
+        bool equivalent = true;
 
-        int[] verticesByChunk = new int[chunkCount];
-        int[] trianglesByChunk = new int[chunkCount];
-        Stopwatch parallelTimer = Stopwatch.StartNew();
-        Parallel.For(
-            0,
-            chunkCount,
-            new ParallelOptions { MaxDegreeOfParallelism = 2 },
-            index =>
+        for (int run = 0; run < iterations; run++)
+        {
+            int sequentialV = 0;
+            int sequentialT = 0;
+            Stopwatch sequentialTimer = Stopwatch.StartNew();
+            foreach (VoxelChunkBuildInput input in inputs)
             {
                 VoxelMeshData[] meshes =
-                    VoxelChunkMesher.BuildSurfaceData(inputs[index], palette);
-                verticesByChunk[index] =
-                    meshes.Sum(static mesh => mesh.VertexCount);
-                trianglesByChunk[index] =
-                    meshes.Sum(static mesh => mesh.TriangleCount);
-            });
-        parallelTimer.Stop();
+                    VoxelChunkMesher.BuildSurfaceData(input, palette);
+                sequentialV += meshes.Sum(static mesh => mesh.VertexCount);
+                sequentialT += meshes.Sum(static mesh => mesh.TriangleCount);
+            }
+            sequentialTimer.Stop();
+            sequentialTimes[run] = sequentialTimer.Elapsed.TotalMilliseconds;
 
-        int parallelVertices = verticesByChunk.Sum();
-        int parallelTriangles = trianglesByChunk.Sum();
-        double speedup = sequentialTimer.Elapsed.TotalMilliseconds /
-            Math.Max(0.001d, parallelTimer.Elapsed.TotalMilliseconds);
-        double throughput = chunkCount /
-            Math.Max(0.001d, parallelTimer.Elapsed.TotalSeconds);
-        bool equivalent =
-            sequentialVertices == parallelVertices &&
-            sequentialTriangles == parallelTriangles;
+            int[] oneV = new int[chunkCount];
+            int[] oneT = new int[chunkCount];
+            Stopwatch oneTimer = Stopwatch.StartNew();
+            Task oneWorker = Task.Run(() =>
+                BuildQueue(inputs, palette, oneV, oneT, workerCount: 1));
+            oneWorker.GetAwaiter().GetResult();
+            oneTimer.Stop();
+            oneWorkerTimes[run] = oneTimer.Elapsed.TotalMilliseconds;
 
-        Console.WriteLine("=== Two-worker throughput benchmark (CPU only) ===");
+            int[] twoV = new int[chunkCount];
+            int[] twoT = new int[chunkCount];
+            Stopwatch twoTimer = Stopwatch.StartNew();
+            Task workerA = Task.Run(() =>
+                BuildQueue(inputs, palette, twoV, twoT, workerCount: 2, workerIndex: 0));
+            Task workerB = Task.Run(() =>
+                BuildQueue(inputs, palette, twoV, twoT, workerCount: 2, workerIndex: 1));
+            Task.WaitAll(workerA, workerB);
+            twoTimer.Stop();
+            twoWorkerTimes[run] = twoTimer.Elapsed.TotalMilliseconds;
+
+            sequentialVertices = sequentialV;
+            sequentialTriangles = sequentialT;
+            oneWorkerVertices = oneV.Sum();
+            oneWorkerTriangles = oneT.Sum();
+            twoWorkerVertices = twoV.Sum();
+            twoWorkerTriangles = twoT.Sum();
+            equivalent &=
+                sequentialVertices == oneWorkerVertices &&
+                sequentialTriangles == oneWorkerTriangles &&
+                sequentialVertices == twoWorkerVertices &&
+                sequentialTriangles == twoWorkerTriangles;
+        }
+
+        Array.Sort(sequentialTimes);
+        Array.Sort(oneWorkerTimes);
+        Array.Sort(twoWorkerTimes);
+
+        double sequentialMedian = sequentialTimes[iterations / 2];
+        double oneMedian = oneWorkerTimes[iterations / 2];
+        double twoMedian = twoWorkerTimes[iterations / 2];
+        double speedupOne = sequentialMedian / Math.Max(0.001d, oneMedian);
+        double speedupTwo = sequentialMedian / Math.Max(0.001d, twoMedian);
+        double throughputTwo = chunkCount /
+            Math.Max(0.001d, twoMedian / 1000d);
+
+        Console.WriteLine("=== Warm CPU worker throughput benchmark (no GPU upload) ===");
         Console.WriteLine(
-            $"chunks={chunkCount} lod={step} captureTotal={captureTimer.Elapsed.TotalMilliseconds:0.000} ms");
+            $"chunks={chunkCount} lod={step} captureTotal={captureTimer.Elapsed.TotalMilliseconds:0.000} ms | runs={iterations}");
         Console.WriteLine(
-            $"sequential={sequentialTimer.Elapsed.TotalMilliseconds:0.000} ms | " +
-            $"2 workers={parallelTimer.Elapsed.TotalMilliseconds:0.000} ms | " +
-            $"speedup={speedup:0.00}x | throughput={throughput:0.0} chunks/s");
+            $"main-thread median/p95={sequentialMedian:0.000}/{sequentialTimes[^1]:0.000} ms");
         Console.WriteLine(
-            $"geometry sequential={sequentialVertices} vertices/{sequentialTriangles} triangles | " +
-            $"parallel={parallelVertices}/{parallelTriangles} | identical={equivalent}");
+            $"1 worker median/p95={oneMedian:0.000}/{oneWorkerTimes[^1]:0.000} ms | speedup={speedupOne:0.00}x");
+        Console.WriteLine(
+            $"2 workers median/p95={twoMedian:0.000}/{twoWorkerTimes[^1]:0.000} ms | speedup={speedupTwo:0.00}x | throughput={throughputTwo:0.0} chunks/s");
+        Console.WriteLine(
+            $"geometry main={sequentialVertices}/{sequentialTriangles} | " +
+            $"one={oneWorkerVertices}/{oneWorkerTriangles} | " +
+            $"two={twoWorkerVertices}/{twoWorkerTriangles} | identical={equivalent}");
 
         if (!equivalent)
             throw new InvalidOperationException(
-                "Parallel mesh workers produced different geometry from sequential meshing.");
+                "Background workers produced geometry different from sequential meshing.");
+    }
+
+    private static void BuildQueue(
+        VoxelChunkBuildInput[] inputs,
+        TerrainPalette palette,
+        int[] vertices,
+        int[] triangles,
+        int workerCount,
+        int workerIndex = 0)
+    {
+        for (int index = workerIndex; index < inputs.Length; index += workerCount)
+        {
+            VoxelMeshData[] meshes =
+                VoxelChunkMesher.BuildSurfaceData(inputs[index], palette);
+            vertices[index] = meshes.Sum(static mesh => mesh.VertexCount);
+            triangles[index] = meshes.Sum(static mesh => mesh.TriangleCount);
+        }
     }
 
     private static VoxelChunkBuildInput Capture(
