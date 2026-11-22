@@ -79,12 +79,25 @@ internal sealed class OrbitCameraController
             terrain.WorldWidth,
             terrain.WorldDepth);
 
-        _topDownTarget = new Vector3(
-            terrain.WorldWidth * 0.5f,
-            MathF.Min(
-                terrain.VerticalWorldExtentMeters,
-                MathF.Max(1f, terrain.MaximumHeightMeters * 0.12f)),
-            terrain.WorldDepth * 0.5f);
+        float centerX = terrain.WorldWidth * 0.5f;
+        float centerZ = terrain.WorldDepth * 0.5f;
+        float focusHeight = Math.Clamp(
+            terrain.MaximumHeightMeters * 0.65f,
+            1f,
+            MathF.Max(1f, terrain.VerticalWorldExtentMeters - 1f));
+
+        // Focus the real central ground surface instead of a fixed fraction
+        // of the world height, which can put the camera target inside rock.
+        if (terrain.Voxels.TryFindHighestWalkableSurfaceAt(
+                centerX,
+                centerZ,
+                minimumUpNormal: 0.05f,
+                out SparseVoxelField.WalkableSurface centerSurface))
+        {
+            focusHeight = centerSurface.HeightMeters;
+        }
+
+        _topDownTarget = new Vector3(centerX, focusHeight, centerZ);
 
         _target = _topDownTarget;
         _desiredTarget = _target;
