@@ -412,6 +412,30 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             field, centerMeters, halfExtentsMeters) ?? 0;
     }
 
+    public void BeginVoxelEdit()
+    {
+        ThrowIfDisposed();
+        _densityVoxelRenderer?.BeginVoxelEdit();
+    }
+
+    public void EndVoxelEdit()
+    {
+        ThrowIfDisposed();
+        _densityVoxelRenderer?.EndVoxelEdit();
+    }
+
+    public void UndoVoxelEdit()
+    {
+        ThrowIfDisposed();
+        _densityVoxelRenderer?.UndoVoxelEdit();
+    }
+
+    public void RedoVoxelEdit()
+    {
+        ThrowIfDisposed();
+        _densityVoxelRenderer?.RedoVoxelEdit();
+    }
+
     public void ClearDynamicFragments()
     {
         ThrowIfDisposed();
