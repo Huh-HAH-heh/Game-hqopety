@@ -209,11 +209,11 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             _pendingEdit?.Add(body);
             return true;
         }
-        catch
+        catch (Exception)
         {
             foreach (Mesh mesh in meshes)
                 UnloadMesh(mesh);
-            throw;
+            return false;
         }
     }
 
