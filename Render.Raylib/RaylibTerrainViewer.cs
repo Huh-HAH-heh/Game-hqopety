@@ -724,7 +724,7 @@ public static class RaylibTerrainViewer
                 LogDetachedFragments(renderer.DetachLooseFragments(
                     worldMap.Voxels,
                     hitPosition,
-                    new Vector3(radiusMeters + 2f)));
+                    new Vector3(radiusMeters + 1f)));
                 break;
 
             case VoxelEditMode.AddSphere:
