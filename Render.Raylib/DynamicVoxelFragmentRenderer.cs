@@ -17,6 +17,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 {
     private const int MaximumBodies = 16;
     private const int MaximumChunksPerBody = 64;
+    private const int DynamicMeshStep = 2;
     private const float Gravity = 9.81f;
     private const float MaximumFallSpeed = 45f;
     private const float SleepLinearSpeed = 0.12f;
@@ -146,12 +147,10 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             return false;
 
         SparseVoxelField localField = snapshot.CreateField();
-        int chunksX = (localField.Width + SparseVoxelField.ChunkSize - 1) /
-            SparseVoxelField.ChunkSize;
-        int chunksY = (localField.Height + SparseVoxelField.ChunkSize - 1) /
-            SparseVoxelField.ChunkSize;
-        int chunksZ = (localField.Depth + SparseVoxelField.ChunkSize - 1) /
-            SparseVoxelField.ChunkSize;
+        int chunkSpan = SparseVoxelField.ChunkSize * DynamicMeshStep;
+        int chunksX = (localField.Width + chunkSpan - 1) / chunkSpan;
+        int chunksY = (localField.Height + chunkSpan - 1) / chunkSpan;
+        int chunksZ = (localField.Depth + chunkSpan - 1) / chunkSpan;
         if ((long)chunksX * chunksY * chunksZ > MaximumChunksPerBody)
             return false;
 
@@ -163,7 +162,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             for (int x = 0; x < chunksX; x++)
             {
                 Mesh[] chunkMeshes = VoxelChunkMesher.BuildSurface(
-                    localField, x, y, z, step: 1, palette: palette);
+                    localField, x, y, z, step: DynamicMeshStep, palette: palette);
                 meshes.AddRange(chunkMeshes);
             }
 
