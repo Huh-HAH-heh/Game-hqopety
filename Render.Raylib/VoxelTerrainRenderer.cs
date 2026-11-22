@@ -115,6 +115,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _frame;
     private bool _disposed;
     private int _activeStep = 40;
+    private int _requestedCutLayer = int.MinValue;
+    private int _stableCutLayer = int.MinValue;
+    private int _cutLayerStableFrames;
+
+    // A moving section plane changes every 0.1 m. Rebuilding the cap meshes
+    // for each intermediate layer creates continuous CPU/GPU work while the
+    // user drags the slice control. Wait until the selected layer settles.
+    private const int CutCapSettleFrames = 8;
 
     public int ActiveRenderCellSize => _activeStep;
     public float ActiveVoxelSizeMeters => _activeStep * SparseVoxelField.VoxelSizeMeters;
@@ -276,6 +284,29 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int cutLayer = cutEnabled
             ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
             : -1;
+
+        if (!cutEnabled)
+        {
+            _requestedCutLayer = int.MinValue;
+            _stableCutLayer = int.MinValue;
+            _cutLayerStableFrames = 0;
+        }
+        else if (cutLayer != _requestedCutLayer)
+        {
+            _requestedCutLayer = cutLayer;
+            _cutLayerStableFrames = 0;
+        }
+        else if (_cutLayerStableFrames < CutCapSettleFrames)
+        {
+            _cutLayerStableFrames++;
+        }
+
+        bool cutCapReady = cutEnabled &&
+            _cutLayerStableFrames >= CutCapSettleFrames &&
+            _stableCutLayer != cutLayer;
+
+        if (cutCapReady)
+            _stableCutLayer = cutLayer;
         float effectiveCutHeight = cutEnabled
             ? cutLayer * SparseVoxelField.VoxelSizeMeters
             : cutHeightMeters;
@@ -313,7 +344,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 baseBuilds++;
             }
 
-            if (cutEnabled && key.Y == cutChunkY &&
+            if (cutEnabled && _cutLayerStableFrames >= CutCapSettleFrames &&
+                key.Y == cutChunkY &&
                 (entry.CutLayer != cutLayer || entry.CutDirty) &&
                 cutBuilds < MaximumCutBuildsPerFrame)
             {
