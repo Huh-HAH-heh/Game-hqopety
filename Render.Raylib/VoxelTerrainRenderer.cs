@@ -1379,16 +1379,31 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (remove != null)
         {
-            foreach (ChunkKey key in remove)
+                foreach (ChunkKey key in remove)
             {
                 if (_chunks.Remove(key, out ChunkEntry? entry))
                     entry.Dispose();
             }
         }
 
-        // MaximumCachedChunks is a high-water target, not a hard limit.
-        // Recently visible LODs stay cached to avoid regenerating them during
-        // ordinary zoom and pan reversals. Cold entries are removed above.
+        // Enforce a real cache ceiling after protecting this frame's visible
+        // chunks and all in-flight jobs. Old LODs must not accumulate forever
+        // as the camera changes scale or position.
+        if (_chunks.Count <= MaximumCachedChunks)
+            return;
+
+        int excess = _chunks.Count - MaximumCachedChunks;
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks
+            .Where(pair =>
+                !protectedKeys.Contains(pair.Key) &&
+                !HasPendingWork(pair.Value))
+            .OrderBy(pair => pair.Value.LastSeenFrame)
+            .Take(excess)
+            .ToArray())
+        {
+            if (_chunks.Remove(key))
+                entry.Dispose();
+        }
     }
 
     private void PrepareAdjacentLodCache(
@@ -1449,7 +1464,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int builds = 0;
         foreach (Candidate candidate in warmCandidates)
         {
-            if (builds >= MaximumLodPrewarmBuildsPerFrame)
+            if (builds >= MaximumLodPrewarmBuildsPerFrame ||
+                _pendingCaptures + _buildQueue.Count >= MaximumPendingMeshJobs - 4)
                 break;
 
             ChunkKey key = candidate.Key;
@@ -1465,7 +1481,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
-            if (!stale)
+            if (!stale || HasPendingWork(entry))
                 continue;
 
             RequestBuild(field, key, entry, buildSurface: true, buildCutCap: false, cutLayer: -1, isPrewarm: true);
