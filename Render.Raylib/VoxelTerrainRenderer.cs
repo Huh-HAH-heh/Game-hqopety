@@ -1093,7 +1093,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
             if (protectedKeys.Contains(key) || entry.LastSeenFrame >= threshold ||
-                entry.RunningBuild != null || entry.Capture != null ||
+                entry.RunningBuild != null || entry.NeedsCapture ||
+                entry.Capture != null || entry.BuildQueued ||
                 entry.ReadyBuild.HasValue)
                 continue;
             (remove ??= new List<ChunkKey>()).Add(key);
