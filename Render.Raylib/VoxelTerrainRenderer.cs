@@ -190,6 +190,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.Update(field, GetFrameTime());
 
         _frame++;
+        RebuiltChunks = 0;
+        RebuiltCutCaps = 0;
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
         int previousStep = _activeStep;
         int step = SelectLod(cameraDistance, previousStep);
