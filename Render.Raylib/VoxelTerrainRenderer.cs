@@ -378,8 +378,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 (chunkY + 0.5f) * chunkSizeMeters,
                 (chunkZ + 0.5f) * chunkSizeMeters);
 
-            float distanceSquared = Vector3.DistanceSquared(center, camera.Position);
-            if (distanceSquared > maximumViewDistanceMeters * maximumViewDistanceMeters &&
+            float cameraDistanceSquared = Vector3.DistanceSquared(center, camera.Position);
+            if (cameraDistanceSquared > maximumViewDistanceMeters * maximumViewDistanceMeters &&
                 Vector3.DistanceSquared(center, camera.Target) >
                 (maximumViewDistanceMeters + chunkRadius) *
                 (maximumViewDistanceMeters + chunkRadius))
@@ -394,15 +394,37 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 maximumViewDistanceMeters))
                 continue;
 
+            // Prioritize chunks around the terrain/cut focus, not empty sky
+            // nearest to the elevated camera position.
+            float dx = center.X - camera.Target.X;
+            float dz = center.Z - camera.Target.Z;
+            float priorityY = cutEnabled
+                ? cutHeightMeters
+                : Math.Clamp(
+                    field.Height * SparseVoxelField.VoxelSizeMeters * 0.55f,
+                    1f,
+                    field.Height * SparseVoxelField.VoxelSizeMeters - 1f);
+            float dy = center.Y - priorityY;
+            float priorityDistanceSquared = dx * dx + dy * dy + dz * dz;
+
             candidates.Add(new Candidate(
                 new ChunkKey(step, chunkX, chunkY, chunkZ),
                 center,
                 chunkRadius,
-                distanceSquared));
+                priorityDistanceSquared));
         }
 
         candidates.Sort(static (a, b) =>
             a.DistanceSquared.CompareTo(b.DistanceSquared));
+
+        FrustumCandidatesLastFrame = candidates.Count;
+        CandidateOverflowLastFrame = Math.Max(
+            0,
+            candidates.Count - MaximumVisibleCandidates);
+        if (candidates.Count > MaximumVisibleCandidates)
+            candidates.RemoveRange(
+                MaximumVisibleCandidates,
+                candidates.Count - MaximumVisibleCandidates);
 
         _visible.Clear();
         _visibleCandidateKeys.Clear();
@@ -467,8 +489,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 key.Y == cutChunkY &&
                 (entry.CutLayer != cutLayer || entry.CutDirty);
 
-            if (surfaceStale || needsCutCap)
-                RequestBuild(field, key, entry, surfaceStale, needsCutCap, cutLayer, isPrewarm: false);
+            bool hasPendingWork = HasPendingWork(entry);
+            bool hasQueueCapacity =
+                _pendingCaptures + _buildQueue.Count < MaximumPendingMeshJobs;
+            if ((surfaceStale || needsCutCap) &&
+                !hasPendingWork &&
+                hasQueueCapacity)
+            {
+                RequestBuild(
+                    field,
+                    key,
+                    entry,
+                    surfaceStale,
+                    needsCutCap,
+                    cutLayer,
+                    isPrewarm: false);
+            }
 
             if (!cutEnabled && entry.CutCap.Length > 0)
                 ClearCutCap(entry);
@@ -619,7 +655,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if ((_frame % 120) == 0)
         {
             string summary =
-                $"frame={_frame} lod={step} candidates={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
+                $"frame={_frame} lod={step} frustumCandidates={FrustumCandidatesLastFrame} selected={_visibleCandidateKeys.Count} overflow={CandidateOverflowLastFrame} visible={_visible.Count} cache={_chunks.Count} emptyChunks={_totalEmptyChunks} " +
                 $"captureMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
                 $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
@@ -844,17 +880,43 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (input == null)
                 continue;
 
-            // Check the clock every 16 samples. Field sampling is the only
-            // render-thread CPU work in this stage; it is deliberately sliced
-            // across frames and never starts a complete chunk capture at once.
+            // Read density first. Chunks whose samples are entirely solid or
+            // entirely air cannot emit an isosurface, so skip their 4096
+            // material reads and the worker/GPU stages altogether.
             while (!input.IsComplete &&
                 timer.Elapsed.TotalMilliseconds < CaptureBudgetMilliseconds)
             {
-                input.CaptureNext(field, 16);
+                bool captureMaterials =
+                    entry.CaptureCutCap ||
+                    !entry.CaptureSurface ||
+                    (input.DensityCaptureComplete && input.HasPotentialSurface);
+                input.CaptureNext(field, 128, captureMaterials);
             }
 
             if (!input.IsComplete)
                 continue;
+
+            bool buildSurface = entry.CaptureSurface && input.HasPotentialSurface;
+            if (entry.CaptureSurface && !buildSurface)
+            {
+                foreach (Mesh mesh in entry.Surface)
+                    UnloadMesh(mesh);
+                entry.Surface = Array.Empty<Mesh>();
+                entry.BaseVersion = entry.CaptureBaseVersion;
+                entry.PaletteVersion = entry.CapturePaletteVersion;
+                entry.SurfaceDirty = false;
+                entry.Built = true;
+                RebuiltChunks++;
+                _totalEmptyChunks++;
+            }
+
+            if (!buildSurface && !entry.CaptureCutCap)
+            {
+                entry.Capture = null;
+                entry.NeedsCapture = false;
+                _pendingCaptures = Math.Max(0, _pendingCaptures - 1);
+                continue;
+            }
 
             BuildRequest request = new()
             {
@@ -864,7 +926,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 RequestRevision = entry.CaptureRevision,
                 PaletteVersion = entry.CapturePaletteVersion,
                 BaseVersion = entry.CaptureBaseVersion,
-                BuildSurface = entry.CaptureSurface,
+                BuildSurface = buildSurface,
                 BuildCutCap = entry.CaptureCutCap,
                 CutLayer = entry.CaptureCutLayer,
                 Palette = _palette,
