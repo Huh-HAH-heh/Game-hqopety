@@ -793,17 +793,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 int triangles = surface.Sum(static mesh => mesh.TriangleCount) +
                     cutCap.Sum(static mesh => mesh.TriangleCount);
 
+                bool hasSurfaceMesh = surface.Length > 0;
                 VoxelMeshBuildResult result = new(
                     surface,
                     cutCap,
-                    hasSurface,
+                    hasSurfaceMesh,
                     request.BuildCutCap,
-                    request.BuildSurface && !hasSurface,
+                    request.BuildSurface && !hasSurfaceMesh,
                     request.CutLayer,
                     workerTimer.Elapsed.TotalMilliseconds,
                     vertices,
                     triangles,
-                    hasSurface ? ComputeMeshHash(surface) : 0UL,
+                    hasSurfaceMesh ? ComputeMeshHash(surface) : 0UL,
                     request.BuildCutCap ? ComputeMeshHash(cutCap) : 0UL);
 
                 _completedBuildQueue.Enqueue(new BuildCompletion(
@@ -843,39 +844,35 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void CollectCompletedBuilds(SparseVoxelField field)
     {
-        for (int i = _runningBuilds.Count - 1; i >= 0; i--)
+        while (_completedBuildQueue.TryDequeue(out BuildCompletion completion))
         {
-            BuildRequest request = _runningBuilds[i];
-            Task<VoxelMeshBuildResult>? task = request.Task;
-            if (task == null || !task.IsCompleted)
-                continue;
-
-            _runningBuilds.RemoveAt(i);
-            _activeMeshWorkers--;
-            request.Cancellation.Dispose();
+            BuildRequest request = completion.Request;
             ChunkEntry entry = request.Entry;
-            if (ReferenceEquals(entry.RunningBuild, request))
-                entry.RunningBuild = null;
+            request.Cancellation.Dispose();
 
-            if (task.IsCanceled)
+            if (ReferenceEquals(entry.RunningBuild, request))
+            {
+                entry.RunningBuild = null;
+                entry.BuildQueued = false;
+            }
+
+            if (completion.Cancelled)
             {
                 _totalBuildCancelled++;
-                if (request.RequestRevision == entry.RequestRevision)
-                    entry.FailedRevision = request.RequestRevision;
                 _logger.Write(
                     "MESH_CANCELLED",
                     $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision}");
                 continue;
             }
 
-            if (task.IsFaulted)
+            if (completion.Error != null)
             {
                 _totalBuildFailed++;
                 if (request.RequestRevision == entry.RequestRevision)
                     entry.FailedRevision = request.RequestRevision;
                 _logger.Write(
                     "MESH_FAILED",
-                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"{task.Exception?.GetBaseException().Message}\"");
+                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"{completion.Error.Message}\"");
                 continue;
             }
 
@@ -892,7 +889,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
             }
 
-            VoxelMeshBuildResult build = task.GetAwaiter().GetResult();
+            VoxelMeshBuildResult build = completion.Result!.Value;
             BuildIdentity identity = new(
                 request.Key,
                 request.RequestRevision,
@@ -923,20 +920,37 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             LastWorkerBuildMilliseconds = build.WorkerMilliseconds;
             LastWorkerQueueWaitMilliseconds = Math.Max(
                 0d,
-                Stopwatch.GetElapsedTime(request.EnqueuedTimestamp).TotalMilliseconds -
-                    build.WorkerMilliseconds);
+                Stopwatch.GetElapsedTime(
+                    request.EnqueuedTimestamp,
+                    completion.WorkerStartedTimestamp).TotalMilliseconds);
+            LastWorkerResultDeliveryMilliseconds = Math.Max(
+                0d,
+                Stopwatch.GetElapsedTime(
+                    completion.WorkerCompletedTimestamp,
+                    Stopwatch.GetTimestamp()).TotalMilliseconds);
             LastBuildStep = request.Key.Step;
             LastBuildVertices = build.VertexCount;
             LastBuildTriangles = build.TriangleCount;
-            _logger.Write(
-                "MESH_BUILT",
-                $"kind=visible surface={request.BuildSurface} cutCap={request.BuildCutCap} cutLayer={request.CutLayer} step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount}");
+
+            bool uploadSurface = build.HasSurface;
+            bool uploadCutCap = build.HasCutCap;
 
             if (build.SurfaceWasEmpty)
             {
-                foreach (Mesh mesh in entry.Surface)
-                    UnloadMesh(mesh);
+                if (entry.Surface.Length > 0)
+                {
+                    _logger.Write(
+                        "MESH_GPU_EVICT",
+                        $"reason=surface-became-empty step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) meshes={entry.Surface.Length}");
+                    foreach (Mesh mesh in entry.Surface)
+                    {
+                        UnloadMesh(mesh);
+                        _totalGpuUnloads++;
+                    }
+                }
+
                 entry.Surface = Array.Empty<Mesh>();
+                entry.SurfaceHash = 0UL;
                 entry.BaseVersion = request.BaseVersion;
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
@@ -944,21 +958,105 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 _totalEmptyChunks++;
                 RebuiltChunks++;
             }
-
-            if (!build.HasSurface && !build.HasCutCap)
+            else if (uploadSurface &&
+                entry.Built &&
+                entry.SurfaceHash == build.SurfaceHash)
             {
+                // The voxel revision changed, but its rendered geometry did not.
+                // Keep the existing VAO and VBOs resident in VRAM.
+                entry.BaseVersion = request.BaseVersion;
+                entry.PaletteVersion = request.PaletteVersion;
+                entry.SurfaceDirty = false;
+                uploadSurface = false;
+                _totalIdenticalSurfaceSkips++;
                 _logger.Write(
-                    "MESH_EMPTY",
-                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) base={request.BaseVersion}");
-                continue;
+                    "MESH_GPU_CACHE_HIT",
+                    $"kind=surface step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) hash={build.SurfaceHash:X16}");
             }
 
-            entry.ReadyBuild = build;
+            if (uploadCutCap &&
+                entry.CutLayer == build.CutLayer &&
+                entry.CutCapHash == build.CutCapHash)
+            {
+                entry.CutDirty = false;
+                uploadCutCap = false;
+                _totalIdenticalCutSkips++;
+                _logger.Write(
+                    "MESH_GPU_CACHE_HIT",
+                    $"kind=cut-cap step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) layer={build.CutLayer} hash={build.CutCapHash:X16}");
+            }
+
+            _logger.Write(
+                "MESH_BUILT",
+                $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount} uploadSurface={uploadSurface} uploadCap={uploadCutCap}");
+
+            if (!uploadSurface && !uploadCutCap)
+                continue;
+
+            entry.ReadyBuild = build with
+            {
+                Surface = uploadSurface ? build.Surface : Array.Empty<VoxelMeshData>(),
+                CutCap = uploadCutCap ? build.CutCap : Array.Empty<VoxelMeshData>(),
+                HasSurface = uploadSurface,
+                HasCutCap = uploadCutCap
+            };
             entry.ReadyRequest = request;
             entry.SurfaceUploadIndex = 0;
             entry.CutUploadIndex = 0;
             entry.UploadingSurface.Clear();
             entry.UploadingCutCap.Clear();
+        }
+    }
+
+    private static ulong ComputeMeshHash(VoxelMeshData[] meshes)
+    {
+        const ulong offset = 14695981039346656037UL;
+        ulong hash = offset;
+        AddHashUInt(ref hash, (uint)meshes.Length);
+
+        foreach (VoxelMeshData mesh in meshes)
+        {
+            AddHashUInt(ref hash, (uint)mesh.VertexCount);
+            AddHashUInt(ref hash, (uint)mesh.TriangleCount);
+
+            foreach (Vector3 vertex in mesh.Vertices)
+            {
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.X)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.Y)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.Z)));
+            }
+
+            foreach (Vector3 normal in mesh.Normals)
+            {
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.X)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.Y)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.Z)));
+            }
+
+            foreach (byte color in mesh.Colors)
+                AddHashByte(ref hash, color);
+
+            foreach (ushort index in mesh.Indices)
+                AddHashUInt(ref hash, index);
+        }
+
+        return hash;
+    }
+
+    private static void AddHashUInt(ref ulong hash, uint value)
+    {
+        AddHashByte(ref hash, (byte)value);
+        AddHashByte(ref hash, (byte)(value >> 8));
+        AddHashByte(ref hash, (byte)(value >> 16));
+        AddHashByte(ref hash, (byte)(value >> 24));
+    }
+
+    private static void AddHashByte(ref ulong hash, byte value)
+    {
+        unchecked
+        {
+            hash ^= value;
+            hash *= 1099511628211UL;
         }
     }
 
