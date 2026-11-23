@@ -1103,6 +1103,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry.UploadingSurface.Add(mesh);
                     GpuUploadsLastFrame++;
                     _totalGpuUploads++;
+                    _logger.Write(
+                        "MESH_GPU_UPLOAD",
+                        $"kind=surface step={entry.ReadyRequest?.Key.Step} vertices={result.Surface[entry.SurfaceUploadIndex - 1].VertexCount}");
                     if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                         break;
                 }
@@ -1121,6 +1124,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry.UploadingCutCap.Add(mesh);
                     GpuUploadsLastFrame++;
                     _totalGpuUploads++;
+                    _logger.Write(
+                        "MESH_GPU_UPLOAD",
+                        $"kind=cut-cap layer={result.CutLayer} vertices={result.CutCap[entry.CutUploadIndex - 1].VertexCount}");
                     if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                         break;
                 }
@@ -1137,9 +1143,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Mesh[] previousSurface = entry.Surface;
                 entry.Surface = entry.UploadingSurface.ToArray();
                 entry.UploadingSurface.Clear();
+                if (previousSurface.Length > 0)
+                {
+                    _logger.Write(
+                        "MESH_GPU_EVICT",
+                        $"reason=surface-replaced step={request.Key.Step} meshes={previousSurface.Length}");
+                }
                 foreach (Mesh mesh in previousSurface)
+                {
                     UnloadMesh(mesh);
+                    _totalGpuUnloads++;
+                }
 
+                entry.SurfaceHash = result.SurfaceHash;
                 entry.BaseVersion = request.BaseVersion;
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
@@ -1152,9 +1168,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Mesh[] previousCut = entry.CutCap;
                 entry.CutCap = entry.UploadingCutCap.ToArray();
                 entry.UploadingCutCap.Clear();
+                if (previousCut.Length > 0)
+                {
+                    _logger.Write(
+                        "MESH_GPU_EVICT",
+                        $"reason=cut-cap-replaced step={request.Key.Step} layer={result.CutLayer} meshes={previousCut.Length}");
+                }
                 foreach (Mesh mesh in previousCut)
+                {
                     UnloadMesh(mesh);
+                    _totalGpuUnloads++;
+                }
 
+                entry.CutCapHash = result.CutCapHash;
                 entry.CutLayer = result.CutLayer;
                 entry.CutDirty = false;
                 RebuiltCutCaps++;
@@ -1172,7 +1198,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void InvalidatePendingBuild(ChunkEntry entry)
     {
-        entry.RunningBuild?.Cancellation.Cancel();
+        BuildRequest? obsolete = entry.RunningBuild;
+        if (obsolete != null)
+        {
+            obsolete.Cancellation.Cancel();
+            entry.RunningBuild = null;
+        }
         entry.BuildQueued = false;
         entry.ReadyBuild = null;
         entry.ReadyRequest = null;
@@ -1180,9 +1211,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.CutUploadIndex = 0;
 
         foreach (Mesh mesh in entry.UploadingSurface)
+        {
             UnloadMesh(mesh);
+            _totalGpuUnloads++;
+        }
         foreach (Mesh mesh in entry.UploadingCutCap)
+        {
             UnloadMesh(mesh);
+            _totalGpuUnloads++;
+        }
         entry.UploadingSurface.Clear();
         entry.UploadingCutCap.Clear();
     }
