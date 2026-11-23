@@ -685,66 +685,66 @@ internal static class VoxelChunkMesher
         MeshBatch batch = new(output);
 
         try
-        {
-        // Split every cut cell along one consistent diagonal. Clipping convex
-        // triangles avoids self-crossing polygons in diagonal-inside cases.
-        ReadOnlySpan<int> triangleA = stackalloc int[] { 0, 1, 2 };
-        ReadOnlySpan<int> triangleB = stackalloc int[] { 0, 2, 3 };
-        Span<SlicePoint> corners = stackalloc SlicePoint[4];
-        Span<SlicePoint> triangle = stackalloc SlicePoint[3];
-        Span<SlicePoint> polygon = stackalloc SlicePoint[4];
-
-        for (int z = 0; z < CellsPerAxis; z++)
-        for (int x = 0; x < CellsPerAxis; x++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            float x0 = originX + x * step;
-            float x1 = x0 + step;
-            float z0 = originZ + z * step;
-            float z1 = z0 + step;
-
-            corners[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
-            corners[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
-            corners[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
-            corners[3] = MakeSlicePoint(field, x0, cutSampleY, z1, cutHeightMeters);
-
-            ushort materialId = field.GetMaterialAtWorldPosition(
-                (x0 + x1) * 0.5f,
-                cutSampleY,
-                (z0 + z1) * 0.5f);
-            Color color = GetMaterialColor(palette, materialId);
-
-            for (int triangleIndex = 0; triangleIndex < 2; triangleIndex++)
             {
-                ReadOnlySpan<int> indices = triangleIndex == 0
-                    ? triangleA
-                    : triangleB;
-                triangle[0] = corners[indices[0]];
-                triangle[1] = corners[indices[1]];
-                triangle[2] = corners[indices[2]];
+            // Split every cut cell along one consistent diagonal. Clipping convex
+            // triangles avoids self-crossing polygons in diagonal-inside cases.
+            ReadOnlySpan<int> triangleA = stackalloc int[] { 0, 1, 2 };
+            ReadOnlySpan<int> triangleB = stackalloc int[] { 0, 2, 3 };
+            Span<SlicePoint> corners = stackalloc SlicePoint[4];
+            Span<SlicePoint> triangle = stackalloc SlicePoint[3];
+            Span<SlicePoint> polygon = stackalloc SlicePoint[4];
 
-                int polygonCount = ClipSolidTriangle(triangle, polygon);
-                if (polygonCount < 3)
-                    continue;
+            for (int z = 0; z < CellsPerAxis; z++)
+            for (int x = 0; x < CellsPerAxis; x++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                float x0 = originX + x * step;
+                float x1 = x0 + step;
+                float z0 = originZ + z * step;
+                float z1 = z0 + step;
 
-                SurfaceVertex anchor = new(
-                    polygon[0].Position + Vector3.UnitY * 0.006f,
-                    Vector3.UnitY);
-                for (int i = 1; i < polygonCount - 1; i++)
+                corners[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
+                corners[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
+                corners[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
+                corners[3] = MakeSlicePoint(field, x0, cutSampleY, z1, cutHeightMeters);
+
+                ushort materialId = field.GetMaterialAtWorldPosition(
+                    (x0 + x1) * 0.5f,
+                    cutSampleY,
+                    (z0 + z1) * 0.5f);
+                Color color = GetMaterialColor(palette, materialId);
+
+                for (int triangleIndex = 0; triangleIndex < 2; triangleIndex++)
                 {
-                    SurfaceVertex b = new(
-                        polygon[i].Position + Vector3.UnitY * 0.006f,
+                    ReadOnlySpan<int> indices = triangleIndex == 0
+                        ? triangleA
+                        : triangleB;
+                    triangle[0] = corners[indices[0]];
+                    triangle[1] = corners[indices[1]];
+                    triangle[2] = corners[indices[2]];
+
+                    int polygonCount = ClipSolidTriangle(triangle, polygon);
+                    if (polygonCount < 3)
+                        continue;
+
+                    SurfaceVertex anchor = new(
+                        polygon[0].Position + Vector3.UnitY * 0.006f,
                         Vector3.UnitY);
-                    SurfaceVertex c = new(
-                        polygon[i + 1].Position + Vector3.UnitY * 0.006f,
-                        Vector3.UnitY);
-                    batch.AddTriangle(anchor, b, c, color, Vector3.UnitY);
+                    for (int i = 1; i < polygonCount - 1; i++)
+                    {
+                        SurfaceVertex b = new(
+                            polygon[i].Position + Vector3.UnitY * 0.006f,
+                            Vector3.UnitY);
+                        SurfaceVertex c = new(
+                            polygon[i + 1].Position + Vector3.UnitY * 0.006f,
+                            Vector3.UnitY);
+                        batch.AddTriangle(anchor, b, c, color, Vector3.UnitY);
+                    }
                 }
             }
-        }
 
-        batch.Flush();
-        return output.ToArray();
+            batch.Flush();
+            return output.ToArray();
         }
         catch
         {
