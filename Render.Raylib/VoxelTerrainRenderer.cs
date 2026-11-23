@@ -176,6 +176,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
     private readonly Dictionary<ChunkKey, ChunkGpuHashes> _gpuMeshHashCache = new();
+
+    // Main-thread-owned round-robin queue. A chunk gets one upload turn,
+    // then moves to the tail if more meshes remain.
+    private readonly Queue<ChunkKey> _readyUploadQueue = new();
+    private readonly HashSet<ChunkKey> _readyUploadKeys = new();
     private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
     private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
     private readonly SemaphoreSlim _buildSignal = new(0);
@@ -849,25 +854,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void CollectCompletedBuilds(SparseVoxelField field)
     {
-        while (_completedBuildQueue.TryPeek(out BuildCompletion pending))
+        // Drain only the completions that were present at the start of this pass.
+        // New worker publications are handled next frame; no head-of-line Peek/Break.
+        int completionsToProcess = _completedBuildQueue.Count;
+
+        for (int completionIndex = 0;
+             completionIndex < completionsToProcess;
+             completionIndex++)
         {
-            BuildRequest pendingRequest = pending.Request;
-            bool pendingIsCurrent =
-                _chunks.TryGetValue(pendingRequest.Key, out ChunkEntry? pendingEntry) &&
-                ReferenceEquals(pendingEntry, pendingRequest.Entry) &&
-                pendingRequest.RequestRevision == pendingRequest.Entry.RequestRevision &&
-                pendingRequest.PaletteVersion == _paletteVersion &&
-                pendingRequest.BaseVersion == field.BaseVersion;
-
-            // A chunk can own only one staged build. Leave later completions in
-            // the concurrent queue until its current upload finishes on a later frame.
-            if (pending.Result.HasValue &&
-                pendingIsCurrent &&
-                pendingRequest.Entry.ReadyBuild.HasValue)
-                break;
-
             if (!_completedBuildQueue.TryDequeue(out BuildCompletion completion))
-                continue;
+                break;
 
             BuildRequest request = completion.Request;
             ChunkEntry entry = request.Entry;
@@ -893,6 +889,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 _totalBuildFailed++;
                 if (request.RequestRevision == entry.RequestRevision)
                     entry.FailedRevision = request.RequestRevision;
+
                 _logger.Write(
                     "MESH_FAILED",
                     $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"{completion.Error.Message}\"");
@@ -906,10 +903,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 request.BaseVersion != field.BaseVersion)
             {
                 if (completion.Result is VoxelMeshBuildResult staleBuild)
-                {
-                    ReturnMeshData(staleBuild.Surface);
-                    ReturnMeshData(staleBuild.CutCap);
-                }
+                    ReturnBuildCpuData(staleBuild);
 
                 _totalStaleResults++;
                 _logger.Write(
@@ -918,7 +912,30 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
             }
 
-            VoxelMeshBuildResult build = completion.Result!.Value;
+            if (!completion.Result.HasValue)
+            {
+                _totalBuildFailed++;
+                entry.FailedRevision = request.RequestRevision;
+                _logger.Write(
+                    "MESH_FAILED",
+                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"missing worker result\"");
+                continue;
+            }
+
+            VoxelMeshBuildResult build = completion.Result.Value;
+
+            // The invariant is one current staged result per chunk. A duplicate
+            // completion must never block the global completion queue.
+            if (entry.ReadyBuild.HasValue)
+            {
+                ReturnBuildCpuData(build);
+                _totalRepeatedBuilds++;
+                _logger.Write(
+                    "MESH_DUPLICATE_COMPLETION",
+                    $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision}");
+                continue;
+            }
+
             BuildIdentity identity = new(
                 request.Key,
                 request.RequestRevision,
@@ -927,10 +944,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 request.BuildSurface,
                 request.BuildCutCap,
                 request.CutLayer);
+
             int sameRevisionBuilds = _completedBuildCounts.TryGetValue(
-                identity, out int previousBuilds)
+                identity,
+                out int previousBuilds)
                     ? previousBuilds + 1
                     : 1;
+
             _completedBuildCounts[identity] = sameRevisionBuilds;
             if (_completedBuildCounts.Count > 4096)
                 _completedBuildCounts.Clear();
@@ -947,26 +967,31 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             BuildsCompletedLastFrame++;
             WorkerBuildMillisecondsLastFrame += build.WorkerMilliseconds;
             LastWorkerBuildMilliseconds = build.WorkerMilliseconds;
+
             LastWorkerQueueWaitMilliseconds = Math.Max(
                 0d,
                 Stopwatch.GetElapsedTime(
                     request.EnqueuedTimestamp,
                     completion.WorkerStartedTimestamp).TotalMilliseconds);
+
             LastWorkerResultDeliveryMilliseconds = Math.Max(
                 0d,
                 Stopwatch.GetElapsedTime(
                     completion.WorkerCompletedTimestamp,
                     Stopwatch.GetTimestamp()).TotalMilliseconds);
+
             LastBuildStep = request.Key.Step;
             LastBuildVertices = build.VertexCount;
             LastBuildTriangles = build.TriangleCount;
 
             bool uploadSurface = build.HasSurface;
             bool uploadCutCap = build.HasCutCap;
+
             bool hasGpuHashes = _gpuMeshHashCache.TryGetValue(
                 request.Key,
                 out ChunkGpuHashes gpuHashes);
 
+            // An empty surface is already a complete result: no GPU slot needed.
             if (build.SurfaceWasEmpty)
             {
                 if (entry.Surface.Length > 0)
@@ -974,6 +999,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     _logger.Write(
                         "MESH_GPU_EVICT",
                         $"reason=surface-became-empty step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) meshes={entry.Surface.Length}");
+
                     foreach (Mesh mesh in entry.Surface)
                     {
                         UnloadMesh(mesh);
@@ -987,6 +1013,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
                 entry.Built = true;
+                uploadSurface = false;
+
                 _totalEmptyChunks++;
                 RebuiltChunks++;
             }
@@ -996,8 +1024,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 gpuHashes.HasSurface &&
                 gpuHashes.SurfaceHash == build.SurfaceHash)
             {
-                // Identical geometry is already resident in VRAM.
-                // Release only this build's temporary CPU buffers.
+                // Identical geometry stays resident in VRAM; only the temporary
+                // CPU buffers from this build are returned.
                 ReturnMeshData(build.Surface);
                 build = build with { Surface = Array.Empty<VoxelMeshData>() };
 
@@ -1006,6 +1034,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.SurfaceDirty = false;
                 uploadSurface = false;
                 _totalIdenticalSurfaceSkips++;
+
                 _logger.Write(
                     "MESH_GPU_CACHE_HIT",
                     $"kind=surface step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) hash={build.SurfaceHash:X16}");
@@ -1023,6 +1052,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.CutDirty = false;
                 uploadCutCap = false;
                 _totalIdenticalCutSkips++;
+
                 _logger.Write(
                     "MESH_GPU_CACHE_HIT",
                     $"kind=cut-cap step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) layer={build.CutLayer} hash={build.CutCapHash:X16}");
@@ -1032,10 +1062,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 "MESH_BUILT",
                 $"step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) rev={request.RequestRevision} base={request.BaseVersion} workerMs={build.WorkerMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount} uploadSurface={uploadSurface} uploadCap={uploadCutCap}");
 
+            // All remaining CPU buffers are either returned on cache hit or
+            // kept only for the products that actually need a GPU upload.
             if (!uploadSurface && !uploadCutCap)
             {
-                // Idempotent ReturnCpuArrays makes this a final ownership guard:
-                // cache-hit buffers are returned above, and no build buffer is retained.
                 ReturnBuildCpuData(build);
                 continue;
             }
@@ -1047,11 +1077,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 HasSurface = uploadSurface,
                 HasCutCap = uploadCutCap
             };
+
             entry.ReadyRequest = request;
             entry.SurfaceUploadIndex = 0;
             entry.CutUploadIndex = 0;
             entry.UploadingSurface.Clear();
             entry.UploadingCutCap.Clear();
+
+            EnqueueReadyUpload(request.Key);
         }
     }
 
@@ -1143,33 +1176,39 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ReturnMeshData(build.CutCap);
     }
 
+    private void EnqueueReadyUpload(ChunkKey key)
+    {
+        if (_readyUploadKeys.Add(key))
+            _readyUploadQueue.Enqueue(key);
+    }
+
     private void UploadReadyMeshes()
     {
         Stopwatch timer = Stopwatch.StartNew();
         GpuUploadMillisecondsLastFrame = 0d;
 
-        // Visible chunks are uploaded first; there is no speculative LOD prewarm.
-        List<ChunkEntry> ready = new();
-        HashSet<ChunkEntry> seen = new();
-        foreach ((ChunkKey _, ChunkEntry entry) in _visible)
-        {
-            if (entry.ReadyBuild.HasValue && seen.Add(entry))
-                ready.Add(entry);
-        }
-        foreach (ChunkEntry entry in _chunks.Values)
-        {
-            if (entry.ReadyBuild.HasValue && seen.Add(entry))
-                ready.Add(entry);
-        }
+        // Process at most the queue length present at frame start. Each key gets
+        // one turn; unfinished chunks are appended to the tail, never pinned at head.
+        int readyAtFrameStart = _readyUploadQueue.Count;
+        int visited = 0;
 
-        foreach (ChunkEntry entry in ready)
+        while (visited < readyAtFrameStart)
         {
             if (GpuUploadsLastFrame >= MaximumGpuMeshUploadsPerFrame ||
                 timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                 break;
 
-            VoxelMeshBuildResult result = entry.ReadyBuild!.Value;
+            ChunkKey key = _readyUploadQueue.Dequeue();
+            _readyUploadKeys.Remove(key);
+            visited++;
+
+            if (!_chunks.TryGetValue(key, out ChunkEntry? entry) ||
+                !entry.ReadyBuild.HasValue)
+                continue;
+
+            VoxelMeshBuildResult result = entry.ReadyBuild.Value;
             BuildRequest? request = entry.ReadyRequest;
+
             if (request == null ||
                 request.RequestRevision != entry.RequestRevision ||
                 request.PaletteVersion != _paletteVersion)
@@ -1178,78 +1217,96 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
             }
 
-            if (result.HasSurface)
+            bool uploadedMesh = false;
+
+            // One real mesh upload per turn. This guarantees a very large chunk
+            // cannot consume every frame's budget while later chunks wait forever.
+            if (result.HasSurface &&
+                entry.SurfaceUploadIndex < result.Surface.Length)
             {
-                while (entry.SurfaceUploadIndex < result.Surface.Length &&
-                    GpuUploadsLastFrame < MaximumGpuMeshUploadsPerFrame &&
-                    timer.Elapsed.TotalMilliseconds < GpuUploadBudgetMilliseconds)
+                int meshIndex = entry.SurfaceUploadIndex;
+                VoxelMeshData source = result.Surface[meshIndex];
+                Mesh mesh;
+
+                try
                 {
-                    int meshIndex = entry.SurfaceUploadIndex;
-                    VoxelMeshData source = result.Surface[meshIndex];
-                    Mesh mesh = VoxelChunkMesher.UploadOne(source);
+                    mesh = VoxelChunkMesher.UploadOne(source);
+                }
+                finally
+                {
                     source.ReturnCpuArrays();
-                    entry.SurfaceUploadIndex = meshIndex + 1;
-                    entry.UploadingSurface.Add(mesh);
-                    GpuUploadsLastFrame++;
-                    _totalGpuUploads++;
-                    _logger.Write(
-                        "MESH_GPU_UPLOAD",
-                        $"kind=surface step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) vertices={result.Surface[entry.SurfaceUploadIndex - 1].VertexCount}");
-                    if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
-                        break;
                 }
 
-                if (entry.SurfaceUploadIndex < result.Surface.Length ||
-                    timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
-                    break;
-            }
+                entry.SurfaceUploadIndex = meshIndex + 1;
+                entry.UploadingSurface.Add(mesh);
+                uploadedMesh = true;
 
-            if (result.HasCutCap)
+                GpuUploadsLastFrame++;
+                _totalGpuUploads++;
+
+                _logger.Write(
+                    "MESH_GPU_UPLOAD",
+                    $"kind=surface step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) vertices={source.VertexCount}");
+            }
+            else if (result.HasCutCap &&
+                entry.CutUploadIndex < result.CutCap.Length)
             {
-                while (entry.CutUploadIndex < result.CutCap.Length &&
-                    GpuUploadsLastFrame < MaximumGpuMeshUploadsPerFrame &&
-                    timer.Elapsed.TotalMilliseconds < GpuUploadBudgetMilliseconds)
+                int meshIndex = entry.CutUploadIndex;
+                VoxelMeshData source = result.CutCap[meshIndex];
+                Mesh mesh;
+
+                try
                 {
-                    int meshIndex = entry.CutUploadIndex;
-                    VoxelMeshData source = result.CutCap[meshIndex];
-                    Mesh mesh = VoxelChunkMesher.UploadOne(source);
+                    mesh = VoxelChunkMesher.UploadOne(source);
+                }
+                finally
+                {
                     source.ReturnCpuArrays();
-                    entry.CutUploadIndex = meshIndex + 1;
-                    entry.UploadingCutCap.Add(mesh);
-                    GpuUploadsLastFrame++;
-                    _totalGpuUploads++;
-                    _logger.Write(
-                        "MESH_GPU_UPLOAD",
-                        $"kind=cut-cap step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) layer={result.CutLayer} vertices={result.CutCap[entry.CutUploadIndex - 1].VertexCount}");
-                    if (timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
-                        break;
                 }
 
-                if (entry.CutUploadIndex < result.CutCap.Length ||
-                    timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
-                    break;
+                entry.CutUploadIndex = meshIndex + 1;
+                entry.UploadingCutCap.Add(mesh);
+                uploadedMesh = true;
+
+                GpuUploadsLastFrame++;
+                _totalGpuUploads++;
+
+                _logger.Write(
+                    "MESH_GPU_UPLOAD",
+                    $"kind=cut-cap step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) layer={result.CutLayer} vertices={source.VertexCount}");
             }
 
-            // Surface and cut cap are independent products. A cap-only refresh
-            // must never replace or invalidate the already-correct base mesh.
+            bool surfaceComplete =
+                !result.HasSurface ||
+                entry.SurfaceUploadIndex >= result.Surface.Length;
+
+            bool cutCapComplete =
+                !result.HasCutCap ||
+                entry.CutUploadIndex >= result.CutCap.Length;
+
+            if (!surfaceComplete || !cutCapComplete)
+            {
+                // Round-robin tail insertion: all other ready chunks get a turn
+                // before this chunk can receive another upload.
+                EnqueueReadyUpload(key);
+                continue;
+            }
+
+            // Empty products and cache-only products can reach finalization
+            // without spending a GPU upload slot.
             if (result.HasSurface)
             {
                 Mesh[] previousSurface = entry.Surface;
                 entry.Surface = entry.UploadingSurface.ToArray();
                 entry.UploadingSurface.Clear();
-                if (previousSurface.Length > 0)
+
+                foreach (Mesh oldMesh in previousSurface)
                 {
-                    _logger.Write(
-                        "MESH_GPU_EVICT",
-                        $"reason=surface-replaced step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) meshes={previousSurface.Length}");
-                }
-                foreach (Mesh mesh in previousSurface)
-                {
-                    UnloadMesh(mesh);
+                    UnloadMesh(oldMesh);
                     _totalGpuUnloads++;
                 }
 
-                SetSurfaceGpuHash(request.Key, result.SurfaceHash);
+                SetSurfaceGpuHash(key, result.SurfaceHash);
                 entry.BaseVersion = request.BaseVersion;
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
@@ -1262,29 +1319,26 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Mesh[] previousCut = entry.CutCap;
                 entry.CutCap = entry.UploadingCutCap.ToArray();
                 entry.UploadingCutCap.Clear();
-                if (previousCut.Length > 0)
+
+                foreach (Mesh oldMesh in previousCut)
                 {
-                    _logger.Write(
-                        "MESH_GPU_EVICT",
-                        $"reason=cut-cap-replaced step={request.Key.Step} chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) layer={result.CutLayer} meshes={previousCut.Length}");
-                }
-                foreach (Mesh mesh in previousCut)
-                {
-                    UnloadMesh(mesh);
+                    UnloadMesh(oldMesh);
                     _totalGpuUnloads++;
                 }
 
-                SetCutCapGpuHash(request.Key, result.CutCapHash, result.CutLayer);
+                SetCutCapGpuHash(key, result.CutCapHash, result.CutLayer);
                 entry.CutLayer = result.CutLayer;
                 entry.CutDirty = false;
                 RebuiltCutCaps++;
             }
 
-
             entry.ReadyBuild = null;
             entry.ReadyRequest = null;
             entry.SurfaceUploadIndex = 0;
             entry.CutUploadIndex = 0;
+
+            // A completed upload turn never gets re-enqueued.
+            _ = uploadedMesh;
         }
 
         GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
@@ -1580,6 +1634,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.Dispose();
         _chunks.Clear();
         _gpuMeshHashCache.Clear();
+        _readyUploadQueue.Clear();
+        _readyUploadKeys.Clear();
         _buildSignal.Dispose();
         _workerShutdown.Dispose();
 
