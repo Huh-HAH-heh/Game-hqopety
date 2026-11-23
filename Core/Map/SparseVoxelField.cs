@@ -258,17 +258,27 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     /// density lattice. Adjacent chunks therefore address identical boundary
     /// samples, including all supported LOD steps.
     /// </summary>
-    public static int GetChunkSampleCoordinate(int chunkIndex, int sampleIndex, int step)
+    public static int GetChunkSampleCoordinate(int chunkIndex, int sampleIndex, int step) =>
+        GetChunkSampleCoordinate(chunkIndex, sampleIndex, step, haloSize: 1);
+
+    public static int GetChunkSampleCoordinate(
+        int chunkIndex,
+        int sampleIndex,
+        int step,
+        int haloSize)
     {
         if (chunkIndex < 0)
             throw new ArgumentOutOfRangeException(nameof(chunkIndex));
-        if (sampleIndex < 0 || sampleIndex >= ChunkSize + 3)
+        if (haloSize < 1 || haloSize > 4)
+            throw new ArgumentOutOfRangeException(nameof(haloSize));
+        if (sampleIndex < 0 ||
+            sampleIndex >= ChunkSize + haloSize * 2 + 1)
             throw new ArgumentOutOfRangeException(nameof(sampleIndex));
         if (step < 1)
             throw new ArgumentOutOfRangeException(nameof(step));
 
         return checked(chunkIndex * ChunkSize * step +
-            (sampleIndex - 1) * step);
+            (sampleIndex - haloSize) * step);
     }
 
     public int ChunkCount => _chunks.Count;
