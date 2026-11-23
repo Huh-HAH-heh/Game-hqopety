@@ -96,6 +96,8 @@ internal static class Program
         VoxelMeshData[] rightCap = VoxelChunkMesher.BuildCutCapData(
             right, cutHeightMeters, palette);
 
+        try
+        {
         float sharedX = (SparseVoxelField.ChunkSize * step + 0.5f) * voxelSizeMeters;
         HashSet<int> leftBoundary = CollectCapBoundaryZ(leftCap, sharedX, cutHeightMeters);
         HashSet<int> rightBoundary = CollectCapBoundaryZ(rightCap, sharedX, cutHeightMeters);
@@ -109,6 +111,12 @@ internal static class Program
             finite && seamMatches,
             $"leftBoundary={leftBoundary.Count}, rightBoundary={rightBoundary.Count}, " +
             $"seamMatch={seamMatches}, finiteNormals={finite}");
+        }
+        finally
+        {
+            ReturnMeshData(leftCap);
+            ReturnMeshData(rightCap);
+        }
     }
 
     private static HashSet<int> CollectCapBoundaryZ(
@@ -248,7 +256,8 @@ internal static class Program
             Array.Sort(captureTimings);
 
             // JIT warm-up is kept outside the measured mesh samples.
-            _ = VoxelChunkMesher.BuildSurfaceData(input, palette);
+            VoxelMeshData[] warmup = VoxelChunkMesher.BuildSurfaceData(input, palette);
+            ReturnMeshData(warmup);
 
             double[] timings = new double[iterations];
             long allocationBefore = GC.GetTotalAllocatedBytes(true);
@@ -257,7 +266,10 @@ internal static class Program
             for (int i = 0; i < iterations; i++)
             {
                 Stopwatch buildTimer = Stopwatch.StartNew();
-                last = VoxelChunkMesher.BuildSurfaceData(input, palette);
+                VoxelMeshData[] next = VoxelChunkMesher.BuildSurfaceData(input, palette);
+                if (last.Length > 0)
+                    ReturnMeshData(last);
+                last = next;
                 buildTimer.Stop();
                 timings[i] = buildTimer.Elapsed.TotalMilliseconds;
             }
@@ -274,6 +286,8 @@ internal static class Program
                 $"{timings[iterations / 2],9:0.000}/{timings[iterations - 1],0:0.000} | " +
                 $"{vertices,8} | {triangles,9} | " +
                 $"{allocated / (1024d * 1024d),9:0.00} | {maximumError:0.000}");
+
+            ReturnMeshData(last);
         }
     }
 
@@ -297,9 +311,9 @@ internal static class Program
         captureTimer.Stop();
 
         // Warm the mesher JIT and both ThreadPool workers before collecting data.
-        _ = VoxelChunkMesher.BuildSurfaceData(inputs[0], palette);
-        Task warmA = Task.Run(() => VoxelChunkMesher.BuildSurfaceData(inputs[0], palette));
-        Task warmB = Task.Run(() => VoxelChunkMesher.BuildSurfaceData(inputs[1], palette));
+        ReturnMeshData(VoxelChunkMesher.BuildSurfaceData(inputs[0], palette));
+        Task warmA = Task.Run(() => BuildAndRelease(inputs[0], palette));
+        Task warmB = Task.Run(() => BuildAndRelease(inputs[1], palette));
         Task.WaitAll(warmA, warmB);
 
         double[] sequentialTimes = new double[iterations];
@@ -322,8 +336,15 @@ internal static class Program
             {
                 VoxelMeshData[] meshes =
                     VoxelChunkMesher.BuildSurfaceData(input, palette);
-                sequentialV += meshes.Sum(static mesh => mesh.VertexCount);
-                sequentialT += meshes.Sum(static mesh => mesh.TriangleCount);
+                try
+                {
+                    sequentialV += meshes.Sum(static mesh => mesh.VertexCount);
+                    sequentialT += meshes.Sum(static mesh => mesh.TriangleCount);
+                }
+                finally
+                {
+                    ReturnMeshData(meshes);
+                }
             }
             sequentialTimer.Stop();
             sequentialTimes[run] = sequentialTimer.Elapsed.TotalMilliseconds;
@@ -404,9 +425,30 @@ internal static class Program
         {
             VoxelMeshData[] meshes =
                 VoxelChunkMesher.BuildSurfaceData(inputs[index], palette);
-            vertices[index] = meshes.Sum(static mesh => mesh.VertexCount);
-            triangles[index] = meshes.Sum(static mesh => mesh.TriangleCount);
+            try
+            {
+                vertices[index] = meshes.Sum(static mesh => mesh.VertexCount);
+                triangles[index] = meshes.Sum(static mesh => mesh.TriangleCount);
+            }
+            finally
+            {
+                ReturnMeshData(meshes);
+            }
         }
+    }
+
+    private static void BuildAndRelease(
+        VoxelChunkBuildInput input,
+        TerrainPalette palette)
+    {
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, palette);
+        ReturnMeshData(meshes);
+    }
+
+    private static void ReturnMeshData(VoxelMeshData[] meshes)
+    {
+        foreach (VoxelMeshData mesh in meshes)
+            mesh.ReturnCpuArrays();
     }
 
     private static VoxelChunkBuildInput Capture(
