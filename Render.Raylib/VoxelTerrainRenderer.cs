@@ -91,7 +91,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
         public long LastAccessFrame;
-        public float PriorityDistanceSquared = float.PositiveInfinity;
         public bool Built;
 
         public int RequestRevision;
@@ -503,7 +502,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
 
             entry.LastAccessFrame = _frame;
-            entry.PriorityDistanceSquared = candidate.DistanceSquared;
             bool surfaceStale = !entry.Built ||
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
@@ -958,7 +956,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 }
 
                 entry.LastAccessFrame = _frame;
-                entry.PriorityDistanceSquared = candidate.DistanceSquared;
 
                 bool surfaceStale = !entry.Built ||
                     entry.SurfaceDirty ||
