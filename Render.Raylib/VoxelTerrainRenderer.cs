@@ -26,7 +26,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const float LodNearRadiusSquared = LodNearRadiusMeters * LodNearRadiusMeters;
     private const float LodMiddleRadiusSquared = LodMiddleRadiusMeters * LodMiddleRadiusMeters;
     private const int MaximumCachedChunks = 6000;
-    private const int MaximumPrewarmBuildsPerFrame = 8;
     private const float LodNearPrewarmStartMeters = 55f;
     private const float LodNearPrewarmStartSquared =
         LodNearPrewarmStartMeters * LodNearPrewarmStartMeters;
@@ -205,9 +204,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // stale records from uploading a removed or recreated LOD chunk.
     private readonly ConcurrentQueue<ReadyUpload> _readyUploadQueue = new();
     private readonly List<Candidate> _candidateScratch = new();
+    private readonly List<Candidate> _step16FallbackScratch = new();
+    private readonly List<Candidate> _step4FallbackScratch = new();
+    private readonly List<Candidate> _step1ParentScratch = new();
     private readonly List<Candidate> _prewarmParentScratch = new();
     private readonly List<Candidate> _prewarmChunkScratch = new(64);
-    private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
+    private readonly HashSet<ChunkKey> _preparedCandidateKeys = new();
+    private readonly HashSet<ChunkKey> _cacheProtectedKeys = new();
     private readonly List<CacheEvictionCandidate> _cacheEvictionScratch = new();
     private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
     private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
@@ -402,8 +405,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         List<Candidate> candidates = _candidateScratch;
         candidates.Clear();
 
+        List<Candidate> step16Fallbacks = _step16FallbackScratch;
+        step16Fallbacks.Clear();
+
+        List<Candidate> step4Fallbacks = _step4FallbackScratch;
+        step4Fallbacks.Clear();
+
+        List<Candidate> step1Parents = _step1ParentScratch;
+        step1Parents.Clear();
+
         List<Candidate> prewarmParents = _prewarmParentScratch;
         prewarmParents.Clear();
+
+        _preparedCandidateKeys.Clear();
+        _cacheProtectedKeys.Clear();
 
         int frustumTests = 0;
         CollectLodCandidates(
@@ -413,10 +428,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             viewportHeight,
             maximumViewDistanceMeters,
             candidates,
+            step16Fallbacks,
+            step4Fallbacks,
+            step1Parents,
             prewarmParents,
             ref frustumTests);
 
         candidates.Sort(static (a, b) =>
+            a.DistanceSquared.CompareTo(b.DistanceSquared));
+        step16Fallbacks.Sort(static (a, b) =>
+            a.DistanceSquared.CompareTo(b.DistanceSquared));
+        step4Fallbacks.Sort(static (a, b) =>
+            a.DistanceSquared.CompareTo(b.DistanceSquared));
+        step1Parents.Sort(static (a, b) =>
             a.DistanceSquared.CompareTo(b.DistanceSquared));
         prewarmParents.Sort(static (a, b) =>
             a.DistanceSquared.CompareTo(b.DistanceSquared));
@@ -455,10 +479,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _visible.Clear();
         _visibleCandidateKeys.Clear();
 
-        List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
-            _candidateEntriesScratch;
-        candidateEntries.Clear();
-
         int cutSampleY = (int)MathF.Floor(
             cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f);
         int cutLayer = cutEnabled
@@ -491,53 +511,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             ? cutLayer * SparseVoxelField.VoxelSizeMeters
             : cutHeightMeters;
 
-        foreach (Candidate candidate in candidates)
-        {
-            ChunkKey key = candidate.Key;
-            _visibleCandidateKeys.Add(key);
-            if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
-            {
-                entry = new ChunkEntry();
-                _chunks.Add(key, entry);
-            }
-
-            entry.LastAccessFrame = _frame;
-            bool surfaceStale = !entry.Built ||
-                entry.SurfaceDirty ||
-                entry.BaseVersion != field.BaseVersion ||
-                entry.PaletteVersion != _paletteVersion;
-            int chunkMinY = key.Y * ChunkCells * key.Step;
-            int chunkMaxY = chunkMinY + ChunkCells * key.Step;
-            bool containsCutPlane =
-                cutSampleY >= chunkMinY &&
-                cutSampleY < chunkMaxY;
-
-            bool needsCutCap = cutEnabled &&
-                _cutLayerStableFrames >= CutCapSettleFrames &&
-                containsCutPlane &&
-                (entry.CutLayer != cutLayer || entry.CutDirty);
-
-            bool hasPendingWork = HasPendingWork(entry);
-            bool hasQueueCapacity =
-                _buildQueue.Count < MaximumPendingMeshJobs;
-            if ((surfaceStale || needsCutCap) &&
-                !hasPendingWork &&
-                hasQueueCapacity)
-            {
-                RequestBuild(
-                    field,
-                    key,
-                    entry,
-                    surfaceStale,
-                    needsCutCap,
-                    cutLayer);
-            }
-
-            if (!cutEnabled && entry.CutCap.Length > 0)
-                ClearCutCap(key, entry);
-
-            candidateEntries.Add((candidate, entry));
-        }
+        // Build parent fallbacks before detailed children. This ensures a coarse
+        // cover is already resident while workers prepare the replacement hierarchy.
+        PrepareCandidateBuilds(
+            field, step16Fallbacks, activeLeaves: false,
+            cutEnabled, cutSampleY, cutLayer);
+        PrepareCandidateBuilds(
+            field, step4Fallbacks, activeLeaves: false,
+            cutEnabled, cutSampleY, cutLayer);
+        PrepareCandidateBuilds(
+            field, candidates, activeLeaves: true,
+            cutEnabled, cutSampleY, cutLayer);
 
         QueuePrewarmBuilds(
             field,
@@ -550,14 +534,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         FrustumCandidatesLastFrame = frustumTests;
 
-        foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
-        {
-            if (entry.Built)
-                AddVisible(candidate.Key, entry);
-        }
-
         EvictUnusedChunks(camera.Position);
         UploadReadyMeshes();
+        SelectVisibleLodMeshes(field, candidates, step16Fallbacks, step4Fallbacks, step1Parents);
         double remainingUploadBudget = Math.Max(
             0d,
             GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
@@ -579,6 +558,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"snapshotMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
                 $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} prewarmQueued={LodPrewarmBuilds} " +
+                $"fallback16={step16Fallbacks.Count} fallback4={step4Fallbacks.Count} " +
                 $"workers={RunningMeshJobs} queue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} gpuReady={_readyUploadQueue.Count} " +
                 $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
                 $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
@@ -691,6 +671,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int viewportHeight,
         float maximumViewDistanceMeters,
         List<Candidate> candidates,
+        List<Candidate> step16Fallbacks,
+        List<Candidate> step4Fallbacks,
+        List<Candidate> step1Parents,
         List<Candidate> prewarmParents,
         ref int frustumTests)
     {
@@ -772,6 +755,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
             }
 
+            AddCandidate(
+                step16Fallbacks,
+                originX,
+                originY,
+                originZ,
+                LodFarStep,
+                cameraPosition);
+
             int farEndX = Math.Min(originX + farSamples, field.Width);
             int farEndY = Math.Min(originY + farSamples, field.Height);
             int farEndZ = Math.Min(originZ + farSamples, field.Depth);
@@ -797,6 +788,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     viewportHeight,
                     maximumViewDistanceMeters))
                     continue;
+
+                AddCandidate(
+                    step4Fallbacks,
+                    middleX,
+                    middleY,
+                    middleZ,
+                    LodMiddleStep,
+                    cameraPosition);
 
                 float middleDistanceSquared = BlockCenterDistanceSquared(
                     cameraPosition,
@@ -842,6 +841,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     continue;
                 }
 
+                AddCandidate(
+                    step1Parents,
+                    middleX,
+                    middleY,
+                    middleZ,
+                    LodMiddleStep,
+                    cameraPosition);
+
                 int middleEndX = Math.Min(middleX + middleSamples, field.Width);
                 int middleEndY = Math.Min(middleY + middleSamples, field.Height);
                 int middleEndZ = Math.Min(middleZ + middleSamples, field.Depth);
@@ -878,6 +885,210 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
     }
+
+    private void PrepareCandidateBuilds(
+        SparseVoxelField field,
+        List<Candidate> candidates,
+        bool activeLeaves,
+        bool cutEnabled,
+        int cutSampleY,
+        int cutLayer)
+    {
+        foreach (Candidate candidate in candidates)
+        {
+            ChunkKey key = candidate.Key;
+
+            if (activeLeaves)
+                _visibleCandidateKeys.Add(key);
+
+            _cacheProtectedKeys.Add(key);
+
+            if (!_preparedCandidateKeys.Add(key))
+                continue;
+
+            if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
+            {
+                entry = new ChunkEntry();
+                _chunks.Add(key, entry);
+            }
+
+            entry.LastAccessFrame = _frame;
+
+            bool surfaceStale = !entry.Built ||
+                entry.SurfaceDirty ||
+                entry.BaseVersion != field.BaseVersion ||
+                entry.PaletteVersion != _paletteVersion;
+
+            int chunkMinY = key.Y * ChunkCells * key.Step;
+            int chunkMaxY = chunkMinY + ChunkCells * key.Step;
+            bool containsCutPlane =
+                cutSampleY >= chunkMinY &&
+                cutSampleY < chunkMaxY;
+
+            bool needsCutCap = cutEnabled &&
+                _cutLayerStableFrames >= CutCapSettleFrames &&
+                containsCutPlane &&
+                (entry.CutLayer != cutLayer || entry.CutDirty);
+
+            if ((surfaceStale || needsCutCap) &&
+                !HasPendingWork(entry) &&
+                _buildQueue.Count < MaximumPendingMeshJobs)
+            {
+                RequestBuild(
+                    field,
+                    key,
+                    entry,
+                    surfaceStale,
+                    needsCutCap,
+                    cutLayer);
+            }
+
+            if (!cutEnabled && entry.CutCap.Length > 0)
+                ClearCutCap(key, entry);
+        }
+    }
+
+    private void SelectVisibleLodMeshes(
+        SparseVoxelField field,
+        List<Candidate> activeLeaves,
+        List<Candidate> step16Fallbacks,
+        List<Candidate> step4Fallbacks,
+        List<Candidate> step1Parents)
+    {
+        // Coarse leaves beyond the Step16 split radius remain directly visible.
+        foreach (Candidate candidate in activeLeaves)
+        {
+            if (candidate.Key.Step != LodFarStep)
+                continue;
+
+            if (_chunks.TryGetValue(candidate.Key, out ChunkEntry? entry) &&
+                entry.Built)
+            {
+                AddVisible(candidate.Key, entry);
+            }
+        }
+
+        foreach (Candidate farParent in step16Fallbacks)
+        {
+            ChunkKey farKey = farParent.Key;
+
+            // A Step16 parent is replaced only when every Step4 child intersecting
+            // the current frustum has a current mesh fully uploaded to the GPU.
+            if (!IsChildGroupReady(
+                farKey,
+                LodMiddleStep,
+                step4Fallbacks,
+                field))
+            {
+                AddCachedFallback(farKey);
+                continue;
+            }
+
+            foreach (Candidate middle in step4Fallbacks)
+            {
+                if (!IsChildOf(middle.Key, farKey))
+                    continue;
+
+                bool wantsNear = ContainsCandidate(step1Parents, middle.Key);
+                if (wantsNear && IsChildGroupReady(
+                    middle.Key,
+                    LodNearStep,
+                    activeLeaves,
+                    field))
+                {
+                    AddReadyChildren(middle.Key, LodNearStep, activeLeaves);
+                }
+                else
+                {
+                    // Step4 is the atomic fallback for its whole Step1 child set.
+                    AddCachedFallback(middle.Key);
+                }
+            }
+        }
+
+        // The previous fallback remains drawable while a rebuild is in flight.
+        // A candidate is added at most once by this hierarchy traversal.
+    }
+
+    private bool IsChildGroupReady(
+        ChunkKey parent,
+        int childStep,
+        List<Candidate> children,
+        SparseVoxelField field)
+    {
+        int matchingChildren = 0;
+        int ratio = parent.Step / childStep;
+
+        foreach (Candidate child in children)
+        {
+            if (child.Key.Step != childStep ||
+                child.Key.X / ratio != parent.X ||
+                child.Key.Y / ratio != parent.Y ||
+                child.Key.Z / ratio != parent.Z)
+                continue;
+
+            matchingChildren++;
+
+            if (!_chunks.TryGetValue(child.Key, out ChunkEntry? entry) ||
+                !IsCurrentMeshReady(entry, field))
+                return false;
+        }
+
+        // No visible child means no visible coverage to hand off.
+        return matchingChildren > 0;
+    }
+
+    private static bool IsChildOf(ChunkKey child, ChunkKey parent)
+    {
+        if (child.Step >= parent.Step || parent.Step % child.Step != 0)
+            return false;
+
+        int ratio = parent.Step / child.Step;
+        return child.X / ratio == parent.X &&
+            child.Y / ratio == parent.Y &&
+            child.Z / ratio == parent.Z;
+    }
+
+    private static bool ContainsCandidate(List<Candidate> candidates, ChunkKey key)
+    {
+        foreach (Candidate candidate in candidates)
+        {
+            if (candidate.Key == key)
+                return true;
+        }
+
+        return false;
+    }
+
+    private void AddReadyChildren(
+        ChunkKey parent,
+        int childStep,
+        List<Candidate> children)
+    {
+        foreach (Candidate child in children)
+        {
+            if (child.Key.Step != childStep || !IsChildOf(child.Key, parent))
+                continue;
+
+            if (_chunks.TryGetValue(child.Key, out ChunkEntry? entry) &&
+                IsRenderable(entry))
+            {
+                AddVisible(child.Key, entry);
+            }
+        }
+    }
+
+    private void AddCachedFallback(ChunkKey key)
+    {
+        if (_chunks.TryGetValue(key, out ChunkEntry? entry) &&
+            IsRenderable(entry))
+        {
+            AddVisible(key, entry);
+        }
+    }
+
+    private static bool IsRenderable(ChunkEntry entry) =>
+        entry.Built && (entry.Surface.Length > 0 || entry.BaseVersion != long.MinValue);
 
     private void QueuePrewarmBuilds(
         SparseVoxelField field,
@@ -941,8 +1152,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             foreach (Candidate candidate in children)
             {
-                if (LodPrewarmBuilds >= MaximumPrewarmBuildsPerFrame ||
-                    _buildQueue.Count >= MaximumPendingMeshJobs)
+                if (_buildQueue.Count >= MaximumPendingMeshJobs)
                     return;
 
                 ChunkKey key = candidate.Key;
@@ -956,6 +1166,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 }
 
                 entry.LastAccessFrame = _frame;
+                _cacheProtectedKeys.Add(key);
 
                 bool surfaceStale = !entry.Built ||
                     entry.SurfaceDirty ||
@@ -1940,7 +2151,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // invalidates their generations and safely cancels/releases their work.
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (_visibleCandidateKeys.Contains(key))
+            if (_cacheProtectedKeys.Contains(key))
                 continue;
 
             int span = ChunkCells * key.Step;
