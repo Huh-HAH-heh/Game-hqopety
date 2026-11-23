@@ -875,7 +875,7 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"WORKERS {renderer.VoxelMeshWorkers} | QUEUED {renderer.VoxelPendingMeshJobs} | BUILT {renderer.VoxelBuildsCompletedLastFrame}/FRAME | GPU PACKETS {renderer.VoxelGpuUploadsLastFrame}",
+                    $"WORKERS {renderer.VoxelMeshWorkers} | QUEUED {renderer.VoxelPendingMeshJobs} | READY {renderer.VoxelCompletedMeshResultsPending} | BUILT {renderer.VoxelBuildsCompletedLastFrame}/FRAME | GPU PACKETS {renderer.VoxelGpuUploadsLastFrame}",
                     13f,
                     Color.LightGray));
                 lines.Add((
