@@ -522,7 +522,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             candidateEntries.Add((candidate, entry));
         }
 
-        EvictObsoleteLodEntries(field, camera.Position);
+        EvictObsoleteLodEntries(camera.Position);
         CancelQueuedBuildsOutsideView();
 
         foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
@@ -683,14 +683,45 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int farSamples = ChunkCells * LodFarStep;
         int middleSamples = ChunkCells * LodMiddleStep;
         int nearSamples = ChunkCells * LodNearStep;
+        float farSizeMeters = farSamples * voxelSize;
+        float farSphereRadius = farSizeMeters * sphereScale;
 
-        // The outer grid advances by a full Step=16 chunk. Only blocks whose
-        // AABB reaches the 256 m LOD band are subdivided into Step=4 children.
-        for (int originZ = 0; originZ < field.Depth; originZ += farSamples)
-        for (int originY = 0; originY < field.Height; originY += farSamples)
-        for (int originX = 0; originX < field.Width; originX += farSamples)
+        // Any visible chunk must have its parent sphere intersect this
+        // camera-distance envelope. This broad phase avoids scanning distant
+        // Step=16 cells elsewhere in the world.
+        float scanRadius = MathF.Max(0f, maximumViewDistanceMeters) + farSphereRadius;
+        int chunksX = DivideRoundUp(field.Width, farSamples);
+        int chunksY = DivideRoundUp(field.Height, farSamples);
+        int chunksZ = DivideRoundUp(field.Depth, farSamples);
+
+        int firstChunkX = Math.Clamp(
+            (int)MathF.Floor((cameraPosition.X - scanRadius) / farSizeMeters),
+            0, chunksX - 1);
+        int lastChunkX = Math.Clamp(
+            (int)MathF.Floor((cameraPosition.X + scanRadius) / farSizeMeters),
+            0, chunksX - 1);
+        int firstChunkY = Math.Clamp(
+            (int)MathF.Floor((cameraPosition.Y - scanRadius) / farSizeMeters),
+            0, chunksY - 1);
+        int lastChunkY = Math.Clamp(
+            (int)MathF.Floor((cameraPosition.Y + scanRadius) / farSizeMeters),
+            0, chunksY - 1);
+        int firstChunkZ = Math.Clamp(
+            (int)MathF.Floor((cameraPosition.Z - scanRadius) / farSizeMeters),
+            0, chunksZ - 1);
+        int lastChunkZ = Math.Clamp(
+            (int)MathF.Floor((cameraPosition.Z + scanRadius) / farSizeMeters),
+            0, chunksZ - 1);
+
+        // Advance directly by the Step=16 parent grid; refine only parents whose
+        // center enters the 256 m band. Each child level is aligned to its parent.
+        for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
+        for (int chunkY = firstChunkY; chunkY <= lastChunkY; chunkY++)
+        for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
         {
-            float farSizeMeters = farSamples * voxelSize;
+            int originX = chunkX * farSamples;
+            int originY = chunkY * farSamples;
+            int originZ = chunkZ * farSamples;
             Vector3 farCenter = new(
                 (originX + farSamples * 0.5f) * voxelSize,
                 (originY + farSamples * 0.5f) * voxelSize,
@@ -706,14 +737,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 maximumViewDistanceMeters))
                 continue;
 
-            if (!BlockIntersectsRadius(
+            if (BlockCenterDistanceSquared(
                 cameraPosition,
-                field,
                 originX,
                 originY,
                 originZ,
-                farSamples,
-                LodMiddleRadiusSquared))
+                farSamples) > LodMiddleRadiusSquared)
             {
                 AddCandidate(
                     candidates,
@@ -751,14 +780,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     maximumViewDistanceMeters))
                     continue;
 
-                if (!BlockIntersectsRadius(
+                if (BlockCenterDistanceSquared(
                     cameraPosition,
-                    field,
                     middleX,
                     middleY,
                     middleZ,
-                    middleSamples,
-                    LodNearRadiusSquared))
+                    middleSamples) > LodNearRadiusSquared)
                 {
                     AddCandidate(
                         candidates,
@@ -836,37 +863,27 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Vector3.DistanceSquared(center, cameraPosition)));
     }
 
-    private static bool BlockIntersectsRadius(
+    private static float BlockCenterDistanceSquared(
         Vector3 point,
-        SparseVoxelField field,
         int originX,
         int originY,
         int originZ,
-        int sizeSamples,
-        float radiusSquared)
+        int sizeSamples)
     {
-        float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        float centerX =
+            (originX + sizeSamples * 0.5f) * SparseVoxelField.VoxelSizeMeters;
+        float centerY =
+            (originY + sizeSamples * 0.5f) * SparseVoxelField.VoxelSizeMeters;
+        float centerZ =
+            (originZ + sizeSamples * 0.5f) * SparseVoxelField.VoxelSizeMeters;
 
-        float minX = originX * voxelSize;
-        float minY = originY * voxelSize;
-        float minZ = originZ * voxelSize;
-        float maxX = Math.Min(originX + sizeSamples, field.Width) * voxelSize;
-        float maxY = Math.Min(originY + sizeSamples, field.Height) * voxelSize;
-        float maxZ = Math.Min(originZ + sizeSamples, field.Depth) * voxelSize;
-
-        float dx = point.X < minX ? minX - point.X :
-            point.X > maxX ? point.X - maxX : 0f;
-        float dy = point.Y < minY ? minY - point.Y :
-            point.Y > maxY ? point.Y - maxY : 0f;
-        float dz = point.Z < minZ ? minZ - point.Z :
-            point.Z > maxZ ? point.Z - maxZ : 0f;
-
-        return dx * dx + dy * dy + dz * dz <= radiusSquared;
+        float dx = point.X - centerX;
+        float dy = point.Y - centerY;
+        float dz = point.Z - centerZ;
+        return dx * dx + dy * dy + dz * dz;
     }
 
-    private void EvictObsoleteLodEntries(
-        SparseVoxelField field,
-        Vector3 cameraPosition)
+    private void EvictObsoleteLodEntries(Vector3 cameraPosition)
     {
         _lodEvictionScratch.Clear();
 
@@ -874,7 +891,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // hierarchical LOD band, even while temporarily outside the frustum.
         foreach (ChunkKey key in _chunks.Keys)
         {
-            if (!IsChunkInCurrentLodBand(key, field, cameraPosition))
+            if (!IsChunkInCurrentLodBand(key, cameraPosition))
                 _lodEvictionScratch.Add(key);
         }
 
@@ -884,7 +901,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static bool IsChunkInCurrentLodBand(
         ChunkKey key,
-        SparseVoxelField field,
         Vector3 cameraPosition)
     {
         int blockSize = ChunkCells * key.Step;
@@ -897,16 +913,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             case LodNearStep:
             {
                 // Step=1 children are emitted as a complete 4x4x4 set whenever
-                // their Step=4 parent touches the 64 m band. Keep the whole set.
+                // their Step=4 parent's center enters the 64 m band.
                 int middleSize = ChunkCells * LodMiddleStep;
                 int parentX = originX / middleSize * middleSize;
                 int parentY = originY / middleSize * middleSize;
                 int parentZ = originZ / middleSize * middleSize;
 
-                return BlockIntersectsRadius(
-                    cameraPosition, field,
-                    parentX, parentY, parentZ, middleSize,
-                    LodNearRadiusSquared);
+                return BlockCenterDistanceSquared(
+                    cameraPosition,
+                    parentX, parentY, parentZ, middleSize) <= LodNearRadiusSquared;
             }
 
             case LodMiddleStep:
@@ -916,24 +931,23 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 int parentY = originY / farSize * farSize;
                 int parentZ = originZ / farSize * farSize;
 
-                bool parentInMiddleBand = BlockIntersectsRadius(
-                    cameraPosition, field,
-                    parentX, parentY, parentZ, farSize,
-                    LodMiddleRadiusSquared);
+                bool parentInMiddleBand =
+                    BlockCenterDistanceSquared(
+                        cameraPosition,
+                        parentX, parentY, parentZ, farSize) <= LodMiddleRadiusSquared;
 
-                bool chunkInNearBand = BlockIntersectsRadius(
-                    cameraPosition, field,
-                    originX, originY, originZ, blockSize,
-                    LodNearRadiusSquared);
+                bool chunkInNearBand =
+                    BlockCenterDistanceSquared(
+                        cameraPosition,
+                        originX, originY, originZ, blockSize) <= LodNearRadiusSquared;
 
                 return parentInMiddleBand && !chunkInNearBand;
             }
 
             case LodFarStep:
-                return !BlockIntersectsRadius(
-                    cameraPosition, field,
-                    originX, originY, originZ, blockSize,
-                    LodMiddleRadiusSquared);
+                return BlockCenterDistanceSquared(
+                    cameraPosition,
+                    originX, originY, originZ, blockSize) > LodMiddleRadiusSquared;
 
             default:
                 return true;
