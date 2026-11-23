@@ -479,7 +479,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _visible.Clear();
         foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
         {
-            if (entry.Built && entry.Surface.Length > 0)
+            bool hasVisibleSurface = entry.Surface.Length > 0;
+            bool hasVisibleCutCap = cutEnabled &&
+                stableCutLayer >= 0 &&
+                entry.CutLayer == stableCutLayer &&
+                entry.CutCap.Length > 0;
+
+            if (entry.Built && (hasVisibleSurface || hasVisibleCutCap))
                 AddVisible(candidate.Key, entry);
         }
 
@@ -1380,7 +1386,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void AddVisible(ChunkKey key, ChunkEntry entry)
     {
-        if (!entry.Built || entry.Surface.Length == 0)
+        if (!entry.Built)
             return;
 
         entry.LastSeenFrame = _frame;
