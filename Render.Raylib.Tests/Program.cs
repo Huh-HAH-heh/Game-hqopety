@@ -97,20 +97,20 @@ internal static class Program
             right, cutHeightMeters, palette);
 
         try
-            {
-            float sharedX = (SparseVoxelField.ChunkSize * step + 0.5f) * voxelSizeMeters;
-            HashSet<int> leftBoundary = CollectCapBoundaryZ(leftCap, sharedX, cutHeightMeters);
-            HashSet<int> rightBoundary = CollectCapBoundaryZ(rightCap, sharedX, cutHeightMeters);
+        {
+        float sharedX = (SparseVoxelField.ChunkSize * step + 0.5f) * voxelSizeMeters;
+        HashSet<int> leftBoundary = CollectCapBoundaryZ(leftCap, sharedX, cutHeightMeters);
+        HashSet<int> rightBoundary = CollectCapBoundaryZ(rightCap, sharedX, cutHeightMeters);
 
-            bool finite = HasFiniteNonZeroNormals(leftCap) &&
-                HasFiniteNonZeroNormals(rightCap);
-            bool seamMatches = leftBoundary.Count > 0 &&
-                leftBoundary.SetEquals(rightBoundary);
+        bool finite = HasFiniteNonZeroNormals(leftCap) &&
+            HasFiniteNonZeroNormals(rightCap);
+        bool seamMatches = leftBoundary.Count > 0 &&
+            leftBoundary.SetEquals(rightBoundary);
 
-            return (
-                finite && seamMatches,
-                $"leftBoundary={leftBoundary.Count}, rightBoundary={rightBoundary.Count}, " +
-                $"seamMatch={seamMatches}, finiteNormals={finite}");
+        return (
+            finite && seamMatches,
+            $"leftBoundary={leftBoundary.Count}, rightBoundary={rightBoundary.Count}, " +
+            $"seamMatch={seamMatches}, finiteNormals={finite}");
         }
         finally
         {
