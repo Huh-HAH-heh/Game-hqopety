@@ -327,9 +327,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int originY = chunkY * ChunkSize * step;
         int originZ = chunkZ * ChunkSize * step;
 
-        int minX = Math.Max(0, originX - step);
-        int minY = Math.Max(0, originY - step);
-        int minZ = Math.Max(0, originZ - step);
+        int minX = Math.Max(0, originX - step * 2);
+        int minY = Math.Max(0, originY - step * 2);
+        int minZ = Math.Max(0, originZ - step * 2);
         int maxX = Math.Min(Width - 1, originX + (ChunkSize + 1) * step);
         int maxY = Math.Min(Height, originY + (ChunkSize + 1) * step);
         int maxZ = Math.Min(Depth - 1, originZ + (ChunkSize + 1) * step);
