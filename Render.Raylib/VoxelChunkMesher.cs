@@ -253,8 +253,20 @@ internal static class VoxelChunkMesher
             Color color,
             Vector3 fallbackNormal)
         {
-            Vector3 normal = NormalizeOr(fallbackNormal, Vector3.UnitY);
-            if (Vector3.Dot(Vector3.Cross(b.Position - a.Position, c.Position - a.Position), normal) < 0f)
+            if (!IsFinite(a.Position) || !IsFinite(b.Position) || !IsFinite(c.Position))
+                return;
+
+            Vector3 face = Vector3.Cross(
+                b.Position - a.Position,
+                c.Position - a.Position);
+            float faceLengthSquared = face.LengthSquared();
+            if (!float.IsFinite(faceLengthSquared) || faceLengthSquared < 1e-12f)
+                return;
+
+            Vector3 normal = NormalizeOr(
+                fallbackNormal,
+                NormalizeOr(face, Vector3.UnitY));
+            if (Vector3.Dot(face, normal) < 0f)
                 (b, c) = (c, b);
 
             if (_vertices.Count + 3 > MaximumVerticesPerMesh)
@@ -367,9 +379,6 @@ internal static class VoxelChunkMesher
         int originZ = input.OriginZ;
         float[] density = input.DensitySamples;
 
-        // Surface Nets creates one shared vertex for each active density cell.
-        // The one-cell surrounding ring is built from the symmetric sample
-        // halo, allowing border quads and normals to match neighbouring chunks.
         int gridSide = CellsPerAxis + 1;
         int gridPlane = gridSide * gridSide;
         int gridCount = gridSide * gridPlane;
@@ -380,6 +389,9 @@ internal static class VoxelChunkMesher
         Span<Vector3> normals = stackalloc Vector3[8];
         Span<float> values = stackalloc float[8];
 
+        // Build the cell vertices in the one-cell skirt around this chunk.
+        // All four vertices required by an owned lattice edge are therefore
+        // available even when that edge touches a chunk border.
         for (int z = -1; z < CellsPerAxis; z++)
         for (int y = -1; y < CellsPerAxis; y++)
         for (int x = -1; x < CellsPerAxis; x++)
@@ -394,8 +406,7 @@ internal static class VoxelChunkMesher
                 int sx = x + HaloSize + CornerX[corner];
                 int sy = y + HaloSize + CornerY[corner];
                 int sz = z + HaloSize + CornerZ[corner];
-                int sampleIndex = GetSampleIndex(sx, sy, sz);
-                float value = density[sampleIndex];
+                float value = density[GetSampleIndex(sx, sy, sz)];
                 values[corner] = value;
                 hasSolid |= value > 0f;
                 hasAir |= value <= 0f;
@@ -414,9 +425,7 @@ internal static class VoxelChunkMesher
                     density[GetSampleIndex(sx, sy - 1, sz)];
                 float gz = density[GetSampleIndex(sx, sy, sz + 1)] -
                     density[GetSampleIndex(sx, sy, sz - 1)];
-                normals[corner] = NormalizeOr(
-                    new Vector3(-gx, -gy, -gz),
-                    Vector3.UnitY);
+                normals[corner] = NormalizeOrZero(new Vector3(-gx, -gy, -gz));
             }
 
             if (!hasSolid || !hasAir)
@@ -434,11 +443,13 @@ internal static class VoxelChunkMesher
                 if ((da > 0f) == (db > 0f))
                     continue;
 
-                float t = Math.Clamp(da / (da - db), 0f, 1f);
+                float denominator = da - db;
+                float t = MathF.Abs(denominator) > 1e-8f
+                    ? Math.Clamp(da / denominator, 0f, 1f)
+                    : 0.5f;
                 positionSum += Vector3.Lerp(positions[a], positions[b], t);
-                normalSum += NormalizeOr(
-                    Vector3.Lerp(normals[a], normals[b], t),
-                    Vector3.UnitY);
+                normalSum += NormalizeOrZero(
+                    Vector3.Lerp(normals[a], normals[b], t));
                 intersections++;
             }
 
@@ -448,16 +459,16 @@ internal static class VoxelChunkMesher
             int vertexIndex = GetSurfaceCellIndex(x, y, z, gridSide);
             cellVertices[vertexIndex] = new SurfaceVertex(
                 positionSum / intersections,
-                NormalizeOr(normalSum, Vector3.UnitY));
+                NormalizeOrZero(normalSum));
             hasVertex[vertexIndex] = true;
         }
 
         List<VoxelMeshData> output = new(2);
         MeshBatch batch = new(output);
 
-        // Each sign-changing lattice edge emits one quad from its four
-        // adjacent Surface Nets cell vertices. Lower sample coordinates are
-        // owned by this chunk; the high boundary is owned by the next chunk.
+        // Each sign-changing density edge belongs to exactly one chunk: the
+        // chunk containing its lower-coordinate sample. Neighbouring chunks
+        // use identical source samples and the same edge ownership rule.
         for (int z = 0; z < CellsPerAxis; z++)
         for (int y = 0; y < CellsPerAxis; y++)
         for (int x = 0; x < CellsPerAxis; x++)
@@ -478,7 +489,8 @@ internal static class VoxelChunkMesher
                     x, y - 1, z - 1,
                     x, y, z - 1,
                     x, y, z,
-                    x, y - 1, z);
+                    x, y - 1, z,
+                    Vector3.UnitX * (value > 0f ? 1f : -1f));
             }
 
             float nextY = density[GetSampleIndex(sx, sy + 1, sz)];
@@ -489,7 +501,8 @@ internal static class VoxelChunkMesher
                     x - 1, y, z - 1,
                     x, y, z - 1,
                     x, y, z,
-                    x - 1, y, z);
+                    x - 1, y, z,
+                    Vector3.UnitY * (value > 0f ? 1f : -1f));
             }
 
             float nextZ = density[GetSampleIndex(sx, sy, sz + 1)];
@@ -500,7 +513,8 @@ internal static class VoxelChunkMesher
                     x - 1, y - 1, z,
                     x, y - 1, z,
                     x, y, z,
-                    x - 1, y, z);
+                    x - 1, y, z,
+                    Vector3.UnitZ * (value > 0f ? 1f : -1f));
             }
         }
 
@@ -521,7 +535,8 @@ internal static class VoxelChunkMesher
         int x0, int y0, int z0,
         int x1, int y1, int z1,
         int x2, int y2, int z2,
-        int x3, int y3, int z3)
+        int x3, int y3, int z3,
+        Vector3 expectedNormal)
     {
         int i0 = GetSurfaceCellIndex(x0, y0, z0, gridSide);
         int i1 = GetSurfaceCellIndex(x1, y1, z1, gridSide);
@@ -537,7 +552,7 @@ internal static class VoxelChunkMesher
         SurfaceVertex d = vertices[i3];
         Vector3 normal = NormalizeOr(
             a.Normal + b.Normal + c.Normal + d.Normal,
-            Vector3.UnitY);
+            expectedNormal);
 
         int materialX = Math.Clamp((x0 + x1 + x2 + x3) / 4, 0, CellsPerAxis - 1);
         int materialY = Math.Clamp((y0 + y1 + y2 + y3) / 4, 0, CellsPerAxis - 1);
@@ -578,6 +593,9 @@ internal static class VoxelChunkMesher
         TerrainPalette palette,
         CancellationToken cancellationToken = default)
     {
+        if (!float.IsFinite(cutHeightMeters))
+            return Array.Empty<VoxelMeshData>();
+
         float cutSampleY = cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f;
         if (cutSampleY <= -0.5f || cutSampleY >= field.FieldHeight - 0.5f)
             return Array.Empty<VoxelMeshData>();
@@ -588,6 +606,11 @@ internal static class VoxelChunkMesher
         List<VoxelMeshData> output = new(1);
         MeshBatch batch = new(output);
 
+        // Split every cut cell along one consistent diagonal. Clipping convex
+        // triangles avoids self-crossing polygons in diagonal-inside cases.
+        ReadOnlySpan<int> triangleA = stackalloc int[] { 0, 1, 2 };
+        ReadOnlySpan<int> triangleB = stackalloc int[] { 0, 2, 3 };
+
         for (int z = 0; z < CellsPerAxis; z++)
         for (int x = 0; x < CellsPerAxis; x++)
         {
@@ -596,36 +619,47 @@ internal static class VoxelChunkMesher
             float x1 = x0 + step;
             float z0 = originZ + z * step;
             float z1 = z0 + step;
-            Span<SlicePoint> input = stackalloc SlicePoint[4];
-            Span<SlicePoint> polygon = stackalloc SlicePoint[8];
 
-            input[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
-            input[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
-            input[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
-            input[3] = MakeSlicePoint(field, x0, cutSampleY, z1, cutHeightMeters);
-
-            int polygonCount = ClipSolidPolygon(input, polygon);
-            if (polygonCount < 3)
-                continue;
+            Span<SlicePoint> corners = stackalloc SlicePoint[4];
+            corners[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
+            corners[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
+            corners[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
+            corners[3] = MakeSlicePoint(field, x0, cutSampleY, z1, cutHeightMeters);
 
             ushort materialId = field.GetMaterialAtWorldPosition(
                 (x0 + x1) * 0.5f,
                 cutSampleY,
                 (z0 + z1) * 0.5f);
             Color color = GetMaterialColor(palette, materialId);
-            SurfaceVertex anchor = new(
-                polygon[0].Position + Vector3.UnitY * 0.006f,
-                Vector3.UnitY);
 
-            for (int i = 1; i < polygonCount - 1; i++)
+            Span<SlicePoint> triangle = stackalloc SlicePoint[3];
+            Span<SlicePoint> polygon = stackalloc SlicePoint[4];
+            for (int triangleIndex = 0; triangleIndex < 2; triangleIndex++)
             {
-                SurfaceVertex b = new(
-                    polygon[i].Position + Vector3.UnitY * 0.006f,
+                ReadOnlySpan<int> indices = triangleIndex == 0
+                    ? triangleA
+                    : triangleB;
+                triangle[0] = corners[indices[0]];
+                triangle[1] = corners[indices[1]];
+                triangle[2] = corners[indices[2]];
+
+                int polygonCount = ClipSolidTriangle(triangle, polygon);
+                if (polygonCount < 3)
+                    continue;
+
+                SurfaceVertex anchor = new(
+                    polygon[0].Position + Vector3.UnitY * 0.006f,
                     Vector3.UnitY);
-                SurfaceVertex c = new(
-                    polygon[i + 1].Position + Vector3.UnitY * 0.006f,
-                    Vector3.UnitY);
-                batch.AddTriangle(anchor, b, c, color, Vector3.UnitY);
+                for (int i = 1; i < polygonCount - 1; i++)
+                {
+                    SurfaceVertex b = new(
+                        polygon[i].Position + Vector3.UnitY * 0.006f,
+                        Vector3.UnitY);
+                    SurfaceVertex c = new(
+                        polygon[i + 1].Position + Vector3.UnitY * 0.006f,
+                        Vector3.UnitY);
+                    batch.AddTriangle(anchor, b, c, color, Vector3.UnitY);
+                }
             }
         }
 
@@ -647,7 +681,7 @@ internal static class VoxelChunkMesher
         return new SlicePoint(position, field.SampleDensity(x, ySample, z));
     }
 
-    private static int ClipSolidPolygon(
+    private static int ClipSolidTriangle(
         ReadOnlySpan<SlicePoint> input,
         Span<SlicePoint> output)
     {
@@ -656,32 +690,61 @@ internal static class VoxelChunkMesher
         {
             SlicePoint a = input[i];
             SlicePoint b = input[(i + 1) % input.Length];
+            if (!float.IsFinite(a.Density) || !float.IsFinite(b.Density))
+                continue;
+
             bool insideA = a.Density >= 0f;
             bool insideB = b.Density >= 0f;
-
             if (insideA && insideB)
             {
-                output[count++] = b;
+                AppendUnique(output, ref count, b);
             }
             else if (insideA && !insideB)
             {
-                output[count++] = Intersect(a, b);
+                AppendUnique(output, ref count, Intersect(a, b));
             }
             else if (!insideA && insideB)
             {
-                output[count++] = Intersect(a, b);
-                output[count++] = b;
+                AppendUnique(output, ref count, Intersect(a, b));
+                AppendUnique(output, ref count, b);
             }
         }
+
+        if (count > 1 &&
+            Vector3.DistanceSquared(
+                output[0].Position,
+                output[count - 1].Position) < 1e-10f)
+            count--;
+
         return count;
+    }
+
+    private static void AppendUnique(
+        Span<SlicePoint> output,
+        ref int count,
+        SlicePoint point)
+    {
+        if (!IsFinite(point.Position))
+            return;
+        if (count > 0 &&
+            Vector3.DistanceSquared(
+                output[count - 1].Position,
+                point.Position) < 1e-10f)
+            return;
+        if (count < output.Length)
+            output[count++] = point;
     }
 
     private static SlicePoint Intersect(SlicePoint a, SlicePoint b)
     {
-        float t = Math.Clamp(a.Density / (a.Density - b.Density), 0f, 1f);
-        return new SlicePoint(
-            Vector3.Lerp(a.Position, b.Position, t),
-            0f);
+        float denominator = a.Density - b.Density;
+        float t = MathF.Abs(denominator) > 1e-8f
+            ? Math.Clamp(a.Density / denominator, 0f, 1f)
+            : 0.5f;
+        Vector3 position = Vector3.Lerp(a.Position, b.Position, t);
+        if (!IsFinite(position))
+            position = IsFinite(a.Position) ? a.Position : b.Position;
+        return new SlicePoint(position, 0f);
     }
 
     private static int GetSampleIndex(int x, int y, int z) =>
@@ -697,11 +760,29 @@ internal static class VoxelChunkMesher
         };
     }
 
+    private static Vector3 NormalizeOrZero(Vector3 value)
+    {
+        if (!IsFinite(value))
+            return Vector3.Zero;
+
+        float lengthSquared = value.LengthSquared();
+        return float.IsFinite(lengthSquared) && lengthSquared > 1e-12f
+            ? value / MathF.Sqrt(lengthSquared)
+            : Vector3.Zero;
+    }
+
     private static Vector3 NormalizeOr(Vector3 value, Vector3 fallback)
     {
-        float lengthSquared = value.LengthSquared();
-        return lengthSquared > 0.000001f
-            ? value / MathF.Sqrt(lengthSquared)
-            : fallback;
+        Vector3 normalized = NormalizeOrZero(value);
+        if (normalized != Vector3.Zero)
+            return normalized;
+
+        Vector3 safeFallback = NormalizeOrZero(fallback);
+        return safeFallback != Vector3.Zero ? safeFallback : Vector3.UnitY;
     }
+
+    private static bool IsFinite(Vector3 value) =>
+        float.IsFinite(value.X) &&
+        float.IsFinite(value.Y) &&
+        float.IsFinite(value.Z);
 }
