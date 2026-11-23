@@ -1939,11 +1939,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (_visibleCandidateKeys.Contains(key))
                 continue;
 
+            int span = ChunkCells * key.Step;
+            float distanceSquared = BlockCenterDistanceSquared(
+                cameraPosition,
+                key.X * span,
+                key.Y * span,
+                key.Z * span,
+                span);
+
             eviction.Add(new CacheEvictionCandidate(
                 key,
                 entry.LastAccessFrame,
                 entry.LastSeenFrame,
-                entry.PriorityDistanceSquared));
+                distanceSquared));
         }
 
         eviction.Sort(static (left, right) =>
