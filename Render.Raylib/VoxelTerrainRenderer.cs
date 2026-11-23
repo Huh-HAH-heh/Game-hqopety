@@ -895,10 +895,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         switch (key.Step)
         {
             case LodNearStep:
+            {
+                // Step=1 children are emitted as a complete 4x4x4 set whenever
+                // their Step=4 parent touches the 64 m band. Keep the whole set.
+                int middleSize = ChunkCells * LodMiddleStep;
+                int parentX = originX / middleSize * middleSize;
+                int parentY = originY / middleSize * middleSize;
+                int parentZ = originZ / middleSize * middleSize;
+
                 return BlockIntersectsRadius(
                     cameraPosition, field,
-                    originX, originY, originZ, blockSize,
+                    parentX, parentY, parentZ, middleSize,
                     LodNearRadiusSquared);
+            }
 
             case LodMiddleStep:
             {
