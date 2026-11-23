@@ -43,8 +43,10 @@ internal sealed class VoxelMeshData
 /// </summary>
 internal sealed class VoxelChunkBuildInput
 {
-    private const int Cells = SparseVoxelField.ChunkSize;
-    private const int SampleSide = Cells + 3;
+    internal const int CellsPerAxis = SparseVoxelField.ChunkSize;
+    private const int Cells = CellsPerAxis;
+    private const int HaloSize = 2;
+    private const int SampleSide = Cells + HaloSize * 2;
     private const int SamplePlane = SampleSide * SampleSide;
     private const int SampleCount = SampleSide * SampleSide * SampleSide;
     private const int CellCount = Cells * Cells * Cells;
@@ -120,19 +122,19 @@ internal sealed class VoxelChunkBuildInput
                 int x = index % SampleSide;
                 int y = index / SampleSide % SampleSide;
                 int z = index / SamplePlane;
-                int worldX = SparseVoxelField.GetChunkSampleCoordinate(ChunkX, x, Step);
-                int worldY = SparseVoxelField.GetChunkSampleCoordinate(ChunkY, y, Step);
-                int worldZ = SparseVoxelField.GetChunkSampleCoordinate(ChunkZ, z, Step);
+                int worldX = SparseVoxelField.GetChunkSampleCoordinate(ChunkX, x, Step, HaloSize);
+                int worldY = SparseVoxelField.GetChunkSampleCoordinate(ChunkY, y, Step, HaloSize);
+                int worldZ = SparseVoxelField.GetChunkSampleCoordinate(ChunkZ, z, Step, HaloSize);
                 float density = field.GetDensity(worldX, worldY, worldZ);
                 DensitySamples[index] = density;
 
-                // The outer halo (sample indices 0 and 18) exists only for
-                // finite-difference normals. It is not a corner of any cell
-                // meshed by BuildSurfaceData and must not mark a chunk as
-                // containing a surface (world bounds deliberately sample as air).
-                if (x >= 1 && x <= Cells + 1 &&
-                    y >= 1 && y <= Cells + 1 &&
-                    z >= 1 && z <= Cells + 1)
+                // The symmetric two-sample halo supplies central gradients
+                // for the chunk's border cells and their immediate neighbours.
+                // Only the 17^3 core lattice corners participate in empty-chunk
+                // detection; halo values must not create false surfaces at world bounds.
+                if (x >= HaloSize && x <= Cells + HaloSize &&
+                    y >= HaloSize && y <= Cells + HaloSize &&
+                    z >= HaloSize && z <= Cells + HaloSize)
                 {
                     _minimumDensity = MathF.Min(_minimumDensity, density);
                     _maximumDensity = MathF.Max(_maximumDensity, density);
@@ -172,9 +174,9 @@ internal sealed class VoxelChunkBuildInput
 
     public float SampleDensity(float x, float y, float z)
     {
-        float sx = (x - OriginX) / Step + 1f;
-        float sy = (y - OriginY) / Step + 1f;
-        float sz = (z - OriginZ) / Step + 1f;
+        float sx = (x - OriginX) / Step + HaloSize;
+        float sy = (y - OriginY) / Step + HaloSize;
+        float sz = (z - OriginZ) / Step + HaloSize;
         int x0 = (int)MathF.Floor(sx);
         int y0 = (int)MathF.Floor(sy);
         int z0 = (int)MathF.Floor(sz);
@@ -213,8 +215,9 @@ internal readonly record struct VoxelMeshBuildResult(
 
 internal static class VoxelChunkMesher
 {
-    private const int CellsPerAxis = SparseVoxelField.ChunkSize;
-    private const int SampleSide = CellsPerAxis + 3;
+    private const int CellsPerAxis = VoxelChunkBuildInput.CellsPerAxis;
+    private const int HaloSize = 2;
+    private const int SampleSide = CellsPerAxis + HaloSize * 2;
     private const int SamplePlane = SampleSide * SampleSide;
     private const int SampleCount = SampleSide * SampleSide * SampleSide;
     private const int MaximumVerticesPerMesh = 60_000;
