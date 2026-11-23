@@ -18,6 +18,8 @@ internal static class Program
         Run("Surface Nets chunk borders use identical source samples", TestChunkBorders, ref failures);
         Run("Uniform chunks skip all material samples", TestDensityOnlySkipsMaterials, ref failures);
         Run("Cut-cap chunks meet without gaps and keep finite normals", TestCutCapBorders, ref failures);
+        Run("Ambiguous cut saddles stitch across chunk borders", TestAmbiguousCutCapBorders, ref failures);
+        Run("Surface boundary normals stay finite and non-zero", TestSurfaceNormalsAtChunkBorders, ref failures);
         Run("Reduced LOD preserves more SDF detail than legacy 40-step LOD",
             TestLodApproximation, ref failures);
 
@@ -116,6 +118,80 @@ internal static class Program
         {
             ReturnMeshData(leftCap);
             ReturnMeshData(rightCap);
+        }
+    }
+
+    private static (bool Passed, string Detail) TestAmbiguousCutCapBorders()
+    {
+        const int step = 4;
+        const float cutHeightMeters = 5f;
+        SyntheticSaddleField field = new(512, 512, 512, step);
+        TerrainPalette palette = new();
+        int chunkY = 0;
+
+        VoxelChunkBuildInput left = Capture(field, 0, chunkY, 0, step);
+        VoxelChunkBuildInput right = Capture(field, 1, chunkY, 0, step);
+        VoxelMeshData[] leftCap = VoxelChunkMesher.BuildCutCapData(
+            left, cutHeightMeters, palette);
+        VoxelMeshData[] rightCap = VoxelChunkMesher.BuildCutCapData(
+            right, cutHeightMeters, palette);
+
+        try
+        {
+            float sharedX =
+                (SparseVoxelField.ChunkSize * step + 0.5f) *
+                SparseVoxelField.VoxelSizeMeters;
+
+            HashSet<int> leftBoundary =
+                CollectCapBoundaryZ(leftCap, sharedX, cutHeightMeters);
+            HashSet<int> rightBoundary =
+                CollectCapBoundaryZ(rightCap, sharedX, cutHeightMeters);
+
+            bool seamMatches = leftBoundary.Count > 0 &&
+                leftBoundary.SetEquals(rightBoundary);
+            bool validNormals = HasFiniteNonZeroNormals(leftCap) &&
+                HasFiniteNonZeroNormals(rightCap);
+
+            return (
+                seamMatches && validNormals,
+                $"saddleBoundaryLeft={leftBoundary.Count}, saddleBoundaryRight={rightBoundary.Count}, " +
+                $"seamMatch={seamMatches}, finiteNormals={validNormals}");
+        }
+        finally
+        {
+            ReturnMeshData(leftCap);
+            ReturnMeshData(rightCap);
+        }
+    }
+
+    private static (bool Passed, string Detail) TestSurfaceNormalsAtChunkBorders()
+    {
+        const int step = 4;
+        SyntheticTerrainField field = new(512, 512, 512);
+        TerrainPalette palette = new();
+        int chunkY = GetSurfaceChunkY(step);
+
+        VoxelChunkBuildInput left = Capture(field, 0, chunkY, 0, step);
+        VoxelChunkBuildInput right = Capture(field, 1, chunkY, 0, step);
+        VoxelMeshData[] leftMeshes =
+            VoxelChunkMesher.BuildSurfaceData(left, palette);
+        VoxelMeshData[] rightMeshes =
+            VoxelChunkMesher.BuildSurfaceData(right, palette);
+
+        try
+        {
+            bool leftValid = HasFiniteNonZeroNormals(leftMeshes);
+            bool rightValid = HasFiniteNonZeroNormals(rightMeshes);
+
+            return (
+                leftValid && rightValid,
+                $"leftMeshes={leftMeshes.Length}, rightMeshes={rightMeshes.Length}, " +
+                $"leftNormals={leftValid}, rightNormals={rightValid}");
+        }
+        finally
+        {
+            ReturnMeshData(leftMeshes);
+            ReturnMeshData(rightMeshes);
         }
     }
 
@@ -469,6 +545,35 @@ internal static class Program
             (int)MathF.Floor(50f / (SparseVoxelField.ChunkSize * step)),
             0,
             1024 / (SparseVoxelField.ChunkSize * step) - 1);
+
+    private sealed class SyntheticSaddleField : IVoxelFieldSource
+    {
+        public int Width { get; }
+        public int Height { get; }
+        public int Depth { get; }
+        private readonly int _step;
+
+        public SyntheticSaddleField(int width, int height, int depth, int step)
+        {
+            Width = width;
+            Height = height;
+            Depth = depth;
+            _step = step;
+        }
+
+        public float GetDensity(int x, int y, int z)
+        {
+            if (x < 0 || y < 0 || z < 0 ||
+                x >= Width || y >= Height || z >= Depth)
+                return -1f;
+
+            int cellX = x / _step;
+            int cellZ = z / _step;
+            return ((cellX ^ cellZ) & 1) == 0 ? 1f : -1f;
+        }
+
+        public ushort GetMaterialId(int x, int y, int z) => 1;
+    }
 
     private sealed class SyntheticTerrainField : IVoxelFieldSource
     {
