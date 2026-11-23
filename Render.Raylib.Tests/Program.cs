@@ -528,7 +528,7 @@ internal static class Program
     }
 
     private static VoxelChunkBuildInput Capture(
-        SyntheticTerrainField field,
+        IVoxelFieldSource field,
         int chunkX,
         int chunkY,
         int chunkZ,
