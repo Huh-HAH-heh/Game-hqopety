@@ -610,6 +610,9 @@ internal static class VoxelChunkMesher
         // triangles avoids self-crossing polygons in diagonal-inside cases.
         ReadOnlySpan<int> triangleA = stackalloc int[] { 0, 1, 2 };
         ReadOnlySpan<int> triangleB = stackalloc int[] { 0, 2, 3 };
+        Span<SlicePoint> corners = stackalloc SlicePoint[4];
+        Span<SlicePoint> triangle = stackalloc SlicePoint[3];
+        Span<SlicePoint> polygon = stackalloc SlicePoint[4];
 
         for (int z = 0; z < CellsPerAxis; z++)
         for (int x = 0; x < CellsPerAxis; x++)
@@ -620,7 +623,6 @@ internal static class VoxelChunkMesher
             float z0 = originZ + z * step;
             float z1 = z0 + step;
 
-            Span<SlicePoint> corners = stackalloc SlicePoint[4];
             corners[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
             corners[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
             corners[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
@@ -632,8 +634,6 @@ internal static class VoxelChunkMesher
                 (z0 + z1) * 0.5f);
             Color color = GetMaterialColor(palette, materialId);
 
-            Span<SlicePoint> triangle = stackalloc SlicePoint[3];
-            Span<SlicePoint> polygon = stackalloc SlicePoint[4];
             for (int triangleIndex = 0; triangleIndex < 2; triangleIndex++)
             {
                 ReadOnlySpan<int> indices = triangleIndex == 0
@@ -678,7 +678,10 @@ internal static class VoxelChunkMesher
             (x + 0.5f) * SparseVoxelField.VoxelSizeMeters,
             cutHeightMeters,
             (z + 0.5f) * SparseVoxelField.VoxelSizeMeters);
-        return new SlicePoint(position, field.SampleDensity(x, ySample, z));
+        float density = field.SampleDensity(x, ySample, z);
+        return new SlicePoint(
+            position,
+            float.IsFinite(density) ? density : -1f);
     }
 
     private static int ClipSolidTriangle(
