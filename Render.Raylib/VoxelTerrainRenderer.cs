@@ -236,6 +236,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public double CpuCaptureMilliseconds => CpuCaptureMillisecondsLastFrame;
     public double GpuUploadMilliseconds => GpuUploadMillisecondsLastFrame;
     public int PendingMeshJobs => _buildQueue.Count;
+    public int CompletedMeshResultsPending => _completedBuildQueue.Count;
     public double WorkerBuildMillisecondsLastFrame { get; private set; }
     public double LastWorkerBuildMilliseconds { get; private set; }
     public double LastWorkerQueueWaitMilliseconds { get; private set; }
@@ -572,7 +573,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"snapshotMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
                 $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
-                $"workers={RunningMeshJobs} pending={_buildQueue.Count} " +
+                $"workers={RunningMeshJobs} queue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} " +
                 $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
                 $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
                 $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
