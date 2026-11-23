@@ -7,7 +7,8 @@ The default application entry point opens the isolated Raylib terrain viewer. Th
 \`WorldMap.Voxels\` is the authoritative editable 3D terrain field.
 
 - Native voxel spacing: **0.1 × 0.1 × 0.1 m**.
-- Storage and render chunk dimensions: **16 × 16 × 16 samples** (1.6 m per side).
+- Sparse storage dimensions: **16 × 16 × 16 samples** per edited storage chunk.
+- Fixed render chunk dimensions: **64 × 64 × 64 voxels** (6.4 m per side), all sampled at Step=1.
 - Density: signed distance sampled at voxel centres; positive is solid, negative is air.
 - Material: a separate 16-bit MaterialId per cubic voxel cell. Material zero is air.
 - Storage: sparse edited chunks over a procedural base sampler. The world is not allocated as one dense 3D array.
@@ -20,9 +21,9 @@ All static terrain chunks use the same **Step=1** sampling resolution. The rende
 
 For each of the three axes it sweeps the 17 boundary planes of a 16³ chunk, builds a 16×16 face mask, and greedily merges adjacent faces when both material ID and normal direction match. A merged rectangle is emitted as one indexed quad: **4 vertices and 6 indices**. Mesh packets are split before reaching the 16-bit index limit.
 
-A one-sample density halo is captured on every side. The face-ownership rule assigns a boundary face to the chunk containing the solid sample, so adjacent chunks do not duplicate or omit the same face. Greedy geometry is intentionally block-aligned voxel geometry; it is not a smooth interpolated Surface Nets surface. The reduction in triangle count depends on how many coplanar faces can actually merge, so no fixed 10–50× reduction is assumed for every terrain shape.
+A one-sample density halo is captured on every side of each 64³ render region. The render snapshot copies only the sparse 16³ storage chunks touched by that region and its halo. The face-ownership rule assigns a boundary face to the render chunk containing the solid sample, so adjacent render chunks do not duplicate or omit the same face. Greedy geometry is intentionally block-aligned voxel geometry; it is not a smooth interpolated Surface Nets surface. The reduction in triangle count depends on how many coplanar faces can actually merge, so no fixed 10–50× reduction is assumed for every terrain shape.
 
-The mesher is shared by static chunks and detached voxel fragments; both use Step=1.
+The mesher is shared by static chunks and detached voxel fragments; both use Step=1 and the same 64³ render-region size.
 
 ## Flat streaming and worker pipeline
 
