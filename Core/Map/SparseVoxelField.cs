@@ -360,6 +360,58 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             snapshots);
     }
 
+    /// <summary>
+    /// Captures the sparse edited storage chunks touched by an arbitrary
+    /// fixed-resolution render region. The region uses voxel coordinates,
+    /// independently of the 16^3 storage chunk dimensions.
+    /// </summary>
+    public IVoxelFieldSource CreateRegionSnapshot(
+        int originX,
+        int originY,
+        int originZ,
+        int cellsPerAxis)
+    {
+        if (originX < 0 || originY < 0 || originZ < 0 ||
+            originX >= Width || originY >= Height || originZ >= Depth ||
+            cellsPerAxis <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cellsPerAxis));
+        }
+
+        const int halo = 1;
+        int minX = Math.Max(0, originX - halo);
+        int minY = Math.Max(0, originY - halo);
+        int minZ = Math.Max(0, originZ - halo);
+        int maxX = Math.Min(Width - 1, originX + cellsPerAxis);
+        int maxY = Math.Min(Height - 1, originY + cellsPerAxis);
+        int maxZ = Math.Min(Depth - 1, originZ + cellsPerAxis);
+
+        int minChunkX = minX / ChunkSize;
+        int minChunkY = minY / ChunkSize;
+        int minChunkZ = minZ / ChunkSize;
+        int maxChunkX = maxX / ChunkSize;
+        int maxChunkY = maxY / ChunkSize;
+        int maxChunkZ = maxZ / ChunkSize;
+
+        Dictionary<ChunkCoordinate, ChunkSnapshot> snapshots = new();
+        for (int z = minChunkZ; z <= maxChunkZ; z++)
+        for (int y = minChunkY; y <= maxChunkY; y++)
+        for (int x = minChunkX; x <= maxChunkX; x++)
+        {
+            ChunkCoordinate key = new(x, y, z);
+            if (_chunks.TryGetValue(key, out Chunk? chunk))
+                snapshots.Add(key, ChunkSnapshot.From(chunk));
+        }
+
+        return new ChunkFieldSnapshot(
+            Width,
+            Height,
+            Depth,
+            _baseDensity,
+            _baseMaterial,
+            snapshots);
+    }
+
     public float GetDensity(int x, int y, int z)
     {
         if (x < 0 || y < 0 || z < 0 ||
