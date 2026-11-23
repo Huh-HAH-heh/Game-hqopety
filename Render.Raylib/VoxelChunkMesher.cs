@@ -536,61 +536,61 @@ internal static class VoxelChunkMesher
         MeshBatch batch = new(output);
 
         try
-        {
-        // Each sign-changing density edge belongs to exactly one chunk: the
-        // chunk containing its lower-coordinate sample. Neighbouring chunks
-        // use identical source samples and the same edge ownership rule.
-        for (int z = 0; z < CellsPerAxis; z++)
-        for (int y = 0; y < CellsPerAxis; y++)
-        for (int x = 0; x < CellsPerAxis; x++)
-        {
-            if (x == 0)
-                cancellationToken.ThrowIfCancellationRequested();
-
-            int sx = x + HaloSize;
-            int sy = y + HaloSize;
-            int sz = z + HaloSize;
-            float value = density[GetSampleIndex(sx, sy, sz)];
-
-            float nextX = density[GetSampleIndex(sx + 1, sy, sz)];
-            if ((value > 0f) != (nextX > 0f))
             {
-                AddSurfaceQuad(
-                    input, palette, batch, cellVertices, hasVertex, gridSide,
-                    x, y - 1, z - 1,
-                    x, y, z - 1,
-                    x, y, z,
-                    x, y - 1, z,
-                    Vector3.UnitX * (value > 0f ? 1f : -1f));
+            // Each sign-changing density edge belongs to exactly one chunk: the
+            // chunk containing its lower-coordinate sample. Neighbouring chunks
+            // use identical source samples and the same edge ownership rule.
+            for (int z = 0; z < CellsPerAxis; z++)
+            for (int y = 0; y < CellsPerAxis; y++)
+            for (int x = 0; x < CellsPerAxis; x++)
+            {
+                if (x == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                int sx = x + HaloSize;
+                int sy = y + HaloSize;
+                int sz = z + HaloSize;
+                float value = density[GetSampleIndex(sx, sy, sz)];
+
+                float nextX = density[GetSampleIndex(sx + 1, sy, sz)];
+                if ((value > 0f) != (nextX > 0f))
+                {
+                    AddSurfaceQuad(
+                        input, palette, batch, cellVertices, hasVertex, gridSide,
+                        x, y - 1, z - 1,
+                        x, y, z - 1,
+                        x, y, z,
+                        x, y - 1, z,
+                        Vector3.UnitX * (value > 0f ? 1f : -1f));
+                }
+
+                float nextY = density[GetSampleIndex(sx, sy + 1, sz)];
+                if ((value > 0f) != (nextY > 0f))
+                {
+                    AddSurfaceQuad(
+                        input, palette, batch, cellVertices, hasVertex, gridSide,
+                        x - 1, y, z - 1,
+                        x, y, z - 1,
+                        x, y, z,
+                        x - 1, y, z,
+                        Vector3.UnitY * (value > 0f ? 1f : -1f));
+                }
+
+                float nextZ = density[GetSampleIndex(sx, sy, sz + 1)];
+                if ((value > 0f) != (nextZ > 0f))
+                {
+                    AddSurfaceQuad(
+                        input, palette, batch, cellVertices, hasVertex, gridSide,
+                        x - 1, y - 1, z,
+                        x, y - 1, z,
+                        x, y, z,
+                        x - 1, y, z,
+                        Vector3.UnitZ * (value > 0f ? 1f : -1f));
+                }
             }
 
-            float nextY = density[GetSampleIndex(sx, sy + 1, sz)];
-            if ((value > 0f) != (nextY > 0f))
-            {
-                AddSurfaceQuad(
-                    input, palette, batch, cellVertices, hasVertex, gridSide,
-                    x - 1, y, z - 1,
-                    x, y, z - 1,
-                    x, y, z,
-                    x - 1, y, z,
-                    Vector3.UnitY * (value > 0f ? 1f : -1f));
-            }
-
-            float nextZ = density[GetSampleIndex(sx, sy, sz + 1)];
-            if ((value > 0f) != (nextZ > 0f))
-            {
-                AddSurfaceQuad(
-                    input, palette, batch, cellVertices, hasVertex, gridSide,
-                    x - 1, y - 1, z,
-                    x, y - 1, z,
-                    x, y, z,
-                    x - 1, y, z,
-                    Vector3.UnitZ * (value > 0f ? 1f : -1f));
-            }
-        }
-
-        batch.Flush();
-        return output.ToArray();
+            batch.Flush();
+            return output.ToArray();
         }
         catch
         {
