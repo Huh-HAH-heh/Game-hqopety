@@ -65,21 +65,18 @@ internal sealed class VoxelMeshData
 }
 
 /// <summary>
-/// Immutable-to-worker snapshot for one fixed-resolution 16x16x16 render chunk.
-/// A one-cell density halo is captured on the render thread so neighbouring
-/// chunks make identical face-ownership decisions at their shared boundary.
+/// Immutable-to-worker fixed-resolution render-region snapshot.
+/// Density sampling uses a one-sample halo; render regions may group many
+/// 16^3 storage chunks without changing the 0.1 m voxel resolution.
 /// </summary>
 internal sealed class VoxelChunkBuildInput
 {
-    internal const int CellsPerAxis = SparseVoxelField.ChunkSize;
+    internal const int DefaultCellsPerAxis = SparseVoxelField.ChunkSize;
     internal const int HaloSize = 1;
-    internal const int SampleSide = CellsPerAxis + HaloSize * 2;
-    internal const int SamplePlane = SampleSide * SampleSide;
-    internal const int SampleCount = SampleSide * SampleSide * SampleSide;
-    internal const int CellCount = CellsPerAxis * CellsPerAxis * CellsPerAxis;
+    private const int MaximumCellsPerAxis = 128;
 
-    public readonly float[] DensitySamples = new float[SampleCount];
-    public readonly ushort[] Materials = new ushort[CellCount];
+    public readonly float[] DensitySamples;
+    public readonly ushort[] Materials;
 
     public int ChunkX { get; }
     public int ChunkY { get; }
@@ -90,6 +87,12 @@ internal sealed class VoxelChunkBuildInput
     public int FieldWidth { get; }
     public int FieldHeight { get; }
     public int FieldDepth { get; }
+
+    public int CellsPerAxis { get; }
+    public int SampleSide { get; }
+    public int SamplePlane { get; }
+    public int SampleCount { get; }
+    public int CellCount { get; }
 
     public int CaptureCursor { get; private set; }
     public int CaptureCount => SampleCount + CellCount;
@@ -105,21 +108,34 @@ internal sealed class VoxelChunkBuildInput
         IVoxelFieldSource field,
         int chunkX,
         int chunkY,
-        int chunkZ)
+        int chunkZ,
+        int cellsPerAxis = DefaultCellsPerAxis)
     {
         ArgumentNullException.ThrowIfNull(field);
+
         if (chunkX < 0 || chunkY < 0 || chunkZ < 0)
             throw new ArgumentOutOfRangeException(nameof(chunkX));
+        if (cellsPerAxis <= 0 || cellsPerAxis > MaximumCellsPerAxis)
+            throw new ArgumentOutOfRangeException(nameof(cellsPerAxis));
 
         ChunkX = chunkX;
         ChunkY = chunkY;
         ChunkZ = chunkZ;
-        OriginX = chunkX * CellsPerAxis;
-        OriginY = chunkY * CellsPerAxis;
-        OriginZ = chunkZ * CellsPerAxis;
+        CellsPerAxis = cellsPerAxis;
+        OriginX = checked(chunkX * cellsPerAxis);
+        OriginY = checked(chunkY * cellsPerAxis);
+        OriginZ = checked(chunkZ * cellsPerAxis);
         FieldWidth = field.Width;
         FieldHeight = field.Height;
         FieldDepth = field.Depth;
+
+        SampleSide = checked(cellsPerAxis + HaloSize * 2);
+        SamplePlane = checked(SampleSide * SampleSide);
+        SampleCount = checked(SamplePlane * SampleSide);
+        CellCount = checked(cellsPerAxis * cellsPerAxis * cellsPerAxis);
+
+        DensitySamples = new float[SampleCount];
+        Materials = new ushort[CellCount];
     }
 
     public int CaptureNext(IVoxelFieldSource field, int maximumValues) =>
@@ -154,12 +170,9 @@ internal sealed class VoxelChunkBuildInput
                 int y = index / SampleSide % SampleSide;
                 int z = index / SamplePlane;
 
-                int worldX = SparseVoxelField.GetChunkSampleCoordinate(
-                    ChunkX, x, 1, HaloSize);
-                int worldY = SparseVoxelField.GetChunkSampleCoordinate(
-                    ChunkY, y, 1, HaloSize);
-                int worldZ = SparseVoxelField.GetChunkSampleCoordinate(
-                    ChunkZ, z, 1, HaloSize);
+                int worldX = OriginX + x - HaloSize;
+                int worldY = OriginY + y - HaloSize;
+                int worldZ = OriginZ + z - HaloSize;
 
                 float density = field.GetDensity(worldX, worldY, worldZ);
                 DensitySamples[index] = density;
@@ -173,8 +186,7 @@ internal sealed class VoxelChunkBuildInput
                 int y = cellIndex / CellsPerAxis % CellsPerAxis;
                 int z = cellIndex / (CellsPerAxis * CellsPerAxis);
 
-                float density = GetDensity(x, y, z);
-                if (density > 0f)
+                if (GetDensity(x, y, z) > 0f)
                 {
                     Materials[cellIndex] = field.GetMaterialId(
                         OriginX + x,
@@ -214,8 +226,7 @@ internal sealed class VoxelChunkBuildInput
     }
 
     /// <summary>
-    /// Trilinear sample in voxel-centre coordinates. Used only for the
-    /// horizontal CUT cap; the terrain surface itself is greedy voxel geometry.
+    /// Trilinear sample in voxel-centre coordinates for the horizontal CUT cap.
     /// </summary>
     public float SampleDensity(float x, float y, float z)
     {
@@ -278,7 +289,6 @@ internal readonly record struct VoxelMeshBuildResult(
 
 internal static class VoxelChunkMesher
 {
-    private const int Cells = VoxelChunkBuildInput.CellsPerAxis;
     private const int MaximumVerticesPerMesh = 60_000;
 
     private readonly struct FaceKey : IEquatable<FaceKey>
@@ -480,9 +490,10 @@ internal static class VoxelChunkMesher
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(palette);
 
+        int cells = input.CellsPerAxis;
         List<VoxelMeshData> output = new(2);
         MeshBatch batch = new(output);
-        Span<FaceKey> mask = stackalloc FaceKey[Cells * Cells];
+        Span<FaceKey> mask = stackalloc FaceKey[cells * cells];
 
         try
         {
@@ -492,13 +503,13 @@ internal static class VoxelChunkMesher
                 int uAxis = (axis + 1) % 3;
                 int vAxis = (axis + 2) % 3;
 
-                for (int slice = 0; slice <= Cells; slice++)
+                for (int slice = 0; slice <= cells; slice++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     mask.Clear();
 
-                    for (int v = 0; v < Cells; v++)
-                    for (int u = 0; u < Cells; u++)
+                    for (int v = 0; v < cells; v++)
+                    for (int u = 0; u < cells; u++)
                     {
                         GetCellCoordinates(
                             axis, slice - 1, u, v,
@@ -521,12 +532,12 @@ internal static class VoxelChunkMesher
                         int solidAxis = axis == 0 ? solidX :
                             axis == 1 ? solidY : solidZ;
 
-                        if ((uint)solidAxis >= Cells)
+                        if ((uint)solidAxis  >= cells)
                             continue;
 
                         ushort materialId = input.GetMaterialId(
                             solidX, solidY, solidZ);
-                        mask[u + v * Cells] = new FaceKey(
+                        mask[u + v * cells] = new FaceKey(
                             materialId,
                             aSolid ? (sbyte)1 : (sbyte)-1);
                     }
@@ -574,14 +585,15 @@ internal static class VoxelChunkMesher
             cutSampleY >= input.FieldHeight - 0.5f)
             return Array.Empty<VoxelMeshData>();
 
-        Span<FaceKey> mask = stackalloc FaceKey[Cells * Cells];
+        int cells = input.CellsPerAxis;
+        Span<FaceKey> mask = stackalloc FaceKey[cells * cells];
         List<VoxelMeshData> output = new(1);
         MeshBatch batch = new(output);
 
         try
         {
-            for (int z = 0; z < Cells; z++)
-            for (int x = 0; x < Cells; x++)
+            for (int z = 0; z < cells; z++)
+            for (int x = 0; x < cells; x++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -598,10 +610,10 @@ internal static class VoxelChunkMesher
                     cutSampleY,
                     input.OriginZ + z + 0.5f);
 
-                mask[x + z * Cells] = new FaceKey(materialId, 1);
+                mask[x + z * cells] = new FaceKey(materialId, 1);
             }
 
-            GreedyEmitCap(input, palette, batch, mask, cutHeightMeters);
+            GreedyEmitCap(input, palette, batch, mask, cutHeightMeters, cells);
             batch.Flush();
             return output.ToArray();
         }
@@ -621,14 +633,15 @@ internal static class VoxelChunkMesher
         int axis,
         int uAxis,
         int vAxis,
-        int slice)
+        int slice,
+        int cells)
     {
-        for (int v = 0; v < Cells; v++)
+        for (int v = 0; v < cells; v++)
         {
             int u = 0;
-            while (u < Cells)
+            while (u < cells)
             {
-                FaceKey key = mask[u + v * Cells];
+                FaceKey key = mask[u + v * cells];
                 if (!key.Visible)
                 {
                     u++;
@@ -636,17 +649,17 @@ internal static class VoxelChunkMesher
                 }
 
                 int width = 1;
-                while (u + width < Cells &&
-                    mask[u + width + v * Cells].Equals(key))
+                while (u + width < cells &&
+                    mask[u + width + v * cells].Equals(key))
                 {
                     width++;
                 }
 
                 int height = 1;
                 bool canGrow = true;
-                while (v + height < Cells && canGrow)
+                while (v + height < cells && canGrow)
                 {
-                    int row = (v + height) * Cells + u;
+                    int row = (v + height) * cells + u;
                     for (int x = 0; x < width; x++)
                     {
                         if (!mask[row + x].Equals(key))
@@ -676,7 +689,7 @@ internal static class VoxelChunkMesher
 
                 for (int row = v; row < v + height; row++)
                 {
-                    int start = row * Cells + u;
+                    int start = row * cells + u;
                     for (int x = 0; x < width; x++)
                         mask[start + x] = default;
                 }
@@ -747,14 +760,15 @@ internal static class VoxelChunkMesher
         TerrainPalette palette,
         MeshBatch batch,
         Span<FaceKey> mask,
-        float cutHeightMeters)
+        float cutHeightMeters,
+        int cells)
     {
-        for (int z = 0; z < Cells; z++)
+        for (int z = 0; z < cells; z++)
         {
             int x = 0;
-            while (x < Cells)
+            while (x < cells)
             {
-                FaceKey key = mask[x + z * Cells];
+                FaceKey key = mask[x + z * cells];
                 if (!key.Visible)
                 {
                     x++;
@@ -762,17 +776,17 @@ internal static class VoxelChunkMesher
                 }
 
                 int width = 1;
-                while (x + width < Cells &&
-                    mask[x + width + z * Cells].Equals(key))
+                while (x + width < cells &&
+                    mask[x + width + z * cells].Equals(key))
                 {
                     width++;
                 }
 
                 int height = 1;
                 bool canGrow = true;
-                while (z + height < Cells && canGrow)
+                while (z + height < cells && canGrow)
                 {
-                    int row = (z + height) * Cells + x;
+                    int row = (z + height) * cells + x;
                     for (int i = 0; i < width; i++)
                     {
                         if (!mask[row + i].Equals(key))
@@ -802,7 +816,7 @@ internal static class VoxelChunkMesher
 
                 for (int row = z; row < z + height; row++)
                 {
-                    int start = row * Cells + x;
+                    int start = row * cells + x;
                     for (int i = 0; i < width; i++)
                         mask[start + i] = default;
                 }
