@@ -327,104 +327,104 @@ internal static class VoxelChunkMesher
             ushort[]? indices = null;
 
             try
-        {
-            vertices = ArrayPool<Vector3>.Shared.Rent(vertexCount);
-            normals = ArrayPool<Vector3>.Shared.Rent(vertexCount);
-            colors = ArrayPool<byte>.Shared.Rent(vertexCount * 4);
-            indices = ArrayPool<ushort>.Shared.Rent(indexCount);
-
-            _vertices.CopyTo(vertices, 0);
-            _normals.CopyTo(normals, 0);
-            _indices.CopyTo(indices, 0);
-
-            for (int i = 0; i < vertexCount; i++)
             {
-                int offset = i * 4;
-                colors[offset] = _colors[i].R;
-                colors[offset + 1] = _colors[i].G;
-                colors[offset + 2] = _colors[i].B;
-                colors[offset + 3] = _colors[i].A;
+                vertices = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+                normals = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+                colors = ArrayPool<byte>.Shared.Rent(vertexCount * 4);
+                indices = ArrayPool<ushort>.Shared.Rent(indexCount);
+
+                _vertices.CopyTo(vertices, 0);
+                _normals.CopyTo(normals, 0);
+                _indices.CopyTo(indices, 0);
+
+                for (int i = 0; i < vertexCount; i++)
+                {
+                    int offset = i * 4;
+                    colors[offset] = _colors[i].R;
+                    colors[offset + 1] = _colors[i].G;
+                    colors[offset + 2] = _colors[i].B;
+                    colors[offset + 3] = _colors[i].A;
+                }
+
+                _output.Add(new VoxelMeshData(
+                    vertices,
+                    normals,
+                    colors,
+                    indices,
+                    vertexCount,
+                    indexCount));
+            }
+            catch
+            {
+                if (vertices != null)
+                    ArrayPool<Vector3>.Shared.Return(vertices);
+                if (normals != null)
+                    ArrayPool<Vector3>.Shared.Return(normals);
+                if (colors != null)
+                    ArrayPool<byte>.Shared.Return(colors);
+                if (indices != null)
+                    ArrayPool<ushort>.Shared.Return(indices);
+                throw;
             }
 
-            _output.Add(new VoxelMeshData(
-                vertices,
-                normals,
-                colors,
-                indices,
-                vertexCount,
-                indexCount));
-        }
-        catch
-        {
-            if (vertices != null)
-                ArrayPool<Vector3>.Shared.Return(vertices);
-            if (normals != null)
-                ArrayPool<Vector3>.Shared.Return(normals);
-            if (colors != null)
-                ArrayPool<byte>.Shared.Return(colors);
-            if (indices != null)
-                ArrayPool<ushort>.Shared.Return(indices);
-            throw;
+            _vertices.Clear();
+            _normals.Clear();
+            _colors.Clear();
+            _indices.Clear();
         }
 
-        _vertices.Clear();
-        _normals.Clear();
-        _colors.Clear();
-        _indices.Clear();
+        private void AddVertex(SurfaceVertex vertex, Color color, Vector3 fallbackNormal)
+        {
+            _vertices.Add(vertex.Position);
+            _normals.Add(NormalizeOr(vertex.Normal, fallbackNormal));
+            _colors.Add(color);
+        }
     }
 
-    private void AddVertex(SurfaceVertex vertex, Color color, Vector3 fallbackNormal)
+    public static Mesh[] BuildSurface(
+        IVoxelFieldSource field,
+        int chunkX,
+        int chunkY,
+        int chunkZ,
+        int step,
+        TerrainPalette palette)
     {
-        _vertices.Add(vertex.Position);
-        _normals.Add(NormalizeOr(vertex.Normal, fallbackNormal));
-        _colors.Add(color);
+        VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ, step);
+        while (!input.IsComplete)
+            input.CaptureNext(field, input.CaptureCount);
+        return Upload(BuildSurfaceData(input, palette));
     }
-}
 
-public static Mesh[] BuildSurface(
-    IVoxelFieldSource field,
-    int chunkX,
-    int chunkY,
-    int chunkZ,
-    int step,
-    TerrainPalette palette)
-{
-    VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ, step);
-    while (!input.IsComplete)
-        input.CaptureNext(field, input.CaptureCount);
-    return Upload(BuildSurfaceData(input, palette));
-}
-
-public static Mesh UploadOne(VoxelMeshData source)
-{
-    Mesh mesh = new(source.VertexCount, source.TriangleCount);
-    mesh.AllocVertices();
-    mesh.AllocNormals();
-    mesh.AllocColors();
-    mesh.AllocIndices();
-    source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
-    source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
-    source.Colors.CopyTo(mesh.ColorsAs<byte>());
-    source.Indices.CopyTo(mesh.IndicesAs<ushort>());
-    UploadMesh(ref mesh, false);
-    return mesh;
-}
-
-public static Mesh[] Upload(VoxelMeshData[] data)
-{
-    if (data.Length == 0)
-        return Array.Empty<Mesh>();
-
-    Mesh[] meshes = new Mesh[data.Length];
-    int uploaded = 0;
-    try
+    public static Mesh UploadOne(VoxelMeshData source)
     {
-        for (; uploaded < data.Length; uploaded++)
+        Mesh mesh = new(source.VertexCount, source.TriangleCount);
+        mesh.AllocVertices();
+        mesh.AllocNormals();
+        mesh.AllocColors();
+        mesh.AllocIndices();
+        source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
+        source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
+        source.Colors.CopyTo(mesh.ColorsAs<byte>());
+        source.Indices.CopyTo(mesh.IndicesAs<ushort>());
+        UploadMesh(ref mesh, false);
+        return mesh;
+    }
+
+    public static Mesh[] Upload(VoxelMeshData[] data)
+    {
+        if (data.Length == 0)
+            return Array.Empty<Mesh>();
+
+        Mesh[] meshes = new Mesh[data.Length];
+        int uploaded = 0;
+        try
         {
-            meshes[uploaded] = UploadOne(data[uploaded]);
-            data[uploaded].ReturnCpuArrays();
-        }
-        return meshes;
+            for (; uploaded < data.Length; uploaded++)
+            {
+                meshes[uploaded] = UploadOne(data[uploaded]);
+                data[uploaded].ReturnCpuArrays();
+            }
+            return meshes;
         }
         catch
         {
@@ -685,66 +685,66 @@ public static Mesh[] Upload(VoxelMeshData[] data)
         MeshBatch batch = new(output);
 
         try
+        {
+        // Split every cut cell along one consistent diagonal. Clipping convex
+        // triangles avoids self-crossing polygons in diagonal-inside cases.
+        ReadOnlySpan<int> triangleA = stackalloc int[] { 0, 1, 2 };
+        ReadOnlySpan<int> triangleB = stackalloc int[] { 0, 2, 3 };
+        Span<SlicePoint> corners = stackalloc SlicePoint[4];
+        Span<SlicePoint> triangle = stackalloc SlicePoint[3];
+        Span<SlicePoint> polygon = stackalloc SlicePoint[4];
+
+        for (int z = 0; z < CellsPerAxis; z++)
+        for (int x = 0; x < CellsPerAxis; x++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            float x0 = originX + x * step;
+            float x1 = x0 + step;
+            float z0 = originZ + z * step;
+            float z1 = z0 + step;
+
+            corners[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
+            corners[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
+            corners[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
+            corners[3] = MakeSlicePoint(field, x0, cutSampleY, z1, cutHeightMeters);
+
+            ushort materialId = field.GetMaterialAtWorldPosition(
+                (x0 + x1) * 0.5f,
+                cutSampleY,
+                (z0 + z1) * 0.5f);
+            Color color = GetMaterialColor(palette, materialId);
+
+            for (int triangleIndex = 0; triangleIndex < 2; triangleIndex++)
             {
-            // Split every cut cell along one consistent diagonal. Clipping convex
-            // triangles avoids self-crossing polygons in diagonal-inside cases.
-            ReadOnlySpan<int> triangleA = stackalloc int[] { 0, 1, 2 };
-            ReadOnlySpan<int> triangleB = stackalloc int[] { 0, 2, 3 };
-            Span<SlicePoint> corners = stackalloc SlicePoint[4];
-            Span<SlicePoint> triangle = stackalloc SlicePoint[3];
-            Span<SlicePoint> polygon = stackalloc SlicePoint[4];
+                ReadOnlySpan<int> indices = triangleIndex == 0
+                    ? triangleA
+                    : triangleB;
+                triangle[0] = corners[indices[0]];
+                triangle[1] = corners[indices[1]];
+                triangle[2] = corners[indices[2]];
 
-            for (int z = 0; z < CellsPerAxis; z++)
-            for (int x = 0; x < CellsPerAxis; x++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                float x0 = originX + x * step;
-                float x1 = x0 + step;
-                float z0 = originZ + z * step;
-                float z1 = z0 + step;
+                int polygonCount = ClipSolidTriangle(triangle, polygon);
+                if (polygonCount < 3)
+                    continue;
 
-                corners[0] = MakeSlicePoint(field, x0, cutSampleY, z0, cutHeightMeters);
-                corners[1] = MakeSlicePoint(field, x1, cutSampleY, z0, cutHeightMeters);
-                corners[2] = MakeSlicePoint(field, x1, cutSampleY, z1, cutHeightMeters);
-                corners[3] = MakeSlicePoint(field, x0, cutSampleY, z1, cutHeightMeters);
-
-                ushort materialId = field.GetMaterialAtWorldPosition(
-                    (x0 + x1) * 0.5f,
-                    cutSampleY,
-                    (z0 + z1) * 0.5f);
-                Color color = GetMaterialColor(palette, materialId);
-
-                for (int triangleIndex = 0; triangleIndex < 2; triangleIndex++)
+                SurfaceVertex anchor = new(
+                    polygon[0].Position + Vector3.UnitY * 0.006f,
+                    Vector3.UnitY);
+                for (int i = 1; i < polygonCount - 1; i++)
                 {
-                    ReadOnlySpan<int> indices = triangleIndex == 0
-                        ? triangleA
-                        : triangleB;
-                    triangle[0] = corners[indices[0]];
-                    triangle[1] = corners[indices[1]];
-                    triangle[2] = corners[indices[2]];
-
-                    int polygonCount = ClipSolidTriangle(triangle, polygon);
-                    if (polygonCount < 3)
-                        continue;
-
-                    SurfaceVertex anchor = new(
-                        polygon[0].Position + Vector3.UnitY * 0.006f,
+                    SurfaceVertex b = new(
+                        polygon[i].Position + Vector3.UnitY * 0.006f,
                         Vector3.UnitY);
-                    for (int i = 1; i < polygonCount - 1; i++)
-                    {
-                        SurfaceVertex b = new(
-                            polygon[i].Position + Vector3.UnitY * 0.006f,
-                            Vector3.UnitY);
-                        SurfaceVertex c = new(
-                            polygon[i + 1].Position + Vector3.UnitY * 0.006f,
-                            Vector3.UnitY);
-                        batch.AddTriangle(anchor, b, c, color, Vector3.UnitY);
-                    }
+                    SurfaceVertex c = new(
+                        polygon[i + 1].Position + Vector3.UnitY * 0.006f,
+                        Vector3.UnitY);
+                    batch.AddTriangle(anchor, b, c, color, Vector3.UnitY);
                 }
             }
+        }
 
-            batch.Flush();
-            return output.ToArray();
+        batch.Flush();
+        return output.ToArray();
         }
         catch
         {
