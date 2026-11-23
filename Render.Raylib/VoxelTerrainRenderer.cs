@@ -129,6 +129,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required int CutLayer { get; init; }
         public required TerrainPalette Palette { get; init; }
         public long EnqueuedTimestamp { get; init; }
+        public int Started;
         public CancellationTokenSource Cancellation { get; } = new();
     }
 
@@ -535,6 +536,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             candidateEntries.Add((candidate, entry));
         }
 
+        CancelQueuedBuildsOutsideView();
+
         foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
         {
             if (entry.Built)
@@ -567,12 +570,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             string summary =
                 $"frame={_frame} fixedStep={step} frustumCandidates={FrustumCandidatesLastFrame} selected={_visibleCandidateKeys.Count} overflow={CandidateOverflowLastFrame} visible={_visible.Count} cache={_chunks.Count} emptyChunks={_totalEmptyChunks} " +
                 $"snapshotMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
-                $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} " +
+                $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
-                $"workers={_activeMeshWorkers} pending={_buildQueue.Count} " +
+                $"workers={RunningMeshJobs} pending={_buildQueue.Count} " +
                 $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
                 $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
                 $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
+                $"gpuUploads={_totalGpuUploads} gpuUnloads={_totalGpuUnloads} surfaceCacheHits={_totalIdenticalSurfaceSkips} capCacheHits={_totalIdenticalCutSkips} " +
                 $"lastMeshStep={LastBuildStep} vertices={LastBuildVertices} triangles={LastBuildTriangles}";
             _logger.Write("FRAME_SUMMARY", summary);
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
@@ -745,6 +749,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (!_buildQueue.TryDequeue(out BuildRequest? request))
                 continue;
 
+            Interlocked.Exchange(ref request.Started, 1);
             Interlocked.Increment(ref _activeMeshWorkers);
             Interlocked.Increment(ref _totalBuildStarted);
             long workerStarted = Stopwatch.GetTimestamp();
@@ -1326,6 +1331,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.CutCapHash = 0UL;
         entry.CutLayer = int.MinValue;
         entry.CutDirty = true;
+    }
+
+    private void CancelQueuedBuildsOutsideView()
+    {
+        foreach (ChunkEntry entry in _chunks.Values)
+        {
+            BuildRequest? request = entry.RunningBuild;
+            if (request == null ||
+                Volatile.Read(ref request.Started) != 0 ||
+                _visibleCandidateKeys.Contains(request.Key))
+                continue;
+
+            InvalidatePendingBuild(entry);
+        }
     }
 
     private static bool HasPendingWork(ChunkEntry entry) =>
