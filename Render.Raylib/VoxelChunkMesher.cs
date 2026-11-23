@@ -226,20 +226,11 @@ internal static class VoxelChunkMesher
     private static readonly int[] CornerY = { 0, 0, 1, 1, 0, 0, 1, 1 };
     private static readonly int[] CornerZ = { 0, 0, 0, 0, 1, 1, 1, 1 };
 
-    // A consistent six-tetrahedra decomposition around cube diagonal 0-6.
-    private static readonly int[,] Tetrahedra =
+    private static readonly int[] CubeEdges =
     {
-        { 0, 5, 1, 6 },
-        { 0, 1, 2, 6 },
-        { 0, 2, 3, 6 },
-        { 0, 3, 7, 6 },
-        { 0, 7, 4, 6 },
-        { 0, 4, 5, 6 }
-    };
-
-    private static readonly int[] TetraEdges =
-    {
-        0, 1, 0, 2, 0, 3, 1, 2, 1, 3, 2, 3
+        0, 1, 1, 2, 2, 3, 3, 0,
+        4, 5, 5, 6, 6, 7, 7, 4,
+        0, 4, 1, 5, 2, 6, 3, 7
     };
 
     private readonly record struct SurfaceVertex(Vector3 Position, Vector3 Normal);
@@ -376,39 +367,46 @@ internal static class VoxelChunkMesher
         int originZ = input.OriginZ;
         float[] density = input.DensitySamples;
 
-        List<VoxelMeshData> output = new(2);
-        MeshBatch batch = new(output);
+        // Surface Nets creates one shared vertex for each active density cell.
+        // The one-cell surrounding ring is built from the symmetric sample
+        // halo, allowing border quads and normals to match neighbouring chunks.
+        int gridSide = CellsPerAxis + 1;
+        int gridPlane = gridSide * gridSide;
+        int gridCount = gridSide * gridPlane;
+        SurfaceVertex[] cellVertices = new SurfaceVertex[gridCount];
+        bool[] hasVertex = new bool[gridCount];
+
         Span<Vector3> positions = stackalloc Vector3[8];
         Span<Vector3> normals = stackalloc Vector3[8];
         Span<float> values = stackalloc float[8];
-        Span<SurfaceVertex> intersections = stackalloc SurfaceVertex[4];
-        Span<float> angles = stackalloc float[4];
 
-        for (int z = 0; z < CellsPerAxis; z++)
-        for (int y = 0; y < CellsPerAxis; y++)
-        for (int x = 0; x < CellsPerAxis; x++)
+        for (int z = -1; z < CellsPerAxis; z++)
+        for (int y = -1; y < CellsPerAxis; y++)
+        for (int x = -1; x < CellsPerAxis; x++)
         {
-            if (x == 0)
+            if (x == -1)
                 cancellationToken.ThrowIfCancellationRequested();
 
-            float minimum = float.PositiveInfinity;
-            float maximum = float.NegativeInfinity;
-
+            bool hasSolid = false;
+            bool hasAir = false;
             for (int corner = 0; corner < 8; corner++)
             {
-                int sx = x + 1 + CornerX[corner];
-                int sy = y + 1 + CornerY[corner];
-                int sz = z + 1 + CornerZ[corner];
+                int sx = x + HaloSize + CornerX[corner];
+                int sy = y + HaloSize + CornerY[corner];
+                int sz = z + HaloSize + CornerZ[corner];
                 int sampleIndex = GetSampleIndex(sx, sy, sz);
                 float value = density[sampleIndex];
                 values[corner] = value;
-                minimum = MathF.Min(minimum, value);
-                maximum = MathF.Max(maximum, value);
+                hasSolid |= value > 0f;
+                hasAir |= value <= 0f;
 
                 positions[corner] = new Vector3(
-                    (originX + (x + CornerX[corner]) * step + 0.5f) * SparseVoxelField.VoxelSizeMeters,
-                    (originY + (y + CornerY[corner]) * step + 0.5f) * SparseVoxelField.VoxelSizeMeters,
-                    (originZ + (z + CornerZ[corner]) * step + 0.5f) * SparseVoxelField.VoxelSizeMeters);
+                    (originX + (x + CornerX[corner]) * step + 0.5f) *
+                        SparseVoxelField.VoxelSizeMeters,
+                    (originY + (y + CornerY[corner]) * step + 0.5f) *
+                        SparseVoxelField.VoxelSizeMeters,
+                    (originZ + (z + CornerZ[corner]) * step + 0.5f) *
+                        SparseVoxelField.VoxelSizeMeters);
 
                 float gx = density[GetSampleIndex(sx + 1, sy, sz)] -
                     density[GetSampleIndex(sx - 1, sy, sz)];
@@ -421,98 +419,135 @@ internal static class VoxelChunkMesher
                     Vector3.UnitY);
             }
 
-            if (minimum > 0f || maximum < 0f)
+            if (!hasSolid || !hasAir)
                 continue;
 
-            int materialX = originX + x * step + step / 2;
-            int materialY = originY + y * step + step / 2;
-            int materialZ = originZ + z * step + step / 2;
-            ushort materialId = input.GetMaterialId(x, y, z);
-            Color color = GetMaterialColor(palette, materialId);
-
-            for (int tetra = 0; tetra < 6; tetra++)
+            Vector3 positionSum = Vector3.Zero;
+            Vector3 normalSum = Vector3.Zero;
+            int intersections = 0;
+            for (int edge = 0; edge < CubeEdges.Length; edge += 2)
             {
-                int a = Tetrahedra[tetra, 0];
-                int b = Tetrahedra[tetra, 1];
-                int c = Tetrahedra[tetra, 2];
-                int d = Tetrahedra[tetra, 3];
-                int count = 0;
-
-                for (int edge = 0; edge < 6; edge++)
-                {
-                    int first = TetraEdges[edge * 2];
-                    int second = TetraEdges[edge * 2 + 1];
-                    int ia = first switch { 0 => a, 1 => b, 2 => c, _ => d };
-                    int ib = second switch { 0 => a, 1 => b, 2 => c, _ => d };
-                    float da = values[ia];
-                    float db = values[ib];
-                    if ((da > 0f) == (db > 0f))
-                        continue;
-
-                    float t = Math.Clamp(da / (da - db), 0f, 1f);
-                    Vector3 p = Vector3.Lerp(positions[ia], positions[ib], t);
-                    Vector3 n = NormalizeOr(
-                        Vector3.Lerp(normals[ia], normals[ib], t),
-                        Vector3.UnitY);
-                    intersections[count++] = new SurfaceVertex(p, n);
-                }
-
-                if (count < 3)
+                int a = CubeEdges[edge];
+                int b = CubeEdges[edge + 1];
+                float da = values[a];
+                float db = values[b];
+                if ((da > 0f) == (db > 0f))
                     continue;
 
-                Vector3 average = Vector3.Zero;
-                Vector3 center = Vector3.Zero;
-                for (int i = 0; i < count; i++)
-                {
-                    average += intersections[i].Normal;
-                    center += intersections[i].Position;
-                }
-                center /= count;
-                average = NormalizeOr(average, Vector3.UnitY);
+                float t = Math.Clamp(da / (da - db), 0f, 1f);
+                positionSum += Vector3.Lerp(positions[a], positions[b], t);
+                normalSum += NormalizeOr(
+                    Vector3.Lerp(normals[a], normals[b], t),
+                    Vector3.UnitY);
+                intersections++;
+            }
 
-                Vector3 axis = NormalizeOr(
-                    Vector3.Cross(
-                        MathF.Abs(average.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX,
-                        average),
-                    Vector3.UnitX);
-                Vector3 secondAxis = NormalizeOr(
-                    Vector3.Cross(average, axis),
-                    Vector3.UnitZ);
+            if (intersections == 0)
+                continue;
 
-                for (int i = 0; i < count; i++)
-                {
-                    Vector3 relative = intersections[i].Position - center;
-                    angles[i] = MathF.Atan2(
-                        Vector3.Dot(relative, secondAxis),
-                        Vector3.Dot(relative, axis));
-                }
+            int vertexIndex = GetSurfaceCellIndex(x, y, z, gridSide);
+            cellVertices[vertexIndex] = new SurfaceVertex(
+                positionSum / intersections,
+                NormalizeOr(normalSum, Vector3.UnitY));
+            hasVertex[vertexIndex] = true;
+        }
 
-                for (int i = 1; i < count; i++)
-                {
-                    int j = i;
-                    while (j > 0 && angles[j] < angles[j - 1])
-                    {
-                        (angles[j], angles[j - 1]) = (angles[j - 1], angles[j]);
-                        (intersections[j], intersections[j - 1]) =
-                            (intersections[j - 1], intersections[j]);
-                        j--;
-                    }
-                }
+        List<VoxelMeshData> output = new(2);
+        MeshBatch batch = new(output);
 
-                for (int i = 1; i < count - 1; i++)
-                {
-                    batch.AddTriangle(
-                        intersections[0],
-                        intersections[i],
-                        intersections[i + 1],
-                        color,
-                        average);
-                }
+        // Each sign-changing lattice edge emits one quad from its four
+        // adjacent Surface Nets cell vertices. Lower sample coordinates are
+        // owned by this chunk; the high boundary is owned by the next chunk.
+        for (int z = 0; z < CellsPerAxis; z++)
+        for (int y = 0; y < CellsPerAxis; y++)
+        for (int x = 0; x < CellsPerAxis; x++)
+        {
+            if (x == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
+            int sx = x + HaloSize;
+            int sy = y + HaloSize;
+            int sz = z + HaloSize;
+            float value = density[GetSampleIndex(sx, sy, sz)];
+
+            float nextX = density[GetSampleIndex(sx + 1, sy, sz)];
+            if ((value > 0f) != (nextX > 0f))
+            {
+                AddSurfaceQuad(
+                    input, palette, batch, cellVertices, hasVertex, gridSide,
+                    x, y - 1, z - 1,
+                    x, y, z - 1,
+                    x, y, z,
+                    x, y - 1, z);
+            }
+
+            float nextY = density[GetSampleIndex(sx, sy + 1, sz)];
+            if ((value > 0f) != (nextY > 0f))
+            {
+                AddSurfaceQuad(
+                    input, palette, batch, cellVertices, hasVertex, gridSide,
+                    x - 1, y, z - 1,
+                    x, y, z - 1,
+                    x, y, z,
+                    x - 1, y, z);
+            }
+
+            float nextZ = density[GetSampleIndex(sx, sy, sz + 1)];
+            if ((value > 0f) != (nextZ > 0f))
+            {
+                AddSurfaceQuad(
+                    input, palette, batch, cellVertices, hasVertex, gridSide,
+                    x - 1, y - 1, z,
+                    x, y - 1, z,
+                    x, y, z,
+                    x - 1, y, z);
             }
         }
 
         batch.Flush();
         return output.ToArray();
+    }
+
+    private static int GetSurfaceCellIndex(int x, int y, int z, int side) =>
+        (x + 1) + (y + 1) * side + (z + 1) * side * side;
+
+    private static void AddSurfaceQuad(
+        VoxelChunkBuildInput input,
+        TerrainPalette palette,
+        MeshBatch batch,
+        SurfaceVertex[] vertices,
+        bool[] hasVertex,
+        int gridSide,
+        int x0, int y0, int z0,
+        int x1, int y1, int z1,
+        int x2, int y2, int z2,
+        int x3, int y3, int z3)
+    {
+        int i0 = GetSurfaceCellIndex(x0, y0, z0, gridSide);
+        int i1 = GetSurfaceCellIndex(x1, y1, z1, gridSide);
+        int i2 = GetSurfaceCellIndex(x2, y2, z2, gridSide);
+        int i3 = GetSurfaceCellIndex(x3, y3, z3, gridSide);
+        if (!hasVertex[i0] || !hasVertex[i1] ||
+            !hasVertex[i2] || !hasVertex[i3])
+            return;
+
+        SurfaceVertex a = vertices[i0];
+        SurfaceVertex b = vertices[i1];
+        SurfaceVertex c = vertices[i2];
+        SurfaceVertex d = vertices[i3];
+        Vector3 normal = NormalizeOr(
+            a.Normal + b.Normal + c.Normal + d.Normal,
+            Vector3.UnitY);
+
+        int materialX = Math.Clamp((x0 + x1 + x2 + x3) / 4, 0, CellsPerAxis - 1);
+        int materialY = Math.Clamp((y0 + y1 + y2 + y3) / 4, 0, CellsPerAxis - 1);
+        int materialZ = Math.Clamp((z0 + z1 + z2 + z3) / 4, 0, CellsPerAxis - 1);
+        Color color = GetMaterialColor(
+            palette,
+            input.GetMaterialId(materialX, materialY, materialZ));
+
+        batch.AddTriangle(a, b, c, color, normal);
+        batch.AddTriangle(a, c, d, color, normal);
     }
 
     public static Mesh[] BuildCutCap(
