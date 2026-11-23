@@ -248,6 +248,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     public int ActiveRenderCellSize => 1;
     public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters;
+    public float RenderChunkSizeMeters =>
+        ChunkCells * SparseVoxelField.VoxelSizeMeters;
     public bool IsUsingCoarseLod => false;
     public int Step1ChunksLastFrame { get; private set; }
     public int Step4ChunksLastFrame => 0;
