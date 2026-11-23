@@ -17,11 +17,15 @@ namespace RimClone.Render.Raylib;
 internal sealed class VoxelMeshData
 {
     private int _returned;
+    private readonly Vector3[] _vertices;
+    private readonly Vector3[] _normals;
+    private readonly byte[] _colors;
+    private readonly ushort[] _indices;
 
-    public Vector3[] Vertices { get; }
-    public Vector3[] Normals { get; }
-    public byte[] Colors { get; }
-    public ushort[] Indices { get; }
+    public ReadOnlySpan<Vector3> Vertices => _vertices.AsSpan(0, VertexCount);
+    public ReadOnlySpan<Vector3> Normals => _normals.AsSpan(0, VertexCount);
+    public ReadOnlySpan<byte> Colors => _colors.AsSpan(0, VertexCount * 4);
+    public ReadOnlySpan<ushort> Indices => _indices.AsSpan(0, IndexCount);
 
     public int VertexCount { get; }
     public int IndexCount { get; }
@@ -45,10 +49,10 @@ internal sealed class VoxelMeshData
             throw new ArgumentOutOfRangeException(nameof(vertexCount));
         }
 
-        Vertices = vertices;
-        Normals = normals;
-        Colors = colors;
-        Indices = indices;
+        _vertices = vertices;
+        _normals = normals;
+        _colors = colors;
+        _indices = indices;
         VertexCount = vertexCount;
         IndexCount = indexCount;
     }
@@ -58,10 +62,10 @@ internal sealed class VoxelMeshData
         if (Interlocked.Exchange(ref _returned, 1) != 0)
             return;
 
-        ArrayPool<Vector3>.Shared.Return(Vertices);
-        ArrayPool<Vector3>.Shared.Return(Normals);
-        ArrayPool<byte>.Shared.Return(Colors);
-        ArrayPool<ushort>.Shared.Return(Indices);
+        ArrayPool<Vector3>.Shared.Return(_vertices);
+        ArrayPool<Vector3>.Shared.Return(_normals);
+        ArrayPool<byte>.Shared.Return(_colors);
+        ArrayPool<ushort>.Shared.Return(_indices);
     }
 }
 
@@ -398,14 +402,10 @@ internal static class VoxelChunkMesher
         mesh.AllocNormals();
         mesh.AllocColors();
         mesh.AllocIndices();
-        source.Vertices.AsSpan(0, source.VertexCount)
-            .CopyTo(mesh.VerticesAs<Vector3>());
-        source.Normals.AsSpan(0, source.VertexCount)
-            .CopyTo(mesh.NormalsAs<Vector3>());
-        source.Colors.AsSpan(0, source.VertexCount * 4)
-            .CopyTo(mesh.ColorsAs<byte>());
-        source.Indices.AsSpan(0, source.IndexCount)
-            .CopyTo(mesh.IndicesAs<ushort>());
+        source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
+        source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
+        source.Colors.CopyTo(mesh.ColorsAs<byte>());
+        source.Indices.CopyTo(mesh.IndicesAs<ushort>());
         UploadMesh(ref mesh, false);
         return mesh;
     }
