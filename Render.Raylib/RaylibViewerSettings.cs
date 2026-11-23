@@ -66,9 +66,9 @@ internal sealed class TerrainPalette
 
     // One neutral rock albedo is shared by every terrain face. Depth comes
     // from the directional light, not from height- or material-based colors.
-    public RgbColorSetting BaseRock { get; set; } = new(28, 30, 33);
-    public RgbColorSetting CutHatching { get; set; } = new(76, 81, 89);
-    public RgbColorSetting Background { get; set; } = new(18, 22, 29);
+    public RgbColorSetting BaseRock { get; set; } = new(92, 96, 103);
+    public RgbColorSetting CutHatching { get; set; } = new(137, 143, 152);
+    public RgbColorSetting Background { get; set; } = new(31, 35, 43);
     public bool ShowCutHatching { get; set; } = true;
 
     // Cheap global lighting stub: one directional sun and an ambient floor.
@@ -76,8 +76,8 @@ internal sealed class TerrainPalette
     public float SunDirectionX { get; set; } = -0.45f;
     public float SunDirectionY { get; set; } = 0.82f;
     public float SunDirectionZ { get; set; } = 0.35f;
-    public float AmbientLight { get; set; } = 0.34f;
-    public float SunIntensity { get; set; } = 0.82f;
+    public float AmbientLight { get; set; } = 0.70f;
+    public float SunIntensity { get; set; } = 0.58f;
 
     public Color GetSurfaceColor(float height, ushort materialId) =>
         BaseRock.ToRaylibColor();
@@ -113,9 +113,9 @@ internal sealed class TerrainPalette
 
     public void Normalize()
     {
-        BaseRock ??= new RgbColorSetting(28, 30, 33);
-        CutHatching ??= new RgbColorSetting(76, 81, 89);
-        Background ??= new RgbColorSetting(18, 22, 29);
+        BaseRock ??= new RgbColorSetting(92, 96, 103);
+        CutHatching ??= new RgbColorSetting(137, 143, 152);
+        Background ??= new RgbColorSetting(31, 35, 43);
         BaseRock.Normalize();
         CutHatching.Normalize();
         Background.Normalize();
@@ -123,8 +123,8 @@ internal sealed class TerrainPalette
         if (!float.IsFinite(SunDirectionX)) SunDirectionX = -0.45f;
         if (!float.IsFinite(SunDirectionY)) SunDirectionY = 0.82f;
         if (!float.IsFinite(SunDirectionZ)) SunDirectionZ = 0.35f;
-        if (!float.IsFinite(AmbientLight)) AmbientLight = 0.34f;
-        if (!float.IsFinite(SunIntensity)) SunIntensity = 0.82f;
+        if (!float.IsFinite(AmbientLight)) AmbientLight = 0.70f;
+        if (!float.IsFinite(SunIntensity)) SunIntensity = 0.58f;
         AmbientLight = Math.Clamp(AmbientLight, 0.05f, 1f);
         SunIntensity = Math.Clamp(SunIntensity, 0f, 1.5f);
 
@@ -193,10 +193,28 @@ internal sealed class RaylibViewerSettings
 
             settings ??= new RaylibViewerSettings();
 
-            // Migrate the old pure-black default once. Custom non-black
-            // background colors remain untouched.
-            if (settings.Palette?.Background is { R: 0, G: 0, B: 0 })
-                settings.Palette.Background = new RgbColorSetting(18, 22, 29);
+            settings.Palette ??= new TerrainPalette();
+
+            // Upgrade only the exact shipped defaults. User-customized colors
+            // and lighting values are preserved.
+            bool hadDarkDefaultRock =
+                settings.Palette.BaseRock is { R: 28, G: 30, B: 33 };
+            if (hadDarkDefaultRock)
+                settings.Palette.BaseRock = new RgbColorSetting(92, 96, 103);
+
+            if (settings.Palette.CutHatching is { R: 76, G: 81, B: 89 })
+                settings.Palette.CutHatching = new RgbColorSetting(137, 143, 152);
+
+            if (settings.Palette.Background is { R: 18, G: 22, B: 29 } or { R: 0, G: 0, B: 0 })
+                settings.Palette.Background = new RgbColorSetting(31, 35, 43);
+
+            if (hadDarkDefaultRock &&
+                MathF.Abs(settings.Palette.AmbientLight - 0.34f) < 0.001f &&
+                MathF.Abs(settings.Palette.SunIntensity - 0.82f) < 0.001f)
+            {
+                settings.Palette.AmbientLight = 0.70f;
+                settings.Palette.SunIntensity = 0.58f;
+            }
 
             settings.Normalize();
             return settings;
