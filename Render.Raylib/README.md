@@ -1,136 +1,97 @@
-# Raylib 3D voxel terrain
+# Raylib flat voxel terrain
 
-The default application entry point opens the isolated Raylib terrain viewer. The legacy SFML gameplay renderer remains available with `--legacy-sfml`.
+The default application entry point opens the isolated Raylib terrain viewer. The legacy SFML gameplay renderer remains available with \`--legacy-sfml\`.
 
-## Authoritative voxel representation
+## Authoritative voxel field
 
-`WorldMap.Voxels` is the authoritative 3D terrain field used by the Raylib voxel renderer and terrain editing tools.
+\`WorldMap.Voxels\` is the authoritative editable 3D terrain field.
 
-- Native voxel spacing: **0.1 × 0.1 × 0.1 m** on X, Y and Z.
-- Voxel volume: **0.001 m³**.
-- Storage: sparse **16 × 16 × 16** voxel chunks (1.6 m per side).
-- Geometry value: signed distance sampled at voxel centres and quantized into a signed 16-bit value. Positive is solid, negative is air, and zero is the surface.
-- Material: a separate 16-bit MaterialId for every cubic voxel cell. Material zero is air.
-- Material definitions are shared by ID and include mass density, hardness, compressive strength, porosity and thermal conductivity.
+- Native voxel spacing: **0.1 × 0.1 × 0.1 m**.
+- Storage and render chunk dimensions: **16 × 16 × 16 samples** (1.6 m per side).
+- Density: signed distance sampled at voxel centres; positive is solid, negative is air.
+- Material: a separate 16-bit MaterialId per cubic voxel cell. Material zero is air.
+- Storage: sparse edited chunks over a procedural base sampler. The world is not allocated as one dense 3D array.
 
-The world is 2304 × 2304 × 50 m. It is not allocated as a dense 3D array. Unedited terrain is evaluated procedurally as a 3D signed-distance field from the existing canyon/plateau base surface; only chunks touched by actual edits allocate voxel data. This sparse base-plus-voxel-edit design avoids allocating hundreds of billions of cells while allowing edits to create caves, arches, overhangs and disconnected volumes.
+All static terrain chunks use the same **Step=1** sampling resolution. The renderer has no Step=2/4/8/16 tiers, parent/child chunk grid, LOD prewarm or scale-transition stitching. Camera distance changes only which fixed-size chunks are requested and rendered.
 
-The initial canyon generator still supplies the broad base surface from its existing 1 m XY terrain data. The rendered surface, however, is extracted from the 3D density field, and all local sculpting operations update that same field. This is a sparse voxel terrain, not a height-column renderer relabelled as voxels.
+## Greedy surface meshing
 
-## Surface extraction and rendering
+\`VoxelChunkMesher\` converts the binary occupancy boundary (\`density > 0\`) into axis-aligned voxel faces.
 
-`VoxelChunkMesher` extracts the visible 3D isosurface from density samples using Surface Nets. Each active density cell contributes one shared surface vertex; sign-changing lattice edges connect four neighbouring vertices into quads. A symmetric two-sample halo keeps border geometry and central-difference normals consistent across chunks. Degenerate triangles and non-finite vertices are rejected before GPU upload.
+For each of the three axes it sweeps the 17 boundary planes of a 16³ chunk, builds a 16×16 face mask, and greedily merges adjacent faces when both material ID and normal direction match. A merged rectangle is emitted as one indexed quad: **4 vertices and 6 indices**. Mesh packets are split before reaching the 16-bit index limit.
 
-The same density field is used by:
-- exposed-surface mesh generation;
-- raycasting from the 3D camera;
-- sphere, capsule and box CSG edits;
-- material painting and local smoothing;
-- horizontal cut-plane intersections and cut caps.
+A one-sample density halo is captured on every side. The face-ownership rule assigns a boundary face to the chunk containing the solid sample, so adjacent chunks do not duplicate or omit the same face. Greedy geometry is intentionally block-aligned voxel geometry; it is not a smooth interpolated Surface Nets surface. The reduction in triangle count depends on how many coplanar faces can actually merge, so no fixed 10–50× reduction is assumed for every terrain shape.
 
-The source field and edit operations retain **0.1 m voxel spacing**. The Raylib surface renderer now uses one fixed **0.4 m sampling step** at every camera distance. It does not switch mesh resolution when zooming, keep parallel LOD caches or prewarm another tier. This keeps the same geometry density during camera movement. The fixed render step is a presentation sampling choice; it does not change the authoritative 0.1 m field or the resolution of voxel edits.
+The mesher is shared by static chunks and detached voxel fragments; both use Step=1.
 
-Chunk meshes are cached in 3D coordinates. A local edit dirties only intersecting chunks and neighbours whose sampling halo overlaps the edit.
+## Flat streaming and worker pipeline
 
-**Meshing pipeline:** the render thread copies only the sparse edited storage chunks needed by a render chunk into an immutable source snapshot. Persistent background workers pull jobs from a bounded `ConcurrentQueue`; a `SemaphoreSlim` signal wakes an idle worker as soon as a request is added. Density sampling, material capture, empty-chunk detection, surface extraction and geometry hashing run on the worker. Workers never call Raylib or OpenGL. There is no per-request `Task.Run` dispatch or frame-by-frame worker-launch polling. A queued request that has not started is cancelled when its chunk leaves the current view; stale completions are discarded by chunk/request revision.
+\`VoxelTerrainRenderer\` uses a single key: \`ChunkKey(X,Y,Z)\`. A chunk is 16³ samples everywhere.
 
-The render thread remains the sole owner of GPU resources. It uploads completed mesh packets with up to 60,000 vertices per packet, and keeps the existing VAO/VBOs resident until a genuinely different mesh is ready. Before upload, the renderer hashes vertex positions, normals, colors and indices. If the geometry hash matches the resident surface or cut cap, only the chunk's source revision is advanced: no `UploadMesh` or `UnloadMesh` is issued for that unchanged GPU mesh. A 3.0 ms upload target per frame (shared with detached-fragment meshes) bounds render-thread upload work. Old valid geometry remains visible until a changed replacement is completely uploaded, then the renderer swaps the mesh set atomically.
+1. The render thread discovers chunk AABBs intersecting the camera's view radius and frustum.
+2. It copies a small immutable snapshot from the sparse voxel field and enqueues a build request.
+3. Persistent worker threads wait on \`SemaphoreSlim\`, consume \`ConcurrentQueue\` requests and run Greedy Meshing. Workers never call Raylib/OpenGL.
+4. Workers publish CPU mesh packets through a completion queue.
+5. The render thread uploads packets with \`UploadMesh\` and draws the resident GPU meshes.
 
-HUD/diagnostics separate worker queue wait from completion-to-render-thread delivery delay, and report actual GPU upload/unload counts plus identical surface/cap cache hits. A GPU upload call cannot be preempted once submitted, so actual upload time and VRAM reuse must still be checked on the target GPU.
+The queue is bounded to 128 pending jobs. The pool uses 2–6 persistent workers based on the available processor count. GPU uploads remain round-robin, with a 4-mesh / 3 ms per-frame budget shared with detached-fragment meshes. A generation token protects CPU completions; a separate upload generation protects queued GPU packets.
 
-## Terrain editing
+Chunks whose bounds move completely outside the configured view radius are removed from the cache and their GPU meshes are unloaded. Chunks that remain in range are not regenerated merely because the camera moves. Mesh hashes prevent an identical replacement from causing another GPU upload.
 
-The voxel field exposes these operations:
+## CUT plane
 
-- `SetCell`, `FillBox`, `CarveBox`;
-- `AddSphere`, `CarveSphere`;
-- `AddCapsule`, `CarveCapsule`;
-- `PaintSphere`;
-- `SmoothSphere`.
+The base terrain uses the same GPU clip plane as before. The horizontal cap is now generated at Step=1 and greedily merges adjacent solid cut cells of the same material into flat +Y quads. The cap is offset by 0.006 m to avoid z-fighting. The cut cap is a separate mesh product, so changing the slice does not require rebuilding an unchanged base surface.
 
-These are CSG/density-field operations. They change the 3D volume rather than editing a surface-height number.
+The cut plane waits for 8 stable frames before requesting a new cap, avoiding one rebuild for every intermediate slider/key step. CUT cap geometry is generated from the same immutable chunk snapshot and is uploaded only on the render thread.
 
-### Viewer controls
+## Editing and detached fragments
 
-- **F3**: cycle edit mode — off, carve sphere, add sphere, paint sphere, smooth sphere, carve capsule, add capsule.
-- **Left mouse**: apply a sphere/paint/smooth operation; for capsule tools, press to set the first endpoint and release to set the second.
+The same authoritative density field backs voxel CSG edits, material painting, raycasts and navigation queries. Available edits include sphere/capsule/box carve and add, paint, smooth, ramp and plane flattening.
+
+Detached components use a bounded pool of at most 16 rigid fragments, 64 Step=1 mesh chunks per body and 32 MiB of fragment snapshots. Fragment bodies receive gravity, angular motion, approximate terrain support and body-to-body contacts. Settled fragments are incrementally merged into the master voxel field; they remain visible until the affected static terrain is current.
+
+This is a bounded first implementation, not a complete rigid-body fracture solver. Stress-based breakage, wall/edge collision and debris cascades are not implemented. Dynamic fragment state is not saved until it has merged into the master field.
+
+## Viewer controls
+
+- **F3**: cycle edit mode — off, carve sphere, add sphere, paint, smooth, carve/add capsule, carve/add box, carve/add ramp and flatten plane.
+- **Left mouse**: apply the selected tool; capsule tools use press/release for endpoints.
 - **F4**: cycle material ID.
 - **F5 / F6**: decrease / increase brush radius.
-- **F7 / F8**: undo / redo the last voxel edit (in-session history, bounded to 16 operations / 64 MiB).
-- The F3 tool cycle includes carve/add sphere, paint, smooth, carve/add capsule, carve/add box, carve/add ramp and **Flatten Plane**, which levels the selected area toward the hit surface plane with a smooth radial falloff.
+- **F7 / F8**: undo / redo the last in-session voxel edit.
 - **Shift + right mouse drag**: orbit the camera.
 - **Middle mouse drag**: pan.
 - **Mouse wheel**: zoom.
 - **WASD**: move camera focus.
-- **F1 / F2 / C**: focus the sample lower passage, upper passage or surface cutaway.
+- **F1 / F2 / C**: focus the lower passage, upper passage or surface cutaway.
 - **Q / E**, **PageUp / PageDown**: move the horizontal cut plane.
 
-The separate Heightmap fallback remains available from the terrain settings.
+The separate Heightmap fallback remains available from the terrain settings. The Voxel mode uses the flat Step=1 renderer directly.
 
-### Automatic edit persistence
+## Persistence
 
-The Raylib viewer restores edited voxel chunks at startup and autosaves after a short idle period, with a final save on exit. Default file: `%LOCALAPPDATA%\\RimClone\\voxel-terrain.rvx`. Override it with `RIMCLONE_VOXEL_SAVE_PATH`. The file contains sparse edit chunks only and is versioned against a fingerprint of the generated base terrain; a mismatched base world is rejected before edits are applied.
+The Raylib viewer restores edited voxel chunks at startup and autosaves after a short idle period, with a final save on exit. Default file: \`%LOCALAPPDATA%\\RimClone\\voxel-terrain.rvx\`. Override it with \`RIMCLONE_VOXEL_SAVE_PATH\`. The file stores sparse edit chunks and is versioned against a fingerprint of the generated base terrain.
 
-### Dynamic detached rock
+## Diagnostics and tests
 
-Carving sphere, capsule, box or ramp tools now runs a bounded local connected-component scan after the edit.
+The terrain pipeline log is written to \`%LOCALAPPDATA%\\RimClone\\logs\\terrain-pipeline.log\`. Frame summaries report fixed resolution, candidate/visible/cache counts, snapshot and worker time, queue wait, completion delivery, GPU upload time and cumulative upload/unload counts.
 
-- Connectivity is checked on a conservative 0.2 m occupancy grid; accepted fragment geometry is copied from the exact 0.1 m density/material field.
-- Components that touch the analysis-window boundary are treated as still attached and remain static.
-- A detached component becomes one rigid body, not thousands of voxel bodies. The pool is limited to 16 active fragments, 64 mesh chunks per body and 32 MiB of fragment snapshots.
-- A fragment snapshot stores signed density as `short` and material as `ushort` (4 bytes per sample/cell), and the mesher reads it directly through `IVoxelFieldSource`. No second `SparseVoxelField` is allocated for a moving rock.
-- Moving-fragment render meshes use a 0.2 m sampling step. The static terrain keeps the full 0.1 m source field.
-- Bodies receive gravity, angular motion, approximate terrain support and approximate body-to-body contacts. Slow grounded bodies sleep.
-- A settled fragment is incrementally resampled back into the one authoritative `WorldMap.Voxels` grid. Its current position and rotation are inverted to find source samples; density is merged with an SDF union. The job processes at most 12,000 world-grid samples per frame and emits one terrain change/undo record when complete.
-- The detached mesh remains visible until all visible overlapping static terrain meshes have been rebuilt, then its GPU meshes and snapshot are released.
-- F7/F8 also deactivate/reactivate fragment bodies in the same in-session edit history as the voxel carve.
+Run the CPU mesher checks locally:
 
-This is a bounded first implementation, not a full rigid-body fracture solver: there is no stress-based breakage, wall/edge collision or debris cascade. Dynamic bodies that have not settled are not yet included in the voxel edit save; once merged into the master field, their terrain is saved normally.
-
-**Streaming boundary:** the renderer evicts distant GPU meshes from its bounded cache, but edited CPU voxel chunks are still retained by the main field in memory. A higher-level flat-planet region pager (active sector set around the camera/units, compressed inactive sector pages, and deterministic reload by global sector coordinates) is not implemented yet. The fragment-to-master-grid merge above is implemented independently of that future pager.
-
-### Fixed-resolution mesh cache and diagnostics
-
-The active viewer mesh step is always 4 source voxels (0.4 m); zooming does not change it. The renderer selects at most 4,096 frustum candidates, retains up to 6,000 chunk entries and queues up to 128 mesh jobs. The view radius is bounded to keep candidate discovery and the local editable scene predictable. The geometry is sampled from the authoritative 0.1 m signed-distance field, and the edit field itself is never downsampled or rewritten.
-
-The mesher test executable still compares multiple sampling steps as a quality regression tool. On the narrow-ridge fixture, maximum SDF error was 0.38 m at step 2, 0.98 m at step 4, 1.19 m at step 8 and 1.28 m at step 40. It also checks shared chunk-border samples and benchmarks CPU capture plus mesh extraction. These are test probes, not runtime camera LOD tiers.
-
-Run locally:
-
-```powershell
+\`\`\`powershell
 dotnet run --project Render.Raylib.Tests/Render.Raylib.Tests.csproj -c Release
-```
+\`\`\`
 
-The viewer writes asynchronous diagnostics to `%LOCALAPPDATA%\RimClone\logs\terrain-pipeline.log`. `MESH_BUILT` entries include LOD, chunk coordinates, source revision, worker milliseconds, queue wait, vertices and triangles. `REBUILD_REPEAT` marks a second build of the same chunk at the same source/palette revision. Other event types record cancellations, stale results and worker failures. A `FRAME_SUMMARY` is written every 120 frames with queue depth, worker count, snapshot/build/upload time and cumulative counters.
+The test executable checks shared Step=1 halo samples, Greedy rectangle reduction, material boundaries, flat CUT caps, exact adjacent-chunk surface boundaries and empty-chunk material-capture avoidance.
 
-The CPU benchmark does not call the GPU. Actual GPU upload timing and packet counts are measured by the running viewer and printed in its HUD/log.
-
-### Fixed-resolution mesh streaming
-
-Every rendered terrain chunk uses the same 0.4 m sampling step. Camera zoom changes only the visible chunk set, not mesh density. There are no adjacent-tier prewarm jobs and no parent/child LOD fallback transitions.
-
-Chunk source snapshots are created from the sparse edited-chunk store on the render thread, then workers perform density capture, material sampling, empty-chunk rejection and triangle extraction. Completed packets are uploaded on the render thread; the previous valid surface remains visible until a replacement is complete. The worker pool is sized from the available logical processor count, with a maximum of six workers.
-
-Cutaway cap updates are independent from the base surface. If only the cut plane changes, the worker request has `surface=false, cutCap=true`; it extracts and uploads only the horizontal cap. The existing base terrain mesh is neither regenerated nor swapped. Each cap cell is split by the same fixed diagonal before convex-triangle clipping, so diagonal saddle cases cannot create a self-crossing four-point polygon. Shared edge samples, cut-plane coordinates and duplicate intersection points use consistent ownership and epsilon rules across chunk boundaries. A voxel edit that affects the base surface requests `surface=true`, and requests a cap as well only if the edit intersects the active cut plane.
-
-### Cutaway rebuild behavior
-
-Moving the horizontal slice still updates the GPU clip plane immediately. The cap mesh waits until the selected 0.1 m layer has remained unchanged for 8 frames, then rebuilds. This avoids rebuilding cut caps for every intermediate slider/key step. HUD mesh-build counters are per-frame counters.
-
-## Important integration boundaries
-
-The Raylib terrain viewer is still an isolated presentation path. Edited regions now use `VoxelNavigationSystem`: it extracts multiple upward-facing support surfaces at 0.5 m intervals and routes in `(X,Y,floor)` space. Movement keeps the selected floor and rejects steps where the SDF vertical capsule intersects solid terrain. Untouched terrain remains on the compact legacy XY route grid. Navigation between distinct 128 m voxel regions and vertical gravity/fall response are not complete. Pawn-to-pawn separation is still the horizontal crowd solver.
-
-Voxel edit chunks are serialized with a compressed, versioned format. The viewer loads the edit file after deterministic base-world generation, autosaves changes and writes a final save on exit. The edit set supports sphere/capsule/box/ramp CSG, local smoothing, material paint and plane flattening. Voxel and detached-fragment undo/redo are in-session; campaign save-slot integration and persistence of dynamic body state are not yet implemented.
-
-Performance budgets and sparse allocation are implemented in source, but the new renderer has not yet been benchmarked on target hardware. Do not treat the configured per-frame budgets as measured FPS.
+These code-path changes have not yet been benchmarked on target hardware. Triangle reduction and frame rate must be measured using the actual edited terrain and configured view radius; the configured upload budget is not a measured FPS result.
 
 ## Build
 
 From the repository root:
 
-```powershell
-dotnet restore .\RimClone.sln
-dotnet build .\RimClone.sln --configuration Release
-dotnet run --project .\App\App.csproj --configuration Release
-```
+\`\`\`powershell
+dotnet restore .\\RimClone.sln
+dotnet build .\\RimClone.sln --configuration Release
+dotnet run --project .\\App\\App.csproj --configuration Release
+\`\`\`
