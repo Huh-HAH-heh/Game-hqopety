@@ -110,6 +110,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public double VoxelWorkerBuildMilliseconds => _densityVoxelRenderer?.WorkerBuildMillisecondsLastFrame ?? 0d;
     public double VoxelLastWorkerBuildMilliseconds => _densityVoxelRenderer?.LastWorkerBuildMilliseconds ?? 0d;
     public double VoxelLastQueueWaitMilliseconds => _densityVoxelRenderer?.LastWorkerQueueWaitMilliseconds ?? 0d;
+    public double VoxelLastResultDeliveryMilliseconds => _densityVoxelRenderer?.LastWorkerResultDeliveryMilliseconds ?? 0d;
     public int VoxelBuildsCompletedLastFrame => _densityVoxelRenderer?.BuildsCompletedLastFrame ?? 0;
     public int VoxelLastBuildStep => _densityVoxelRenderer?.LastBuildStep ?? 0;
     public int VoxelLastBuildVertices => _densityVoxelRenderer?.LastBuildVertices ?? 0;
@@ -122,6 +123,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public long VoxelTotalRepeatedBuilds => _densityVoxelRenderer?.TotalRepeatedBuilds ?? 0;
     public long VoxelTotalDuplicateRequests => _densityVoxelRenderer?.TotalDuplicateRequestAttempts ?? 0;
     public long VoxelTotalQueueSaturated => _densityVoxelRenderer?.TotalQueueSaturated ?? 0;
+    public long VoxelTotalGpuUnloads => _densityVoxelRenderer?.TotalGpuUnloads ?? 0;
+    public long VoxelTotalIdenticalSurfaceSkips => _densityVoxelRenderer?.TotalIdenticalSurfaceSkips ?? 0;
+    public long VoxelTotalIdenticalCutSkips => _densityVoxelRenderer?.TotalIdenticalCutSkips ?? 0;
     public string VoxelDiagnosticsLogPath => _densityVoxelRenderer?.DiagnosticsLogPath ?? string.Empty;
     public int VoxelVisibleCandidates => _densityVoxelRenderer?.VisibleCandidatesLastFrame ?? 0;
     public int VoxelFrustumCandidates => _densityVoxelRenderer?.FrustumCandidatesLastFrame ?? 0;
