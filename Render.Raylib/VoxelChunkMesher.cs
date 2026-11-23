@@ -327,104 +327,104 @@ internal static class VoxelChunkMesher
             ushort[]? indices = null;
 
             try
+        {
+            vertices = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+            normals = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+            colors = ArrayPool<byte>.Shared.Rent(vertexCount * 4);
+            indices = ArrayPool<ushort>.Shared.Rent(indexCount);
+
+            _vertices.CopyTo(vertices, 0);
+            _normals.CopyTo(normals, 0);
+            _indices.CopyTo(indices, 0);
+
+            for (int i = 0; i < vertexCount; i++)
             {
-                vertices = ArrayPool<Vector3>.Shared.Rent(vertexCount);
-                normals = ArrayPool<Vector3>.Shared.Rent(vertexCount);
-                colors = ArrayPool<byte>.Shared.Rent(vertexCount * 4);
-                indices = ArrayPool<ushort>.Shared.Rent(indexCount);
-
-                _vertices.CopyTo(vertices, 0);
-                _normals.CopyTo(normals, 0);
-                _indices.CopyTo(indices, 0);
-
-                for (int i = 0; i < vertexCount; i++)
-                {
-                    int offset = i * 4;
-                    colors[offset] = _colors[i].R;
-                    colors[offset + 1] = _colors[i].G;
-                    colors[offset + 2] = _colors[i].B;
-                    colors[offset + 3] = _colors[i].A;
-                }
-
-                _output.Add(new VoxelMeshData(
-                    vertices,
-                    normals,
-                    colors,
-                    indices,
-                    vertexCount,
-                    indexCount));
-            }
-            catch
-            {
-                if (vertices != null)
-                    ArrayPool<Vector3>.Shared.Return(vertices);
-                if (normals != null)
-                    ArrayPool<Vector3>.Shared.Return(normals);
-                if (colors != null)
-                    ArrayPool<byte>.Shared.Return(colors);
-                if (indices != null)
-                    ArrayPool<ushort>.Shared.Return(indices);
-                throw;
+                int offset = i * 4;
+                colors[offset] = _colors[i].R;
+                colors[offset + 1] = _colors[i].G;
+                colors[offset + 2] = _colors[i].B;
+                colors[offset + 3] = _colors[i].A;
             }
 
-            _vertices.Clear();
-            _normals.Clear();
-            _colors.Clear();
-            _indices.Clear();
+            _output.Add(new VoxelMeshData(
+                vertices,
+                normals,
+                colors,
+                indices,
+                vertexCount,
+                indexCount));
+        }
+        catch
+        {
+            if (vertices != null)
+                ArrayPool<Vector3>.Shared.Return(vertices);
+            if (normals != null)
+                ArrayPool<Vector3>.Shared.Return(normals);
+            if (colors != null)
+                ArrayPool<byte>.Shared.Return(colors);
+            if (indices != null)
+                ArrayPool<ushort>.Shared.Return(indices);
+            throw;
         }
 
-        private void AddVertex(SurfaceVertex vertex, Color color, Vector3 fallbackNormal)
+        _vertices.Clear();
+        _normals.Clear();
+        _colors.Clear();
+        _indices.Clear();
+    }
+
+    private void AddVertex(SurfaceVertex vertex, Color color, Vector3 fallbackNormal)
+    {
+        _vertices.Add(vertex.Position);
+        _normals.Add(NormalizeOr(vertex.Normal, fallbackNormal));
+        _colors.Add(color);
+    }
+}
+
+public static Mesh[] BuildSurface(
+    IVoxelFieldSource field,
+    int chunkX,
+    int chunkY,
+    int chunkZ,
+    int step,
+    TerrainPalette palette)
+{
+    VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ, step);
+    while (!input.IsComplete)
+        input.CaptureNext(field, input.CaptureCount);
+    return Upload(BuildSurfaceData(input, palette));
+}
+
+public static Mesh UploadOne(VoxelMeshData source)
+{
+    Mesh mesh = new(source.VertexCount, source.TriangleCount);
+    mesh.AllocVertices();
+    mesh.AllocNormals();
+    mesh.AllocColors();
+    mesh.AllocIndices();
+    source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
+    source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
+    source.Colors.CopyTo(mesh.ColorsAs<byte>());
+    source.Indices.CopyTo(mesh.IndicesAs<ushort>());
+    UploadMesh(ref mesh, false);
+    return mesh;
+}
+
+public static Mesh[] Upload(VoxelMeshData[] data)
+{
+    if (data.Length == 0)
+        return Array.Empty<Mesh>();
+
+    Mesh[] meshes = new Mesh[data.Length];
+    int uploaded = 0;
+    try
+    {
+        for (; uploaded < data.Length; uploaded++)
         {
-            _vertices.Add(vertex.Position);
-            _normals.Add(NormalizeOr(vertex.Normal, fallbackNormal));
-            _colors.Add(color);
+            meshes[uploaded] = UploadOne(data[uploaded]);
+            data[uploaded].ReturnCpuArrays();
         }
-    }
-
-    public static Mesh[] BuildSurface(
-        IVoxelFieldSource field,
-        int chunkX,
-        int chunkY,
-        int chunkZ,
-        int step,
-        TerrainPalette palette)
-    {
-        VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ, step);
-        while (!input.IsComplete)
-            input.CaptureNext(field, input.CaptureCount);
-        return Upload(BuildSurfaceData(input, palette));
-    }
-
-    public static Mesh UploadOne(VoxelMeshData source)
-    {
-        Mesh mesh = new(source.VertexCount, source.TriangleCount);
-        mesh.AllocVertices();
-        mesh.AllocNormals();
-        mesh.AllocColors();
-        mesh.AllocIndices();
-        source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
-        source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
-        source.Colors.CopyTo(mesh.ColorsAs<byte>());
-        source.Indices.CopyTo(mesh.IndicesAs<ushort>());
-        UploadMesh(ref mesh, false);
-        return mesh;
-    }
-
-    public static Mesh[] Upload(VoxelMeshData[] data)
-    {
-        if (data.Length == 0)
-            return Array.Empty<Mesh>();
-
-        Mesh[] meshes = new Mesh[data.Length];
-        int uploaded = 0;
-        try
-        {
-            for (; uploaded < data.Length; uploaded++)
-            {
-                meshes[uploaded] = UploadOne(data[uploaded]);
-                data[uploaded].ReturnCpuArrays();
-            }
-            return meshes;
+        return meshes;
         }
         catch
         {
