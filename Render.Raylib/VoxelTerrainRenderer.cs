@@ -1217,8 +1217,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
             }
 
-            bool uploadedMesh = false;
-
             // One real mesh upload per turn. This guarantees a very large chunk
             // cannot consume every frame's budget while later chunks wait forever.
             if (result.HasSurface &&
@@ -1232,14 +1230,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 {
                     mesh = VoxelChunkMesher.UploadOne(source);
                 }
-                finally
+                catch (Exception exception)
                 {
-                    source.ReturnCpuArrays();
+                    _totalBuildFailed++;
+                    entry.FailedRevision = request.RequestRevision;
+                    _logger.Write(
+                        "MESH_GPU_UPLOAD_FAILED",
+                        $"kind=surface step={key.Step} chunk=({key.X},{key.Y},{key.Z}) error=\"{exception.Message}\"");
+                    InvalidatePendingBuild(entry);
+                    continue;
                 }
 
+                source.ReturnCpuArrays();
                 entry.SurfaceUploadIndex = meshIndex + 1;
                 entry.UploadingSurface.Add(mesh);
-                uploadedMesh = true;
 
                 GpuUploadsLastFrame++;
                 _totalGpuUploads++;
@@ -1259,14 +1263,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 {
                     mesh = VoxelChunkMesher.UploadOne(source);
                 }
-                finally
+                catch (Exception exception)
                 {
-                    source.ReturnCpuArrays();
+                    _totalBuildFailed++;
+                    entry.FailedRevision = request.RequestRevision;
+                    _logger.Write(
+                        "MESH_GPU_UPLOAD_FAILED",
+                        $"kind=cut-cap step={key.Step} chunk=({key.X},{key.Y},{key.Z}) error=\"{exception.Message}\"");
+                    InvalidatePendingBuild(entry);
+                    continue;
                 }
 
+                source.ReturnCpuArrays();
                 entry.CutUploadIndex = meshIndex + 1;
                 entry.UploadingCutCap.Add(mesh);
-                uploadedMesh = true;
 
                 GpuUploadsLastFrame++;
                 _totalGpuUploads++;
@@ -1338,7 +1348,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.CutUploadIndex = 0;
 
             // A completed upload turn never gets re-enqueued.
-            _ = uploadedMesh;
         }
 
         GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
