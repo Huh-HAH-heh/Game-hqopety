@@ -550,11 +550,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             maximumViewDistanceMeters,
             ref frustumTests);
 
-        FrustumCandidatesLastFrame = frustumTests;
-
         EvictUnusedChunks(camera.Position);
         UploadReadyMeshes();
-        SelectVisibleLodMeshes(field, candidates, step16Fallbacks, step4Fallbacks, step1Parents);
+        SelectVisibleLodMeshes(
+            field,
+            candidates,
+            step16Fallbacks,
+            step4Fallbacks,
+            step1Parents,
+            camera,
+            viewportWidth,
+            viewportHeight,
+            maximumViewDistanceMeters,
+            ref frustumTests);
+        FrustumCandidatesLastFrame = frustumTests;
         double remainingUploadBudget = Math.Max(
             0d,
             GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
@@ -971,7 +980,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         List<Candidate> activeLeaves,
         List<Candidate> step16Fallbacks,
         List<Candidate> step4Fallbacks,
-        List<Candidate> step1Parents)
+        List<Candidate> step1Parents,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        ref int frustumTests)
     {
         _step16Coverage.Clear();
         _step4Coverage.Clear();
@@ -997,8 +1011,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach (Candidate candidate in activeLeaves)
         {
-            if (candidate.Key.Step == LodFarStep)
-                AddCachedFallback(candidate.Key);
+            if (candidate.Key.Step != LodFarStep)
+                continue;
+
+            if (!AddCachedFallback(candidate.Key))
+            {
+                AddPreviousVisibleDescendants(
+                    candidate.Key,
+                    camera,
+                    viewportWidth,
+                    viewportHeight,
+                    maximumViewDistanceMeters,
+                    ref frustumTests);
+            }
         }
 
         // Keep the previous frame's rendered descendants when the new hierarchy
@@ -1009,7 +1034,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
 
             if (AddCachedFallback(farParent.Key) ||
-                AddPreviousVisibleDescendants(farParent.Key))
+                AddPreviousVisibleDescendants(
+                    farParent.Key,
+                    camera,
+                    viewportWidth,
+                    viewportHeight,
+                    maximumViewDistanceMeters,
+                    ref frustumTests))
             {
                 _farFallbackHeldKeys.Add(farParent.Key);
             }
@@ -1030,7 +1061,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
 
             if (AddCachedFallback(middle.Key) ||
-                AddPreviousVisibleDescendants(middle.Key))
+                AddPreviousVisibleDescendants(
+                    middle.Key,
+                    camera,
+                    viewportWidth,
+                    viewportHeight,
+                    maximumViewDistanceMeters,
+                    ref frustumTests))
             {
                 continue;
             }
@@ -1129,9 +1166,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
-    private bool AddPreviousVisibleDescendants(ChunkKey parent)
+    private bool AddPreviousVisibleDescendants(
+        ChunkKey parent,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        ref int frustumTests)
     {
         bool added = false;
+        const float sphereScale = 0.8660254038f;
+        float voxelSize = SparseVoxelField.VoxelSizeMeters;
 
         foreach ((ChunkKey key, ChunkEntry previousEntry) in _previousVisible)
         {
@@ -1139,6 +1184,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 !_chunks.TryGetValue(key, out ChunkEntry? currentEntry) ||
                 !ReferenceEquals(currentEntry, previousEntry) ||
                 !IsRenderable(currentEntry))
+                continue;
+
+            int span = ChunkCells * key.Step;
+            Vector3 center = new(
+                (key.X * span + span * 0.5f) * voxelSize,
+                (key.Y * span + span * 0.5f) * voxelSize,
+                (key.Z * span + span * 0.5f) * voxelSize);
+
+            frustumTests++;
+            if (!TerrainFrustum.IsSphereVisible(
+                camera,
+                center,
+                span * voxelSize * sphereScale,
+                viewportWidth,
+                viewportHeight,
+                maximumViewDistanceMeters))
                 continue;
 
             AddVisible(key, currentEntry);
@@ -1235,7 +1296,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 AddCandidate(children, x, y, z, LodNearStep, camera.Position);
             }
 
-            // The closest child chunks receive the limited prewarm budget first.
+            // The closest child chunks are queued first; worker queue capacity
+            // is the only admission limit.
             children.Sort(static (a, b) =>
                 a.DistanceSquared.CompareTo(b.DistanceSquared));
 
