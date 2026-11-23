@@ -198,6 +198,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public bool Ready;
     }
 
+    private readonly record struct VisibleRange(int Start, int Count);
+
     private readonly record struct ReadyUpload(
         ChunkKey Key,
         ChunkEntry Entry,
@@ -251,6 +253,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _previousVisible = new();
+    private readonly Dictionary<ChunkKey, VisibleRange> _previousVisibleRanges = new();
     private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
     private readonly HashSet<ChunkKey> _farFallbackHeldKeys = new();
     private readonly Material _material;
@@ -492,6 +495,40 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             _previousVisible.Add((key, entry));
             _cacheProtectedKeys.Add(key);
+        }
+
+        _previousVisible.Sort(static (left, right) =>
+        {
+            ChunkKey leftParent = GetParentKey(left.Key, LodFarStep);
+            ChunkKey rightParent = GetParentKey(right.Key, LodFarStep);
+            int order = leftParent.X.CompareTo(rightParent.X);
+            if (order != 0) return order;
+            order = leftParent.Y.CompareTo(rightParent.Y);
+            if (order != 0) return order;
+            order = leftParent.Z.CompareTo(rightParent.Z);
+            if (order != 0) return order;
+            return left.Key.Step.CompareTo(right.Key.Step);
+        });
+
+        _previousVisibleRanges.Clear();
+        int previousStart = 0;
+        while (previousStart < _previousVisible.Count)
+        {
+            ChunkKey parent = GetParentKey(
+                _previousVisible[previousStart].Key,
+                LodFarStep);
+            int previousEnd = previousStart + 1;
+
+            while (previousEnd < _previousVisible.Count &&
+                GetParentKey(_previousVisible[previousEnd].Key, LodFarStep) == parent)
+            {
+                previousEnd++;
+            }
+
+            _previousVisibleRanges[parent] = new VisibleRange(
+                previousStart,
+                previousEnd - previousStart);
+            previousStart = previousEnd;
         }
 
         _visible.Clear();
@@ -1060,17 +1097,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (nearChildrenReady)
                 continue;
 
-            if (AddCachedFallback(middle.Key) ||
-                AddPreviousVisibleDescendants(
-                    middle.Key,
-                    camera,
-                    viewportWidth,
-                    viewportHeight,
-                    maximumViewDistanceMeters,
-                    ref frustumTests))
-            {
+            if (AddCachedFallback(middle.Key))
                 continue;
-            }
 
             // Last-resort streaming fallback: show already resident Step1
             // children while missing siblings are still being built.
@@ -1174,12 +1202,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float maximumViewDistanceMeters,
         ref int frustumTests)
     {
+        ChunkKey farParent = GetParentKey(parent, LodFarStep);
+        if (!_previousVisibleRanges.TryGetValue(
+            farParent,
+            out VisibleRange range))
+            return false;
+
         bool added = false;
         const float sphereScale = 0.8660254038f;
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        int end = range.Start + range.Count;
 
-        foreach ((ChunkKey key, ChunkEntry previousEntry) in _previousVisible)
+        for (int i = range.Start; i < end; i++)
         {
+            (ChunkKey key, ChunkEntry previousEntry) = _previousVisible[i];
+
             if (!IsChildOf(key, parent) ||
                 !_chunks.TryGetValue(key, out ChunkEntry? currentEntry) ||
                 !ReferenceEquals(currentEntry, previousEntry) ||
