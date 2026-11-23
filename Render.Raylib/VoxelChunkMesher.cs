@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Threading;
@@ -15,24 +16,52 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class VoxelMeshData
 {
+    private int _returned;
+
     public Vector3[] Vertices { get; }
     public Vector3[] Normals { get; }
     public byte[] Colors { get; }
     public ushort[] Indices { get; }
 
-    public int VertexCount => Vertices.Length;
-    public int TriangleCount => Indices.Length / 3;
+    public int VertexCount { get; }
+    public int IndexCount { get; }
+    public int TriangleCount => IndexCount / 3;
 
     public VoxelMeshData(
         Vector3[] vertices,
         Vector3[] normals,
         byte[] colors,
-        ushort[] indices)
+        ushort[] indices,
+        int vertexCount,
+        int indexCount)
     {
+        if (vertexCount <= 0 ||
+            indexCount <= 0 ||
+            vertexCount > vertices.Length ||
+            vertexCount > normals.Length ||
+            vertexCount * 4 > colors.Length ||
+            indexCount > indices.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(vertexCount));
+        }
+
         Vertices = vertices;
         Normals = normals;
         Colors = colors;
         Indices = indices;
+        VertexCount = vertexCount;
+        IndexCount = indexCount;
+    }
+
+    public void ReturnCpuArrays()
+    {
+        if (Interlocked.Exchange(ref _returned, 1) != 0)
+            return;
+
+        ArrayPool<Vector3>.Shared.Return(Vertices);
+        ArrayPool<Vector3>.Shared.Return(Normals);
+        ArrayPool<byte>.Shared.Return(Colors);
+        ArrayPool<ushort>.Shared.Return(Indices);
     }
 }
 
@@ -283,24 +312,56 @@ internal static class VoxelChunkMesher
 
         public void Flush()
         {
-            if (_vertices.Count == 0)
+            int vertexCount = _vertices.Count;
+            if (vertexCount == 0)
                 return;
 
-            byte[] colors = new byte[_colors.Count * 4];
-            for (int i = 0; i < _colors.Count; i++)
-            {
-                int offset = i * 4;
-                colors[offset] = _colors[i].R;
-                colors[offset + 1] = _colors[i].G;
-                colors[offset + 2] = _colors[i].B;
-                colors[offset + 3] = _colors[i].A;
-            }
+            int indexCount = _indices.Count;
+            Vector3[]? vertices = null;
+            Vector3[]? normals = null;
+            byte[]? colors = null;
+            ushort[]? indices = null;
 
-            _output.Add(new VoxelMeshData(
-                _vertices.ToArray(),
-                _normals.ToArray(),
-                colors,
-                _indices.ToArray()));
+            try
+            {
+                vertices = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+                normals = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+                colors = ArrayPool<byte>.Shared.Rent(vertexCount * 4);
+                indices = ArrayPool<ushort>.Shared.Rent(indexCount);
+
+                _vertices.CopyTo(vertices, 0);
+                _normals.CopyTo(normals, 0);
+                _indices.CopyTo(indices, 0);
+
+                for (int i = 0; i < vertexCount; i++)
+                {
+                    int offset = i * 4;
+                    colors[offset] = _colors[i].R;
+                    colors[offset + 1] = _colors[i].G;
+                    colors[offset + 2] = _colors[i].B;
+                    colors[offset + 3] = _colors[i].A;
+                }
+
+                _output.Add(new VoxelMeshData(
+                    vertices,
+                    normals,
+                    colors,
+                    indices,
+                    vertexCount,
+                    indexCount));
+            }
+            catch
+            {
+                if (vertices != null)
+                    ArrayPool<Vector3>.Shared.Return(vertices);
+                if (normals != null)
+                    ArrayPool<Vector3>.Shared.Return(normals);
+                if (colors != null)
+                    ArrayPool<byte>.Shared.Return(colors);
+                if (indices != null)
+                    ArrayPool<ushort>.Shared.Return(indices);
+                throw;
+            }
 
             _vertices.Clear();
             _normals.Clear();
@@ -337,10 +398,14 @@ internal static class VoxelChunkMesher
         mesh.AllocNormals();
         mesh.AllocColors();
         mesh.AllocIndices();
-        source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
-        source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
-        source.Colors.CopyTo(mesh.ColorsAs<byte>());
-        source.Indices.CopyTo(mesh.IndicesAs<ushort>());
+        source.Vertices.AsSpan(0, source.VertexCount)
+            .CopyTo(mesh.VerticesAs<Vector3>());
+        source.Normals.AsSpan(0, source.VertexCount)
+            .CopyTo(mesh.NormalsAs<Vector3>());
+        source.Colors.AsSpan(0, source.VertexCount * 4)
+            .CopyTo(mesh.ColorsAs<byte>());
+        source.Indices.AsSpan(0, source.IndexCount)
+            .CopyTo(mesh.IndicesAs<ushort>());
         UploadMesh(ref mesh, false);
         return mesh;
     }
@@ -357,11 +422,15 @@ internal static class VoxelChunkMesher
             for (; uploaded < data.Length; uploaded++)
             {
                 meshes[uploaded] = UploadOne(data[uploaded]);
+                data[uploaded].ReturnCpuArrays();
             }
             return meshes;
         }
         catch
         {
+            for (int i = 0; i < data.Length; i++)
+                data[i].ReturnCpuArrays();
+
             for (int i = 0; i < uploaded; i++)
                 UnloadMesh(meshes[i]);
             throw;
@@ -466,6 +535,8 @@ internal static class VoxelChunkMesher
         List<VoxelMeshData> output = new(2);
         MeshBatch batch = new(output);
 
+        try
+        {
         // Each sign-changing density edge belongs to exactly one chunk: the
         // chunk containing its lower-coordinate sample. Neighbouring chunks
         // use identical source samples and the same edge ownership rule.
@@ -520,6 +591,13 @@ internal static class VoxelChunkMesher
 
         batch.Flush();
         return output.ToArray();
+        }
+        catch
+        {
+            foreach (VoxelMeshData mesh in output)
+                mesh.ReturnCpuArrays();
+            throw;
+        }
     }
 
     private static int GetSurfaceCellIndex(int x, int y, int z, int side) =>
@@ -606,6 +684,8 @@ internal static class VoxelChunkMesher
         List<VoxelMeshData> output = new(1);
         MeshBatch batch = new(output);
 
+        try
+        {
         // Split every cut cell along one consistent diagonal. Clipping convex
         // triangles avoids self-crossing polygons in diagonal-inside cases.
         ReadOnlySpan<int> triangleA = stackalloc int[] { 0, 1, 2 };
@@ -665,6 +745,13 @@ internal static class VoxelChunkMesher
 
         batch.Flush();
         return output.ToArray();
+        }
+        catch
+        {
+            foreach (VoxelMeshData mesh in output)
+                mesh.ReturnCpuArrays();
+            throw;
+        }
     }
 
     private static SlicePoint MakeSlicePoint(
