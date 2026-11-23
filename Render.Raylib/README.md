@@ -19,7 +19,7 @@ The initial canyon generator still supplies the broad base surface from its exis
 
 ## Surface extraction and rendering
 
-`VoxelChunkMesher` extracts the visible 3D isosurface from density samples using marching tetrahedra. Normals come from the density gradient. The renderer does not create terrain by extruding the top of each XY column.
+`VoxelChunkMesher` extracts the visible 3D isosurface from density samples using Surface Nets. Each active density cell contributes one shared surface vertex; sign-changing lattice edges connect four neighbouring vertices into quads. Vertex normals come from the density gradient. A symmetric two-sample halo makes border geometry and central-difference normals agree across neighbouring chunks. The renderer does not create terrain by extruding the top of each XY column.
 
 The same density field is used by:
 - exposed-surface mesh generation;
