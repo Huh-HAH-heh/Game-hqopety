@@ -179,7 +179,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     // Main-thread-owned round-robin queue. A chunk gets one upload turn,
     // then moves to the tail if more meshes remain.
-    private readonly Queue<ChunkKey> _readyUploadQueue = new();
+    private readonly ConcurrentQueue<ChunkKey> _readyUploadQueue = new();
     private readonly HashSet<ChunkKey> _readyUploadKeys = new();
     private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
     private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
@@ -550,7 +550,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"snapshotMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
                 $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
-                $"workers={RunningMeshJobs} queue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} " +
+                $"workers={RunningMeshJobs} queue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} gpuReady={_readyUploadQueue.Count} " +
                 $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
                 $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
                 $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
@@ -1198,7 +1198,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                 break;
 
-            ChunkKey key = _readyUploadQueue.Dequeue();
+            if (!_readyUploadQueue.TryDequeue(out ChunkKey key))
+                break;
+
             _readyUploadKeys.Remove(key);
             visited++;
 
