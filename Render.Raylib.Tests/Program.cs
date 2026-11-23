@@ -90,7 +90,7 @@ internal static class Program
             int triangles = CountTriangles(meshes);
             bool normalsValid = HasFiniteUnitNormals(meshes);
 
-            // A flat 16x16 terrain patch is represented by one rectangle:
+            // A flat 64x64 terrain patch is represented by one rectangle:
             // four unique quad vertices and two indexed triangles.
             bool reduced = vertices == 4 && triangles == 2;
             return (
@@ -118,7 +118,7 @@ internal static class Program
             int vertices = CountVertices(meshes);
             int triangles = CountTriangles(meshes);
 
-            // Two materials divide the 16x16 plane into two mergeable rectangles.
+            // Two materials divide the 64x64 plane into two mergeable rectangles.
             bool splitCorrectly = vertices == 8 && triangles == 4;
             return (
                 splitCorrectly,
@@ -337,7 +337,7 @@ internal static class Program
                 return -1f;
             }
 
-            // A perfectly flat solid layer from the bottom to voxel Y=19.
+            // A perfectly flat solid layer from the bottom to the configured surface height.
             return y < _surfaceHeight ? 1f : -1f;
         }
 
