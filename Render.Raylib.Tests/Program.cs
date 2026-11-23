@@ -14,7 +14,7 @@ internal static class Program
         Console.WriteLine($"Runtime: {Environment.Version} | OS: {Environment.OSVersion}");
         Console.WriteLine($"Processor count: {Environment.ProcessorCount}");
 
-        Run("LOD chunk borders use identical source samples", TestChunkBorders, ref failures);
+        Run("Surface Nets chunk borders use identical source samples", TestChunkBorders, ref failures);
         Run("Uniform chunks skip all material samples", TestDensityOnlySkipsMaterials, ref failures);
         Run("Reduced LOD preserves more SDF detail than legacy 40-step LOD",
             TestLodApproximation, ref failures);
@@ -54,12 +54,14 @@ internal static class Program
             VoxelChunkBuildInput left = Capture(field, 0, chunkY, 0, step);
             VoxelChunkBuildInput right = Capture(field, 1, chunkY, 0, step);
 
+            const int sampleSide = SparseVoxelField.ChunkSize + 4;
+            const int samplePlane = sampleSide * sampleSide;
             int mismatches = 0;
-            for (int z = 0; z < 19; z++)
-            for (int y = 0; y < 19; y++)
+            for (int z = 0; z < sampleSide; z++)
+            for (int y = 0; y < sampleSide; y++)
             {
-                float a = left.DensitySamples[17 + y * 19 + z * 19 * 19];
-                float b = right.DensitySamples[1 + y * 19 + z * 19 * 19];
+                float a = left.DensitySamples[18 + y * sampleSide + z * samplePlane];
+                float b = right.DensitySamples[2 + y * sampleSide + z * samplePlane];
                 if (MathF.Abs(a - b) > 0.00001f)
                     mismatches++;
             }
