@@ -693,21 +693,52 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void StartQueuedBuilds(SparseVoxelField field)
     {
-        while (_activeMeshWorkers < MaximumMeshWorkers &&
-            _buildQueue.Count > 0)
+        if (_buildQueue.Count == 0)
+            return;
+
+        // Camera movement can make already-queued requests obsolete. Re-rank
+        // the small bounded queue by the current terrain-focus distance and
+        // discard requests that are no longer in the visible set.
+        List<BuildRequest> prioritized = new(_buildQueue.Count);
+        while (_buildQueue.Count > 0)
+            prioritized.Add(_buildQueue.Dequeue());
+
+        prioritized.Sort(static (a, b) =>
+            a.Entry.PriorityDistanceSquared.CompareTo(b.Entry.PriorityDistanceSquared));
+
+        foreach (BuildRequest request in prioritized)
         {
-            BuildRequest request = _buildQueue.Dequeue();
             ChunkEntry entry = request.Entry;
             if (!entry.BuildQueued ||
                 entry.RequestRevision != request.RequestRevision ||
                 request.PaletteVersion != _paletteVersion ||
                 !_chunks.TryGetValue(request.Key, out ChunkEntry? current) ||
-                !ReferenceEquals(current, entry))
+                !ReferenceEquals(current, entry) ||
+                !_visibleCandidateKeys.Contains(request.Key))
+            {
+                if (entry.BuildQueued &&
+                    entry.RequestRevision == request.RequestRevision)
+                {
+                    entry.BuildQueued = false;
+                }
+
+                request.Cancellation.Dispose();
+                _totalBuildCancelled++;
                 continue;
+            }
+
+            if (_activeMeshWorkers >= MaximumMeshWorkers)
+            {
+                _buildQueue.Enqueue(request);
+                continue;
+            }
 
             entry.BuildQueued = false;
             if (request.BaseVersion != field.BaseVersion)
+            {
+                request.Cancellation.Dispose();
                 continue;
+            }
 
             entry.RunningBuild = request;
             request.Task = Task.Run(() =>
