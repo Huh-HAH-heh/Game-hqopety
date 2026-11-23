@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Numerics;
 using Core.Map;
 using Raylib_cs;
@@ -93,6 +93,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public List<Mesh> UploadingCutCap = new();
         public int SurfaceUploadIndex;
         public int CutUploadIndex;
+        public ulong SurfaceHash;
+        public ulong CutCapHash;
 
         public void Dispose()
         {
@@ -126,7 +128,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required bool BuildCutCap { get; init; }
         public required int CutLayer { get; init; }
         public required TerrainPalette Palette { get; init; }
-        public Task<VoxelMeshBuildResult>? Task { get; set; }
         public long EnqueuedTimestamp { get; init; }
         public CancellationTokenSource Cancellation { get; } = new();
     }
@@ -140,7 +141,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int CutLayer,
         double WorkerMilliseconds,
         int VertexCount,
-        int TriangleCount);
+        int TriangleCount,
+        ulong SurfaceHash,
+        ulong CutCapHash);
+
+    private readonly record struct BuildCompletion(
+        BuildRequest Request,
+        VoxelMeshBuildResult? Result,
+        Exception? Error,
+        bool Cancelled,
+        long WorkerStartedTimestamp,
+        long WorkerCompletedTimestamp);
 
     private readonly record struct BuildIdentity(
         ChunkKey Key,
@@ -158,8 +169,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float DistanceSquared);
 
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
-    private readonly Queue<BuildRequest> _buildQueue = new();
-    private readonly List<BuildRequest> _runningBuilds = new();
+    private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
+    private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
+    private readonly SemaphoreSlim _buildSignal = new(0);
+    private readonly CancellationTokenSource _workerShutdown = new();
+    private readonly Thread[] _workerThreads;
     private static readonly int MaximumMeshWorkers =
         Math.Clamp(Environment.ProcessorCount - 2, 2, 6);
     private const int MaximumPendingMeshJobs = 128;
@@ -178,6 +192,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalQueueSaturated;
     private long _totalRepeatedBuilds;
     private long _totalGpuUploads;
+    private long _totalGpuUnloads;
+    private long _totalIdenticalSurfaceSkips;
+    private long _totalIdenticalCutSkips;
     private long _totalEmptyChunks;
     private SparseVoxelField? _observedField;
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
@@ -214,13 +231,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int LodPrewarmBuilds { get; private set; }
     public double CpuCaptureMillisecondsLastFrame { get; private set; }
     public double GpuUploadMillisecondsLastFrame { get; private set; }
-    public int RunningMeshJobs => _activeMeshWorkers;
+    public int RunningMeshJobs => Volatile.Read(ref _activeMeshWorkers);
     public double CpuCaptureMilliseconds => CpuCaptureMillisecondsLastFrame;
     public double GpuUploadMilliseconds => GpuUploadMillisecondsLastFrame;
     public int PendingMeshJobs => _buildQueue.Count;
     public double WorkerBuildMillisecondsLastFrame { get; private set; }
     public double LastWorkerBuildMilliseconds { get; private set; }
     public double LastWorkerQueueWaitMilliseconds { get; private set; }
+    public double LastWorkerResultDeliveryMilliseconds { get; private set; }
     public int BuildsCompletedLastFrame { get; private set; }
     public int LastBuildStep { get; private set; }
     public int LastBuildVertices { get; private set; }
@@ -236,6 +254,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public long TotalQueueSaturated => _totalQueueSaturated;
     public long TotalRepeatedBuilds => _totalRepeatedBuilds;
     public long TotalGpuUploads => _totalGpuUploads;
+    public long TotalGpuUnloads => _totalGpuUnloads;
+    public long TotalIdenticalSurfaceSkips => _totalIdenticalSurfaceSkips;
+    public long TotalIdenticalCutSkips => _totalIdenticalCutSkips;
     public long TotalEmptyChunks => _totalEmptyChunks;
     public int FrustumCandidatesLastFrame { get; private set; }
     public int CandidateOverflowLastFrame { get; private set; }
@@ -273,9 +294,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _material.Shader = _shader;
 
         _logger = new TerrainPipelineLogger();
+        _workerThreads = new Thread[MaximumMeshWorkers];
+        for (int i = 0; i < _workerThreads.Length; i++)
+        {
+            _workerThreads[i] = new Thread(ProcessBuildQueue)
+            {
+                IsBackground = true,
+                Name = $"RimClone voxel mesh {i + 1}"
+            };
+            _workerThreads[i].Start();
+        }
+
         _logger.Write(
             "RENDERER_START",
-            $"fixedStep={FixedRenderStep};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0}");
+            $"fixedStep={FixedRenderStep};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};queue=ConcurrentQueue;signal=SemaphoreSlim");
         Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
@@ -519,7 +551,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             GpuUploadMillisecondsLastFrame +=
                 _dynamicFragments.UploadPendingMeshes(remainingUploadBudget);
         }
-        StartQueuedBuilds(field);
+        // Worker threads pull jobs immediately from the signalled queue.
+        // The render thread only drains completed CPU results and owns GPU uploads.
 
         // Cache pruning is deliberately infrequent. Chunks from the
         // previous camera position remain reusable for four seconds.
