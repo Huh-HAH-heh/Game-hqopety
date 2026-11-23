@@ -523,9 +523,9 @@ internal static class VoxelChunkMesher
                         if (aSolid == bSolid)
                             continue;
 
-                        // A chunk emits faces only for its owned solid cells. Halo samples
-                        // decide continuity but never
-                        // duplicate a neighbouring chunk's boundary face.
+                        // Emit a boundary face only from the chunk that owns
+                        // the solid cell. Halo samples decide continuity without
+                        // duplicating faces from neighbouring render chunks.
                         int solidX = aSolid ? ax : bx;
                         int solidY = aSolid ? ay : by;
                         int solidZ = aSolid ? az : bz;
