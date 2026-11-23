@@ -557,8 +557,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // Worker threads pull jobs immediately from the signalled queue.
         // The render thread only drains completed CPU results and owns GPU uploads.
 
-        // Cache pruning is deliberately infrequent. Chunks from the
-        // previous camera position remain reusable for four seconds.
+        // Only enforce the hard cache ceiling under actual cache pressure.
+        // Camera movement alone never unloads an otherwise unchanged VAO.
         if (_chunks.Count > MaximumCachedChunks && (_frame % 30) == 0)
             EvictUnusedChunks();
 
@@ -1356,72 +1356,39 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void EvictUnusedChunks()
     {
-        // Protect every chunk requested by the current view, not only
-        // meshes that have already reached DrawMesh. Otherwise startup can
-        // evict its own capture/worker jobs before the first mesh is uploaded.
-        HashSet<ChunkKey> protectedKeys = new(_visibleCandidateKeys);
-        foreach ((ChunkKey key, ChunkEntry _) in _visible)
-            protectedKeys.Add(key);
-
-        long threshold = _frame - 240;
-        List<ChunkKey>? remove = null;
-
-        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
-        {
-            if (protectedKeys.Contains(key) || entry.LastSeenFrame >= threshold ||
-                HasPendingWork(entry))
-                continue;
-            (remove ??= new List<ChunkKey>()).Add(key);
-        }
-
-        if (remove != null)
-        {
-            foreach (ChunkKey key in remove)
-            {
-                if (!_chunks.Remove(key, out ChunkEntry? entry))
-                    continue;
-
-                int gpuMeshCount =
-                    entry.Surface.Length +
-                    entry.CutCap.Length +
-                    entry.UploadingSurface.Count +
-                    entry.UploadingCutCap.Count;
-                _totalGpuUnloads += gpuMeshCount;
-                _logger.Write(
-                    "MESH_GPU_EVICT",
-                    $"reason=cache-prune step={key.Step} chunk=({key.X},{key.Y},{key.Z}) meshes={gpuMeshCount}");
-                entry.Dispose();
-            }
-        }
-
-        // Enforce a real cache ceiling after protecting this frame's visible
-        // chunks and all in-flight jobs. Old LODs must not accumulate forever
-        // as the camera changes scale or position.
+        // Keep all unchanged GPU meshes resident until actual cache pressure.
+        // Age alone is never a reason to unload a chunk: scrolling away and
+        // back must not cause a VAO upload cycle for unchanged voxel data.
         if (_chunks.Count <= MaximumCachedChunks)
             return;
 
+        HashSet<ChunkKey> protectedKeys = new(_visibleCandidateKeys);
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+        {
+            if (HasPendingWork(entry))
+                protectedKeys.Add(key);
+        }
+
         int excess = _chunks.Count - MaximumCachedChunks;
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks
-            .Where(pair =>
-                !protectedKeys.Contains(pair.Key) &&
-                !HasPendingWork(pair.Value))
+            .Where(pair => !protectedKeys.Contains(pair.Key))
             .OrderBy(pair => pair.Value.LastSeenFrame)
             .Take(excess)
             .ToArray())
         {
-            if (_chunks.Remove(key))
-            {
-                int gpuMeshCount =
-                    entry.Surface.Length +
-                    entry.CutCap.Length +
-                    entry.UploadingSurface.Count +
-                    entry.UploadingCutCap.Count;
-                _totalGpuUnloads += gpuMeshCount;
-                _logger.Write(
-                    "MESH_GPU_EVICT",
-                    $"reason=cache-limit step={key.Step} chunk=({key.X},{key.Y},{key.Z}) meshes={gpuMeshCount}");
-                entry.Dispose();
-            }
+            if (!_chunks.Remove(key))
+                continue;
+
+            int gpuMeshCount =
+                entry.Surface.Length +
+                entry.CutCap.Length +
+                entry.UploadingSurface.Count +
+                entry.UploadingCutCap.Count;
+            _totalGpuUnloads += gpuMeshCount;
+            _logger.Write(
+                "MESH_GPU_EVICT",
+                $"reason=hard-cache-limit step={key.Step} chunk=({key.X},{key.Y},{key.Z}) meshes={gpuMeshCount}");
+            entry.Dispose();
         }
     }
 
