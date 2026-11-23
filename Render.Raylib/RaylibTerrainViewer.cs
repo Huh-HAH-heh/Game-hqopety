@@ -879,7 +879,7 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"LAST MESH LOD {renderer.VoxelLastBuildStep} | VERTICES {renderer.VoxelLastBuildVertices} | TRIANGLES {renderer.VoxelLastBuildTriangles} | BUILD {renderer.VoxelLastWorkerBuildMilliseconds:0.00} ms | WAIT {renderer.VoxelLastQueueWaitMilliseconds:0.00} ms",
+                    $"LAST MESH STEP {renderer.VoxelLastBuildStep} ({renderer.VoxelLastBuildStep * 0.1f:0.00} m) | VERTICES {renderer.VoxelLastBuildVertices} | TRIANGLES {renderer.VoxelLastBuildTriangles} | BUILD {renderer.VoxelLastWorkerBuildMilliseconds:0.00} ms | QUEUE WAIT {renderer.VoxelLastQueueWaitMilliseconds:0.00} ms",
                     13f,
                     Color.LightGray));
                 lines.Add((
