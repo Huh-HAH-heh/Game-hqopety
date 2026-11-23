@@ -19,7 +19,7 @@ The initial canyon generator still supplies the broad base surface from its exis
 
 ## Surface extraction and rendering
 
-`VoxelChunkMesher` extracts the visible 3D isosurface from density samples using Surface Nets. Each active density cell contributes one shared surface vertex; sign-changing lattice edges connect four neighbouring vertices into quads. Vertex normals come from the density gradient. A symmetric two-sample halo makes border geometry and central-difference normals agree across neighbouring chunks. The renderer does not create terrain by extruding the top of each XY column.
+`VoxelChunkMesher` extracts the visible 3D isosurface from density samples using Surface Nets. Each active density cell contributes one shared surface vertex; sign-changing lattice edges connect four neighbouring vertices into quads. A symmetric two-sample halo keeps border geometry and central-difference normals consistent across chunks. Degenerate triangles and non-finite vertices are rejected before GPU upload.
 
 The same density field is used by:
 - exposed-surface mesh generation;
@@ -32,9 +32,11 @@ The source field and edit operations retain **0.1 m voxel spacing**. The Raylib 
 
 Chunk meshes are cached in 3D coordinates. A local edit dirties only intersecting chunks and neighbours whose sampling halo overlaps the edit.
 
-**Meshing pipeline:** the render thread copies only the sparse edited storage chunks needed by a render chunk into an immutable source snapshot. Density sampling, material capture, empty-chunk detection and surface extraction then run together on up to six cancellable CPU workers (the limit leaves two logical processors available to the application). Workers produce only vertex/normal/color/index arrays and never call Raylib or OpenGL. This removes the old 1.25 ms-per-frame capture stage that serialized the pipeline before workers could begin. Stale results are cancelled or discarded using per-chunk request revisions.
+**Meshing pipeline:** the render thread copies only the sparse edited storage chunks needed by a render chunk into an immutable source snapshot. Persistent background workers pull jobs from a bounded `ConcurrentQueue`; a `SemaphoreSlim` signal wakes an idle worker as soon as a request is added. Density sampling, material capture, empty-chunk detection, surface extraction and geometry hashing run on the worker. Workers never call Raylib or OpenGL. There is no per-request `Task.Run` dispatch or frame-by-frame worker-launch polling. A queued request that has not started is cancelled when its chunk leaves the current view; stale completions are discarded by chunk/request revision.
 
-The render thread uploads completed mesh packets with up to 60,000 vertices per packet, reducing GPU buffer allocations and draw calls compared with the previous 3,000-vertex packets. A 3.0 ms upload target per frame (shared with detached-fragment meshes) prevents startup streaming from monopolizing the render thread. The old valid mesh remains visible until every replacement packet has been uploaded, then the renderer swaps the mesh set atomically. The pending queue holds up to 128 jobs and candidates are selected nearest the terrain focus. HUD reports snapshot-copy time, worker build time, GPU upload time, active workers and queued jobs. A GPU upload call cannot be preempted once submitted, so actual upload time must be checked on the target GPU.
+The render thread remains the sole owner of GPU resources. It uploads completed mesh packets with up to 60,000 vertices per packet, and keeps the existing VAO/VBOs resident until a genuinely different mesh is ready. Before upload, the renderer hashes vertex positions, normals, colors and indices. If the geometry hash matches the resident surface or cut cap, only the chunk's source revision is advanced: no `UploadMesh` or `UnloadMesh` is issued for that unchanged GPU mesh. A 3.0 ms upload target per frame (shared with detached-fragment meshes) bounds render-thread upload work. Old valid geometry remains visible until a changed replacement is completely uploaded, then the renderer swaps the mesh set atomically.
+
+HUD/diagnostics separate worker queue wait from completion-to-render-thread delivery delay, and report actual GPU upload/unload counts plus identical surface/cap cache hits. A GPU upload call cannot be preempted once submitted, so actual upload time and VRAM reuse must still be checked on the target GPU.
 
 ## Terrain editing
 
@@ -109,7 +111,7 @@ Every rendered terrain chunk uses the same 0.4 m sampling step. Camera zoom chan
 
 Chunk source snapshots are created from the sparse edited-chunk store on the render thread, then workers perform density capture, material sampling, empty-chunk rejection and triangle extraction. Completed packets are uploaded on the render thread; the previous valid surface remains visible until a replacement is complete. The worker pool is sized from the available logical processor count, with a maximum of six workers.
 
-Cutaway cap updates are independent from the base surface. If only the cut plane changes, the worker request has `surface=false, cutCap=true`; it extracts and uploads only the horizontal cap. The existing base terrain mesh is neither regenerated nor swapped. A voxel edit that affects the base surface requests `surface=true`, and requests a cap as well only if the edit intersects the active cut plane.
+Cutaway cap updates are independent from the base surface. If only the cut plane changes, the worker request has `surface=false, cutCap=true`; it extracts and uploads only the horizontal cap. The existing base terrain mesh is neither regenerated nor swapped. Each cap cell is split by the same fixed diagonal before convex-triangle clipping, so diagonal saddle cases cannot create a self-crossing four-point polygon. Shared edge samples, cut-plane coordinates and duplicate intersection points use consistent ownership and epsilon rules across chunk boundaries. A voxel edit that affects the base surface requests `surface=true`, and requests a cap as well only if the edit intersects the active cut plane.
 
 ### Cutaway rebuild behavior
 
