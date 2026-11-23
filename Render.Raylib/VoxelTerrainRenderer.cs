@@ -17,7 +17,7 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
-    private const int ChunkCells = SparseVoxelField.ChunkSize;
+    private const int ChunkCells = SparseVoxelField.ChunkSize * 4;
     private const int MaximumPendingMeshJobs = 128;
     private const int MaximumGpuMeshUploadsPerFrame = 4;
     private const int CaptureValuesPerWorkerBatch = 512;
@@ -131,6 +131,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required long Generation { get; init; }
         public required int PaletteVersion { get; init; }
         public required long BaseVersion { get; init; }
+        public required int CellsPerAxis { get; init; }
         public required bool BuildSurface { get; init; }
         public required bool BuildCutCap { get; init; }
         public required int CutLayer { get; init; }
@@ -339,7 +340,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=Step1;chunkCells={ChunkCells};chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters:0.0};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=greedy;signal=SemaphoreSlim");
+            $"resolution=Step1;chunkCells={ChunkCells};chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=greedy;signal=SemaphoreSlim");
         Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
@@ -783,8 +784,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
 
         Stopwatch snapshotTimer = Stopwatch.StartNew();
-        IVoxelFieldSource source = field.CreateChunkSnapshot(
-            key.X, key.Y, key.Z, step: 1);
+        IVoxelFieldSource source = field.CreateRegionSnapshot(
+            key.X * ChunkCells,
+            key.Y * ChunkCells,
+            key.Z * ChunkCells,
+            ChunkCells);
         snapshotTimer.Stop();
         CpuCaptureMillisecondsLastFrame += snapshotTimer.Elapsed.TotalMilliseconds;
 
@@ -797,6 +801,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Generation = ++entry.BuildGeneration,
             PaletteVersion = _paletteVersion,
             BaseVersion = field.BaseVersion,
+            CellsPerAxis = ChunkCells,
             BuildSurface = buildSurface,
             BuildCutCap = buildCutCap,
             CutLayer = buildCutCap ? cutLayer : int.MinValue,
@@ -851,7 +856,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     request.Source,
                     request.Key.X,
                     request.Key.Y,
-                    request.Key.Z);
+                    request.Key.Z,
+                    request.CellsPerAxis);
 
                 while (!input.DensityCaptureComplete)
                 {
