@@ -1394,9 +1394,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
             int span = ChunkCells * key.Step;
-            int firstX = key.X * span - key.Step;
-            int firstY = key.Y * span - key.Step;
-            int firstZ = key.Z * span - key.Step;
+            int firstX = key.X * span - key.Step * 2;
+            int firstY = key.Y * span - key.Step * 2;
+            int firstZ = key.Z * span - key.Step * 2;
             int lastX = (key.X * ChunkCells + ChunkCells + 1) * key.Step + 1;
             int lastY = (key.Y * ChunkCells + ChunkCells + 1) * key.Step + 1;
             int lastZ = (key.Z * ChunkCells + ChunkCells + 1) * key.Step + 1;
