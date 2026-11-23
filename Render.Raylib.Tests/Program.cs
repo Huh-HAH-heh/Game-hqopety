@@ -6,7 +6,7 @@ using RimClone.Render.Raylib;
 
 internal static class Program
 {
-    private static readonly int[] Lods = { 1, 2, 4, 8, 5, 10, 40 };
+    private static readonly int[] Lods = { 1, 2, 4, 8, 5, 10, 16, 40 };
 
     private static int Main()
     {
@@ -74,7 +74,7 @@ internal static class Program
                 return (false, $"step={step}, shared-border mismatches={mismatches}");
         }
 
-        return (true, "all shared sample planes match for steps 1, 2, 4, 8, 5, 10 and 40");
+        return (true, "all shared sample planes match for steps 1, 2, 4, 8, 5, 10, 16 and 40");
     }
 
     private static (bool Passed, string Detail) TestCutCapBorders()
