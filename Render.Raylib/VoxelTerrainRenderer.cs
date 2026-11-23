@@ -161,7 +161,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int CutLayer);
 
     private readonly record struct ChunkGpuHashes(
+        bool HasSurface,
         ulong SurfaceHash,
+        bool HasCutCap,
         ulong CutCapHash,
         int CutLayer);
 
@@ -1009,6 +1011,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             else if (uploadSurface &&
                 entry.Built &&
                 hasGpuHashes &&
+                gpuHashes.HasSurface &&
                 gpuHashes.SurfaceHash == build.SurfaceHash)
             {
                 // Identical geometry is already resident in VRAM.
@@ -1028,6 +1031,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             if (uploadCutCap &&
                 hasGpuHashes &&
+                gpuHashes.HasCutCap &&
                 gpuHashes.CutLayer == build.CutLayer &&
                 gpuHashes.CutCapHash == build.CutCapHash)
             {
@@ -1122,7 +1126,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private void SetSurfaceGpuHash(ChunkKey key, ulong hash)
     {
         _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
-        _gpuMeshHashCache[key] = current with { SurfaceHash = hash };
+        _gpuMeshHashCache[key] = current with
+        {
+            HasSurface = true,
+            SurfaceHash = hash
+        };
     }
 
     private void SetCutCapGpuHash(ChunkKey key, ulong hash, int cutLayer)
@@ -1130,6 +1138,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
         _gpuMeshHashCache[key] = current with
         {
+            HasCutCap = true,
             CutCapHash = hash,
             CutLayer = cutLayer
         };
@@ -1415,7 +1424,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _totalGpuUnloads++;
         }
         entry.CutCap = Array.Empty<Mesh>();
-        SetCutCapGpuHash(key, 0UL, int.MinValue);
+        _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
+        _gpuMeshHashCache[key] = current with
+        {
+            HasCutCap = false,
+            CutCapHash = 0UL,
+            CutLayer = int.MinValue
+        };
         entry.CutLayer = int.MinValue;
         entry.CutDirty = true;
     }
