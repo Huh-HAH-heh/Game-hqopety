@@ -66,12 +66,12 @@ internal sealed class VoxelMeshData
 
 /// <summary>
 /// Immutable-to-worker fixed-resolution render-region snapshot.
-/// Density sampling uses a one-sample halo; render regions may group many
-/// 16^3 storage chunks without changing the 0.1 m voxel resolution.
+/// The renderer uses 64^3 cells per region at Step=1; a one-sample halo
+/// keeps neighbouring region face decisions identical.
 /// </summary>
 internal sealed class VoxelChunkBuildInput
 {
-    internal const int DefaultCellsPerAxis = SparseVoxelField.ChunkSize;
+    internal const int DefaultCellsPerAxis = SparseVoxelField.ChunkSize * 4;
     internal const int HaloSize = 1;
     private const int MaximumCellsPerAxis = 128;
 
@@ -523,8 +523,8 @@ internal static class VoxelChunkMesher
                         if (aSolid == bSolid)
                             continue;
 
-                        // A chunk emits only faces owned by one of its cells
-                        // solid cells. Halo cells decide continuity but never
+                        // A chunk emits faces only for its owned solid cells. Halo samples
+                        // decide continuity but never
                         // duplicate a neighbouring chunk's boundary face.
                         int solidX = aSolid ? ax : bx;
                         int solidY = aSolid ? ay : by;
