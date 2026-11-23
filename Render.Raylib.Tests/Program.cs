@@ -52,18 +52,18 @@ internal static class Program
 
     private static (bool Passed, string Detail) TestSharedDensityHalo()
     {
-        SyntheticFlatField field = new(64, 64, 64);
-        VoxelChunkBuildInput left = Capture(field, 1, 1, 1);
-        VoxelChunkBuildInput right = Capture(field, 2, 1, 1);
+        SyntheticFlatField field = new(256, 256, 256, surfaceHeight: 80);
+        VoxelChunkBuildInput left = Capture(field, 1, 1, 1, 64);
+        VoxelChunkBuildInput right = Capture(field, 2, 1, 1, 64);
 
-        const int side = VoxelChunkBuildInput.SampleSide;
-        const int plane = VoxelChunkBuildInput.SamplePlane;
+        int side = left.SampleSide;
+        int plane = left.SamplePlane;
         int mismatches = 0;
 
         for (int z = 0; z < side; z++)
         for (int y = 0; y < side; y++)
         {
-            float a = left.DensitySamples[17 + y * side + z * plane];
+            float a = left.DensitySamples[65 + y * side + z * plane];
             float b = right.DensitySamples[1 + y * side + z * plane];
             if (BitConverter.SingleToInt32Bits(a) !=
                 BitConverter.SingleToInt32Bits(b))
@@ -79,8 +79,8 @@ internal static class Program
 
     private static (bool Passed, string Detail) TestGreedyPlaneReduction()
     {
-        SyntheticFlatField field = new(64, 64, 64);
-        VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        SyntheticFlatField field = new(256, 256, 256, surfaceHeight: 80);
+        VoxelChunkBuildInput input = Capture(field, 1, 1, 1, 64);
         TerrainPalette palette = new();
         VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, palette);
 
@@ -105,8 +105,11 @@ internal static class Program
 
     private static (bool Passed, string Detail) TestGreedyMaterialBoundary()
     {
-        SyntheticFlatField field = new(64, 64, 64, materialSplit: 24);
-        VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        SyntheticFlatField field = new(
+            256, 256, 256,
+            materialSplit: 96,
+            surfaceHeight: 80);
+        VoxelChunkBuildInput input = Capture(field, 1, 1, 1, 64);
         TerrainPalette palette = new();
         VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, palette);
 
@@ -129,9 +132,9 @@ internal static class Program
 
     private static (bool Passed, string Detail) TestGreedyCutCap()
     {
-        const float cutHeightMeters = 1f;
-        SyntheticFlatField field = new(64, 64, 64);
-        VoxelChunkBuildInput input = Capture(field, 1, 0, 1);
+        const float cutHeightMeters = 5f;
+        SyntheticFlatField field = new(256, 256, 256, surfaceHeight: 80);
+        VoxelChunkBuildInput input = Capture(field, 1, 0, 1, 64);
         TerrainPalette palette = new();
         VoxelMeshData[] meshes = VoxelChunkMesher.BuildCutCapData(
             input,
@@ -169,20 +172,19 @@ internal static class Program
 
     private static (bool Passed, string Detail) TestGreedySurfaceBoundary()
     {
-        SyntheticFlatField field = new(64, 64, 64);
+        SyntheticFlatField field = new(256, 256, 256, surfaceHeight: 80);
         TerrainPalette palette = new();
 
         VoxelMeshData[] left = VoxelChunkMesher.BuildSurfaceData(
-            Capture(field, 1, 1, 1), palette);
+            Capture(field, 1, 1, 1, 64), palette);
         VoxelMeshData[] right = VoxelChunkMesher.BuildSurfaceData(
-            Capture(field, 2, 1, 1), palette);
+            Capture(field, 2, 1, 1, 64), palette);
 
         try
         {
             float sharedX =
-                (2 * SparseVoxelField.ChunkSize) *
-                SparseVoxelField.VoxelSizeMeters;
-            const float surfaceY = 2f;
+                (2 * 64) * SparseVoxelField.VoxelSizeMeters;
+            const float surfaceY = 8f;
 
             HashSet<int> leftBoundary = CollectBoundaryZ(left, sharedX, surfaceY);
             HashSet<int> rightBoundary = CollectBoundaryZ(right, sharedX, surfaceY);
@@ -202,8 +204,8 @@ internal static class Program
 
     private static (bool Passed, string Detail) TestEmptyChunkSkipsMaterials()
     {
-        SyntheticFlatField field = new(64, 64, 64, empty: true);
-        VoxelChunkBuildInput input = new(field, 1, 1, 1);
+        SyntheticFlatField field = new(256, 256, 256, empty: true);
+        VoxelChunkBuildInput input = new(field, 1, 1, 1, 64);
 
         while (!input.DensityCaptureComplete)
             input.CaptureNext(field, 256, captureMaterials: false);
@@ -281,9 +283,11 @@ internal static class Program
         IVoxelFieldSource field,
         int chunkX,
         int chunkY,
-        int chunkZ)
+        int chunkZ,
+        int cellsPerAxis = VoxelChunkBuildInput.DefaultCellsPerAxis)
     {
-        VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ);
+        VoxelChunkBuildInput input = new(
+            field, chunkX, chunkY, chunkZ, cellsPerAxis);
 
         while (!input.IsComplete)
             input.CaptureNext(field, 4096);
@@ -306,19 +310,22 @@ internal static class Program
 
         private readonly int _materialSplit;
         private readonly bool _empty;
+        private readonly int _surfaceHeight;
 
         public SyntheticFlatField(
             int width,
             int height,
             int depth,
             int materialSplit = int.MaxValue,
-            bool empty = false)
+            bool empty = false,
+            int surfaceHeight = 20)
         {
             Width = width;
             Height = height;
             Depth = depth;
             _materialSplit = materialSplit;
             _empty = empty;
+            _surfaceHeight = surfaceHeight;
         }
 
         public float GetDensity(int x, int y, int z)
@@ -331,7 +338,7 @@ internal static class Program
             }
 
             // A perfectly flat solid layer from the bottom to voxel Y=19.
-            return y < 20 ? 1f : -1f;
+            return y < _surfaceHeight ? 1f : -1f;
         }
 
         public ushort GetMaterialId(int x, int y, int z)
@@ -340,7 +347,7 @@ internal static class Program
 
             if (x < 0 || y < 0 || z < 0 ||
                 x >= Width || y >= Height || z >= Depth ||
-                _empty || y >= 20)
+                _empty || y >= _surfaceHeight)
             {
                 return 0;
             }
