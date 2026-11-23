@@ -523,7 +523,7 @@ internal static class VoxelChunkMesher
                         if (aSolid == bSolid)
                             continue;
 
-                        // A chunk emits only faces owned by one of its 16^3
+                        // A chunk emits only faces owned by one of its cells
                         // solid cells. Halo cells decide continuity but never
                         // duplicate a neighbouring chunk's boundary face.
                         int solidX = aSolid ? ax : bx;
@@ -532,7 +532,7 @@ internal static class VoxelChunkMesher
                         int solidAxis = axis == 0 ? solidX :
                             axis == 1 ? solidY : solidZ;
 
-                        if ((uint)solidAxis  >= cells)
+                        if ((uint)solidAxis >= cells)
                             continue;
 
                         ushort materialId = input.GetMaterialId(
@@ -550,7 +550,8 @@ internal static class VoxelChunkMesher
                         axis,
                         uAxis,
                         vAxis,
-                        slice);
+                        slice,
+                        cells);
                 }
             }
 
