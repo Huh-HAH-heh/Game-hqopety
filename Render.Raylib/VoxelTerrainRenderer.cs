@@ -1437,21 +1437,42 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_disposed)
             return;
 
+        _disposed = true;
         if (_observedField != null)
             _observedField.Changed -= OnVoxelFieldChanged;
         _observedField = null;
 
+        // Stop producers first, then let in-flight CPU work observe cancellation.
         foreach (ChunkEntry entry in _chunks.Values)
+            entry.RunningBuild?.Cancellation.Cancel();
+
+        _workerShutdown.Cancel();
+        _buildSignal.Release(_workerThreads.Length);
+        foreach (Thread worker in _workerThreads)
+            worker.Join();
+
+        while (_buildQueue.TryDequeue(out BuildRequest? queued))
+            queued.Cancellation.Dispose();
+        while (_completedBuildQueue.TryDequeue(out BuildCompletion completed))
+            completed.Request.Cancellation.Dispose();
+
+        foreach (ChunkEntry entry in _chunks.Values)
+        {
+            entry.RunningBuild = null;
             entry.Dispose();
+        }
+
         _dynamicFragments.Dispose();
         _chunks.Clear();
+        _buildSignal.Dispose();
+        _workerShutdown.Dispose();
+
         // UnloadMaterial also releases the non-default shader assigned to it.
         UnloadMaterial(_material);
         _logger.Write(
             "RENDERER_STOP",
-            $"requests={_totalBuildRequests} completed={_totalBuildCompleted} cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} repeats={_totalRepeatedBuilds} gpuUploads={_totalGpuUploads}");
+            $"requests={_totalBuildRequests} completed={_totalBuildCompleted} cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} repeats={_totalRepeatedBuilds} gpuUploads={_totalGpuUploads} gpuUnloads={_totalGpuUnloads} identicalSurfaceSkips={_totalIdenticalSurfaceSkips} identicalCutSkips={_totalIdenticalCutSkips}");
         _logger.Dispose();
-        _disposed = true;
     }
 
     private void ThrowIfDisposed() =>
