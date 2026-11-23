@@ -681,7 +681,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         bool buildCutCap,
         int cutLayer)
     {
-        if (entry.FailedRevision == entry.RequestRevision)
+        if (_disposed || entry.FailedRevision == entry.RequestRevision)
             return;
 
         if (entry.RunningBuild != null ||
@@ -716,68 +716,43 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             BuildCutCap = buildCutCap,
             CutLayer = buildCutCap ? cutLayer : int.MinValue,
             Palette = _palette,
-            EnqueuedTimestamp = Stopwatch.GetTimestamp(),
+            EnqueuedTimestamp = Stopwatch.GetTimestamp()
         };
 
         entry.BuildQueued = true;
+        entry.RunningBuild = request;
         _buildQueue.Enqueue(request);
         _totalBuildRequests++;
+        _buildSignal.Release();
     }
 
-    private void StartQueuedBuilds(SparseVoxelField field)
+    private void ProcessBuildQueue()
     {
-        if (_buildQueue.Count == 0)
-            return;
-
-        // Camera movement can make already-queued requests obsolete. Re-rank
-        // the small bounded queue by the current terrain-focus distance and
-        // discard requests that are no longer in the visible set.
-        List<BuildRequest> prioritized = new(_buildQueue.Count);
-        while (_buildQueue.Count > 0)
-            prioritized.Add(_buildQueue.Dequeue());
-
-        prioritized.Sort(static (a, b) =>
-            a.Entry.PriorityDistanceSquared.CompareTo(b.Entry.PriorityDistanceSquared));
-
-        foreach (BuildRequest request in prioritized)
+        while (!_workerShutdown.IsCancellationRequested)
         {
-            ChunkEntry entry = request.Entry;
-            if (!entry.BuildQueued ||
-                entry.RequestRevision != request.RequestRevision ||
-                request.PaletteVersion != _paletteVersion ||
-                !_chunks.TryGetValue(request.Key, out ChunkEntry? current) ||
-                !ReferenceEquals(current, entry) ||
-                !_visibleCandidateKeys.Contains(request.Key))
+            try
             {
-                if (entry.BuildQueued &&
-                    entry.RequestRevision == request.RequestRevision)
-                {
-                    entry.BuildQueued = false;
-                }
-
-                request.Cancellation.Dispose();
-                _totalBuildCancelled++;
-                continue;
+                _buildSignal.Wait();
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
             }
 
-            if (_activeMeshWorkers >= MaximumMeshWorkers)
-            {
-                _buildQueue.Enqueue(request);
-                continue;
-            }
+            if (_workerShutdown.IsCancellationRequested)
+                return;
 
-            entry.BuildQueued = false;
-            if (request.BaseVersion != field.BaseVersion)
-            {
-                request.Cancellation.Dispose();
+            if (!_buildQueue.TryDequeue(out BuildRequest? request))
                 continue;
-            }
 
-            entry.RunningBuild = request;
-            request.Task = Task.Run(() =>
+            Interlocked.Increment(ref _activeMeshWorkers);
+            long workerStarted = Stopwatch.GetTimestamp();
+            try
             {
-                Stopwatch workerTimer = Stopwatch.StartNew();
                 CancellationToken token = request.Cancellation.Token;
+                token.ThrowIfCancellationRequested();
+
+                Stopwatch workerTimer = Stopwatch.StartNew();
                 VoxelChunkBuildInput input = new(
                     request.Source,
                     request.Key.X,
@@ -811,13 +786,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         request.Palette,
                         token)
                     : Array.Empty<VoxelMeshData>();
-                workerTimer.Stop();
 
+                workerTimer.Stop();
                 int vertices = surface.Sum(static mesh => mesh.VertexCount) +
                     cutCap.Sum(static mesh => mesh.VertexCount);
                 int triangles = surface.Sum(static mesh => mesh.TriangleCount) +
                     cutCap.Sum(static mesh => mesh.TriangleCount);
-                return new VoxelMeshBuildResult(
+
+                VoxelMeshBuildResult result = new(
                     surface,
                     cutCap,
                     hasSurface,
@@ -826,12 +802,42 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     request.CutLayer,
                     workerTimer.Elapsed.TotalMilliseconds,
                     vertices,
-                    triangles);
-            });
+                    triangles,
+                    hasSurface ? ComputeMeshHash(surface) : 0UL,
+                    request.BuildCutCap ? ComputeMeshHash(cutCap) : 0UL);
 
-            _runningBuilds.Add(request);
-            _activeMeshWorkers++;
-            _totalBuildStarted++;
+                _completedBuildQueue.Enqueue(new BuildCompletion(
+                    request,
+                    result,
+                    null,
+                    false,
+                    workerStarted,
+                    Stopwatch.GetTimestamp()));
+            }
+            catch (OperationCanceledException)
+            {
+                _completedBuildQueue.Enqueue(new BuildCompletion(
+                    request,
+                    null,
+                    null,
+                    true,
+                    workerStarted,
+                    Stopwatch.GetTimestamp()));
+            }
+            catch (Exception exception)
+            {
+                _completedBuildQueue.Enqueue(new BuildCompletion(
+                    request,
+                    null,
+                    exception,
+                    false,
+                    workerStarted,
+                    Stopwatch.GetTimestamp()));
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeMeshWorkers);
+            }
         }
     }
 
