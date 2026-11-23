@@ -16,6 +16,7 @@ internal static class Program
 
         Run("Surface Nets chunk borders use identical source samples", TestChunkBorders, ref failures);
         Run("Uniform chunks skip all material samples", TestDensityOnlySkipsMaterials, ref failures);
+        Run("Cut-cap chunks meet without gaps and keep finite normals", TestCutCapBorders, ref failures);
         Run("Reduced LOD preserves more SDF detail than legacy 40-step LOD",
             TestLodApproximation, ref failures);
 
@@ -71,6 +72,80 @@ internal static class Program
         }
 
         return (true, "all shared sample planes match for steps 1, 2, 4, 8, 5, 10 and 40");
+    }
+
+    private static (bool Passed, string Detail) TestCutCapBorders()
+    {
+        const int step = 4;
+        const float cutHeightMeters = 49f;
+        const float voxelSizeMeters = SparseVoxelField.VoxelSizeMeters;
+        SyntheticTerrainField field = new(1024, 1024, 1024);
+        TerrainPalette palette = new();
+        int cutSampleY = (int)MathF.Floor(
+            cutHeightMeters / voxelSizeMeters - 0.5f);
+        int chunkY = Math.Clamp(
+            cutSampleY / (SparseVoxelField.ChunkSize * step),
+            0,
+            field.Height / (SparseVoxelField.ChunkSize * step) - 1);
+
+        VoxelChunkBuildInput left = Capture(field, 0, chunkY, 0, step);
+        VoxelChunkBuildInput right = Capture(field, 1, chunkY, 0, step);
+        VoxelMeshData[] leftCap = VoxelChunkMesher.BuildCutCapData(
+            left, cutHeightMeters, palette);
+        VoxelMeshData[] rightCap = VoxelChunkMesher.BuildCutCapData(
+            right, cutHeightMeters, palette);
+
+        float sharedX = SparseVoxelField.ChunkSize * step * voxelSizeMeters;
+        HashSet<int> leftBoundary = CollectCapBoundaryZ(leftCap, sharedX, cutHeightMeters);
+        HashSet<int> rightBoundary = CollectCapBoundaryZ(rightCap, sharedX, cutHeightMeters);
+
+        bool finite = HasFiniteNonZeroNormals(leftCap) &&
+            HasFiniteNonZeroNormals(rightCap);
+        bool seamMatches = leftBoundary.Count > 0 &&
+            leftBoundary.SetEquals(rightBoundary);
+
+        return (
+            finite && seamMatches,
+            $"leftBoundary={leftBoundary.Count}, rightBoundary={rightBoundary.Count}, " +
+            $"seamMatch={seamMatches}, finiteNormals={finite}");
+    }
+
+    private static HashSet<int> CollectCapBoundaryZ(
+        VoxelMeshData[] meshes,
+        float sharedX,
+        float cutHeightMeters)
+    {
+        HashSet<int> points = new();
+        float expectedY = cutHeightMeters + 0.006f;
+        foreach (VoxelMeshData mesh in meshes)
+        foreach (Vector3 vertex in mesh.Vertices)
+        {
+            if (MathF.Abs(vertex.X - sharedX) > 0.0001f ||
+                MathF.Abs(vertex.Y - expectedY) > 0.0001f)
+                continue;
+
+            points.Add((int)MathF.Round(vertex.Z * 10000f));
+        }
+        return points;
+    }
+
+    private static bool HasFiniteNonZeroNormals(VoxelMeshData[] meshes)
+    {
+        int count = 0;
+        foreach (VoxelMeshData mesh in meshes)
+        foreach (Vector3 normal in mesh.Normals)
+        {
+            count++;
+            float lengthSquared = normal.LengthSquared();
+            if (!float.IsFinite(normal.X) ||
+                !float.IsFinite(normal.Y) ||
+                !float.IsFinite(normal.Z) ||
+                !float.IsFinite(lengthSquared) ||
+                lengthSquared < 0.9f)
+                return false;
+        }
+
+        return count > 0;
     }
 
     private static (bool Passed, string Detail) TestDensityOnlySkipsMaterials()
