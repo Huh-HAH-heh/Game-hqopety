@@ -1185,13 +1185,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             state.Ready;
     }
 
-    private void AddCachedFallback(ChunkKey key)
+    private bool AddCachedFallback(ChunkKey key)
     {
-        if (_chunks.TryGetValue(key, out ChunkEntry? entry) &&
-            IsRenderable(entry))
-        {
-            AddVisible(key, entry);
-        }
+        if (!_chunks.TryGetValue(key, out ChunkEntry? entry) ||
+            !IsRenderable(entry))
+            return false;
+
+        AddVisible(key, entry);
+        return true;
     }
 
     private bool AddPreviousVisibleDescendants(
