@@ -746,6 +746,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
 
             Interlocked.Increment(ref _activeMeshWorkers);
+            Interlocked.Increment(ref _totalBuildStarted);
             long workerStarted = Stopwatch.GetTimestamp();
             try
             {
@@ -787,13 +788,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         token)
                     : Array.Empty<VoxelMeshData>();
 
-                workerTimer.Stop();
                 int vertices = surface.Sum(static mesh => mesh.VertexCount) +
                     cutCap.Sum(static mesh => mesh.VertexCount);
                 int triangles = surface.Sum(static mesh => mesh.TriangleCount) +
                     cutCap.Sum(static mesh => mesh.TriangleCount);
-
                 bool hasSurfaceMesh = surface.Length > 0;
+                ulong surfaceHash = hasSurfaceMesh ? ComputeMeshHash(surface) : 0UL;
+                ulong cutCapHash = request.BuildCutCap ? ComputeMeshHash(cutCap) : 0UL;
+                workerTimer.Stop();
+
                 VoxelMeshBuildResult result = new(
                     surface,
                     cutCap,
@@ -804,8 +807,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     workerTimer.Elapsed.TotalMilliseconds,
                     vertices,
                     triangles,
-                    hasSurfaceMesh ? ComputeMeshHash(surface) : 0UL,
-                    request.BuildCutCap ? ComputeMeshHash(cutCap) : 0UL);
+                    surfaceHash,
+                    cutCapHash);
 
                 _completedBuildQueue.Enqueue(new BuildCompletion(
                     request,
