@@ -20,6 +20,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 {
     private const int MaximumBodies = 16;
     private const int MaximumChunksPerBody = 64;
+    private const int DynamicChunkCells = SparseVoxelField.ChunkSize * 4;
     private const long MaximumDynamicSnapshotBytes = 32L * 1024 * 1024;
     private const float Gravity = 9.81f;
     private const float MaximumFallSpeed = 45f;
@@ -172,7 +173,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             _snapshotBytes + snapshot.EstimatedBytes > MaximumDynamicSnapshotBytes)
             return false;
 
-        int chunkSpan = SparseVoxelField.ChunkSize;
+        int chunkSpan = DynamicChunkCells;
         int chunksX = (snapshot.Width + chunkSpan - 1) / chunkSpan;
         int chunksY = (snapshot.Height + chunkSpan - 1) / chunkSpan;
         int chunksZ = (snapshot.Depth + chunkSpan - 1) / chunkSpan;
@@ -225,7 +226,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 {
                     meshToken.ThrowIfCancellationRequested();
                     VoxelChunkBuildInput input = new(
-                        snapshot, x, y, z);
+                        snapshot, x, y, z, DynamicChunkCells);
                     while (!input.IsComplete)
                     {
                         meshToken.ThrowIfCancellationRequested();
