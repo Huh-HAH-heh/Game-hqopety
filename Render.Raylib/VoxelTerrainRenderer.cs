@@ -192,6 +192,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         long LastSeenFrame,
         float DistanceSquared);
 
+    private struct ChildGroupState
+    {
+        public int Count;
+        public bool Ready;
+    }
+
     private readonly record struct ReadyUpload(
         ChunkKey Key,
         ChunkEntry Entry,
@@ -211,6 +217,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly List<Candidate> _prewarmChunkScratch = new(64);
     private readonly HashSet<ChunkKey> _preparedCandidateKeys = new();
     private readonly HashSet<ChunkKey> _cacheProtectedKeys = new();
+    private readonly HashSet<ChunkKey> _step1ParentKeys = new();
+    private readonly Dictionary<ChunkKey, ChildGroupState> _step16Coverage = new();
+    private readonly Dictionary<ChunkKey, ChildGroupState> _step4Coverage = new();
     private readonly List<CacheEvictionCandidate> _cacheEvictionScratch = new();
     private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
     private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
@@ -955,127 +964,127 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         List<Candidate> step4Fallbacks,
         List<Candidate> step1Parents)
     {
-        // Coarse leaves beyond the Step16 split radius remain directly visible.
+        _step16Coverage.Clear();
+        _step4Coverage.Clear();
+        _step1ParentKeys.Clear();
+
+        // Aggregate readiness in one pass per level. A group becomes ready only
+        // when every child intersecting this frame's frustum is current and uploaded.
+        AccumulateChildCoverage(
+            step4Fallbacks,
+            LodMiddleStep,
+            field,
+            _step16Coverage);
+
+        AccumulateChildCoverage(
+            activeLeaves,
+            LodNearStep,
+            field,
+            _step4Coverage);
+
+        foreach (Candidate parent in step1Parents)
+            _step1ParentKeys.Add(parent.Key);
+
+        // Far Step16 leaves are not subdivided and remain the active level.
         foreach (Candidate candidate in activeLeaves)
         {
-            if (candidate.Key.Step != LodFarStep)
-                continue;
-
-            if (_chunks.TryGetValue(candidate.Key, out ChunkEntry? entry) &&
-                entry.Built)
-            {
-                AddVisible(candidate.Key, entry);
-            }
+            if (candidate.Key.Step == LodFarStep)
+                AddCachedFallback(candidate.Key);
         }
 
+        // Step16 -> Step4 is an all-or-nothing handoff for each visible parent.
+        // Until the complete Step4 child set is resident, keep the parent mesh.
         foreach (Candidate farParent in step16Fallbacks)
         {
-            ChunkKey farKey = farParent.Key;
-
-            // A Step16 parent is replaced only when every Step4 child intersecting
-            // the current frustum has a current mesh fully uploaded to the GPU.
-            if (!IsChildGroupReady(
-                farKey,
-                LodMiddleStep,
-                step4Fallbacks,
-                field))
-            {
-                AddCachedFallback(farKey);
-                continue;
-            }
-
-            foreach (Candidate middle in step4Fallbacks)
-            {
-                if (!IsChildOf(middle.Key, farKey))
-                    continue;
-
-                bool wantsNear = ContainsCandidate(step1Parents, middle.Key);
-                if (wantsNear && IsChildGroupReady(
-                    middle.Key,
-                    LodNearStep,
-                    activeLeaves,
-                    field))
-                {
-                    AddReadyChildren(middle.Key, LodNearStep, activeLeaves);
-                }
-                else
-                {
-                    // Step4 is the atomic fallback for its whole Step1 child set.
-                    AddCachedFallback(middle.Key);
-                }
-            }
+            if (!IsCoverageReady(_step16Coverage, farParent.Key))
+                AddCachedFallback(farParent.Key);
         }
 
-        // The previous fallback remains drawable while a rebuild is in flight.
-        // A candidate is added at most once by this hierarchy traversal.
+        // Draw Step4 children only for Step16 regions whose complete Step4
+        // coverage is ready. Near Step4 groups remain as fallbacks until all
+        // their Step1 children have completed CPU build + GPU upload.
+        foreach (Candidate middle in step4Fallbacks)
+        {
+            ChunkKey farParent = GetParentKey(middle.Key, LodFarStep);
+            if (!IsCoverageReady(_step16Coverage, farParent))
+                continue;
+
+            bool hasNearChildren = _step1ParentKeys.Contains(middle.Key);
+            bool nearChildrenReady =
+                hasNearChildren &&
+                IsCoverageReady(_step4Coverage, middle.Key);
+
+            if (!nearChildrenReady)
+                AddCachedFallback(middle.Key);
+        }
+
+        // Complete Step1 groups are added only after their Step4 parent has
+        // been atomically released by the Step16 hierarchy.
+        foreach (Candidate near in activeLeaves)
+        {
+            if (near.Key.Step != LodNearStep)
+                continue;
+
+            ChunkKey middleParent = GetParentKey(near.Key, LodMiddleStep);
+            ChunkKey farParent = GetParentKey(middleParent, LodFarStep);
+
+            if (!_step1ParentKeys.Contains(middleParent) ||
+                !IsCoverageReady(_step16Coverage, farParent) ||
+                !IsCoverageReady(_step4Coverage, middleParent))
+                continue;
+
+            AddCachedFallback(near.Key);
+        }
     }
 
-    private bool IsChildGroupReady(
-        ChunkKey parent,
-        int childStep,
+    private void AccumulateChildCoverage(
         List<Candidate> children,
-        SparseVoxelField field)
-    {
-        int matchingChildren = 0;
-        int ratio = parent.Step / childStep;
-
-        foreach (Candidate child in children)
-        {
-            if (child.Key.Step != childStep ||
-                child.Key.X / ratio != parent.X ||
-                child.Key.Y / ratio != parent.Y ||
-                child.Key.Z / ratio != parent.Z)
-                continue;
-
-            matchingChildren++;
-
-            if (!_chunks.TryGetValue(child.Key, out ChunkEntry? entry) ||
-                !IsCurrentMeshReady(entry, field))
-                return false;
-        }
-
-        // No visible child means no visible coverage to hand off.
-        return matchingChildren > 0;
-    }
-
-    private static bool IsChildOf(ChunkKey child, ChunkKey parent)
-    {
-        if (child.Step >= parent.Step || parent.Step % child.Step != 0)
-            return false;
-
-        int ratio = parent.Step / child.Step;
-        return child.X / ratio == parent.X &&
-            child.Y / ratio == parent.Y &&
-            child.Z / ratio == parent.Z;
-    }
-
-    private static bool ContainsCandidate(List<Candidate> candidates, ChunkKey key)
-    {
-        foreach (Candidate candidate in candidates)
-        {
-            if (candidate.Key == key)
-                return true;
-        }
-
-        return false;
-    }
-
-    private void AddReadyChildren(
-        ChunkKey parent,
         int childStep,
-        List<Candidate> children)
+        SparseVoxelField field,
+        Dictionary<ChunkKey, ChildGroupState> coverage)
     {
         foreach (Candidate child in children)
         {
-            if (child.Key.Step != childStep || !IsChildOf(child.Key, parent))
+            if (child.Key.Step != childStep)
                 continue;
 
-            if (_chunks.TryGetValue(child.Key, out ChunkEntry? entry) &&
-                IsRenderable(entry))
+            ChunkKey parent = GetParentKey(child.Key, childStep * 4);
+            bool ready =
+                _chunks.TryGetValue(child.Key, out ChunkEntry? entry) &&
+                IsCurrentMeshReady(entry, field);
+
+            if (coverage.TryGetValue(parent, out ChildGroupState state))
             {
-                AddVisible(child.Key, entry);
+                state.Count++;
+                state.Ready &= ready;
             }
+            else
+            {
+                state.Count = 1;
+                state.Ready = ready;
+            }
+
+            coverage[parent] = state;
         }
+    }
+
+    private static ChunkKey GetParentKey(ChunkKey child, int parentStep)
+    {
+        int ratio = parentStep / child.Step;
+        return new ChunkKey(
+            parentStep,
+            child.X / ratio,
+            child.Y / ratio,
+            child.Z / ratio);
+    }
+
+    private static bool IsCoverageReady(
+        Dictionary<ChunkKey, ChildGroupState> coverage,
+        ChunkKey parent)
+    {
+        return coverage.TryGetValue(parent, out ChildGroupState state) &&
+            state.Count > 0 &&
+            state.Ready;
     }
 
     private void AddCachedFallback(ChunkKey key)
