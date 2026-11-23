@@ -18,7 +18,13 @@ namespace RimClone.Render.Raylib;
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
     private const int ChunkCells = SparseVoxelField.ChunkSize;
-    private const int FixedRenderStep = 4;
+    private const int LodNearStep = 1;
+    private const int LodMiddleStep = 4;
+    private const int LodFarStep = 16;
+    private const float LodNearRadiusMeters = 64f;
+    private const float LodMiddleRadiusMeters = 256f;
+    private const float LodNearRadiusSquared = LodNearRadiusMeters * LodNearRadiusMeters;
+    private const float LodMiddleRadiusSquared = LodMiddleRadiusMeters * LodMiddleRadiusMeters;
     private const int MaximumCachedChunks = 6000;
     private const bool EnableAutomaticChunkCacheEviction = false;
     private const int MaximumGpuMeshUploadsPerFrame = 4;
@@ -94,6 +100,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public List<Mesh> UploadingCutCap = new();
         public int SurfaceUploadIndex;
         public int CutUploadIndex;
+        public bool UploadQueued;
+        public long UploadQueueGeneration;
         public void Dispose()
         {
             RunningBuild?.Cancellation.Cancel();
@@ -174,13 +182,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float Radius,
         float DistanceSquared);
 
+    private readonly record struct ReadyUpload(
+        ChunkKey Key,
+        ChunkEntry Entry,
+        long Generation);
+
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
     private readonly Dictionary<ChunkKey, ChunkGpuHashes> _gpuMeshHashCache = new();
 
-    // Main-thread-owned round-robin queue. A chunk gets one upload turn,
-    // then moves to the tail if more meshes remain.
-    private readonly ConcurrentQueue<ChunkKey> _readyUploadQueue = new();
-    private readonly HashSet<ChunkKey> _readyUploadKeys = new();
+    // Render-thread-owned round-robin queue. A generation token prevents
+    // stale records from uploading a removed or recreated LOD chunk.
+    private readonly ConcurrentQueue<ReadyUpload> _readyUploadQueue = new();
+    private readonly List<Candidate> _candidateScratch = new();
+    private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
+    private readonly List<ChunkKey> _lodEvictionScratch = new();
     private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
     private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
     private readonly SemaphoreSlim _buildSignal = new(0);
@@ -223,7 +238,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _paletteVersion;
     private long _frame;
     private bool _disposed;
-    private int _activeStep = FixedRenderStep;
+    private int _activeStep = LodFarStep;
+    private bool _isUsingCoarseLod;
     private int _requestedCutLayer = int.MinValue;
     private int _stableCutLayer = int.MinValue;
     private int _cutLayerStableFrames;
@@ -235,7 +251,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     public int ActiveRenderCellSize => _activeStep;
     public float ActiveVoxelSizeMeters => _activeStep * SparseVoxelField.VoxelSizeMeters;
-    public bool IsUsingCoarseLod => false;
+    public bool IsUsingCoarseLod => _isUsingCoarseLod;
+    public int Step1ChunksLastFrame { get; private set; }
+    public int Step4ChunksLastFrame { get; private set; }
+    public int Step16ChunksLastFrame { get; private set; }
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleChunksLastFrame { get; private set; }
     public int RebuiltChunks { get; private set; }
@@ -320,7 +339,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _logger.Write(
             "RENDERER_START",
-            $"fixedStep={FixedRenderStep};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};queue=ConcurrentQueue;signal=SemaphoreSlim");
+            $"lodSteps={LodNearStep},{LodMiddleStep},{LodFarStep};lodRadii={LodNearRadiusMeters:0}/{LodMiddleRadiusMeters:0};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};queue=ConcurrentQueue;signal=SemaphoreSlim");
         Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
@@ -366,78 +385,64 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // GPU uploads remain on the render thread later in this frame.
         CollectCompletedBuilds(field);
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
-        const int step = FixedRenderStep;
-        _activeStep = step;
 
-        float chunkSizeMeters = ChunkCells * step * SparseVoxelField.VoxelSizeMeters;
-        int chunksX = DivideRoundUp(field.Width, ChunkCells * step);
-        int chunksY = DivideRoundUp(field.Height, ChunkCells * step);
-        int chunksZ = DivideRoundUp(field.Depth, ChunkCells * step);
+        List<Candidate> candidates = _candidateScratch;
+        candidates.Clear();
 
-        // Do not cap candidate count or pre-trim by an artificial camera radius.
-        // Traverse the complete chunk grid and let the real camera frustum decide visibility.
-        List<Candidate> candidates = new();
-        int frustumCandidateCount = 0;
-        float chunkRadius = chunkSizeMeters * 0.8660254f;
+        int frustumTests = 0;
+        CollectLodCandidates(
+            field,
+            camera,
+            viewportWidth,
+            viewportHeight,
+            maximumViewDistanceMeters,
+            candidates,
+            ref frustumTests);
 
-        for (int chunkZ = 0; chunkZ < chunksZ; chunkZ++)
-        for (int chunkY = 0; chunkY < chunksY; chunkY++)
-        for (int chunkX = 0; chunkX < chunksX; chunkX++)
-        {
-            Vector3 center = new(
-                (chunkX + 0.5f) * chunkSizeMeters,
-                (chunkY + 0.5f) * chunkSizeMeters,
-                (chunkZ + 0.5f) * chunkSizeMeters);
-
-            if (!TerrainFrustum.IsSphereVisible(
-                camera,
-                center,
-                chunkRadius,
-                viewportWidth,
-                viewportHeight,
-                maximumViewDistanceMeters))
-                continue;
-
-            frustumCandidateCount++;
-
-            float dx = center.X - camera.Target.X;
-            float dz = center.Z - camera.Target.Z;
-            float priorityY = cutEnabled
-                ? cutHeightMeters
-                : Math.Clamp(
-                    camera.Target.Y,
-                    0f,
-                    field.Height * SparseVoxelField.VoxelSizeMeters);
-            float dy = center.Y - priorityY;
-            float priorityDistanceSquared = dx * dx + dy * dy + dz * dz;
-
-            candidates.Add(new Candidate(
-                new ChunkKey(step, chunkX, chunkY, chunkZ),
-                center,
-                chunkRadius,
-                priorityDistanceSquared));
-        }
-
-        // Nearest visible chunks enter the bounded worker queue first.
-        // The candidate list itself is never truncated.
         candidates.Sort(static (a, b) =>
             a.DistanceSquared.CompareTo(b.DistanceSquared));
 
-        FrustumCandidatesLastFrame = frustumCandidateCount;
+        FrustumCandidatesLastFrame = frustumTests;
         CandidateOverflowLastFrame = 0;
+        Step1ChunksLastFrame = 0;
+        Step4ChunksLastFrame = 0;
+        Step16ChunksLastFrame = 0;
+        _activeStep = LodFarStep;
+
+        foreach (Candidate candidate in candidates)
+        {
+            switch (candidate.Key.Step)
+            {
+                case LodNearStep:
+                    Step1ChunksLastFrame++;
+                    _activeStep = LodNearStep;
+                    break;
+
+                case LodMiddleStep:
+                    Step4ChunksLastFrame++;
+                    if (_activeStep > LodMiddleStep)
+                        _activeStep = LodMiddleStep;
+                    break;
+
+                case LodFarStep:
+                    Step16ChunksLastFrame++;
+                    break;
+            }
+        }
+
+        _isUsingCoarseLod =
+            Step4ChunksLastFrame > 0 ||
+            Step16ChunksLastFrame > 0;
+
         _visible.Clear();
         _visibleCandidateKeys.Clear();
-        HashSet<ChunkKey> visibleKeys = new();
 
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
-            new(candidates.Count);
-
+            _candidateEntriesScratch;
+        candidateEntries.Clear();
 
         int cutSampleY = (int)MathF.Floor(
             cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f);
-        int cutChunkY = cutEnabled
-            ? Math.Clamp(cutSampleY / (ChunkCells * step), 0, chunksY - 1)
-            : -1;
         int cutLayer = cutEnabled
             ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
             : -1;
@@ -484,9 +489,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
+            int chunkMinY = key.Y * ChunkCells * key.Step;
+            int chunkMaxY = chunkMinY + ChunkCells * key.Step;
+            bool containsCutPlane =
+                cutSampleY >= chunkMinY &&
+                cutSampleY < chunkMaxY;
+
             bool needsCutCap = cutEnabled &&
                 _cutLayerStableFrames >= CutCapSettleFrames &&
-                key.Y == cutChunkY &&
+                containsCutPlane &&
                 (entry.CutLayer != cutLayer || entry.CutDirty);
 
             bool hasPendingWork = HasPendingWork(entry);
@@ -511,12 +522,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             candidateEntries.Add((candidate, entry));
         }
 
+        EvictObsoleteLodEntries(field, camera.Position);
         CancelQueuedBuildsOutsideView();
 
         foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
         {
             if (entry.Built)
-                AddVisible(candidate.Key, entry, visibleKeys);
+                AddVisible(candidate.Key, entry);
         }
 
         UploadReadyMeshes();
@@ -541,12 +553,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
 
         _dynamicFragments.ReleaseBakedBodies(
-            bounds => AreCachedMeshesCurrent(bounds, field, step));
+            bounds => AreCachedMeshesCurrent(bounds, field));
 
         if ((_frame % 120) == 0)
         {
             string summary =
-                $"frame={_frame} fixedStep={step} frustumCandidates={FrustumCandidatesLastFrame} selected={_visibleCandidateKeys.Count} overflow={CandidateOverflowLastFrame} visible={_visible.Count} cache={_chunks.Count} emptyChunks={_totalEmptyChunks} " +
+                $"frame={_frame} lodMinStep={_activeStep} lod1={Step1ChunksLastFrame} lod4={Step4ChunksLastFrame} lod16={Step16ChunksLastFrame} frustumTests={FrustumCandidatesLastFrame} selected={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} emptyChunks={_totalEmptyChunks} " +
                 $"snapshotMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} " +
                 $"lastWorkerMs={LastWorkerBuildMilliseconds:0.000} queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
@@ -653,6 +665,292 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
         _dynamicFragments.Clear();
+    }
+
+    private void CollectLodCandidates(
+        SparseVoxelField field,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        List<Candidate> candidates,
+        ref int frustumTests)
+    {
+        const float sphereScale = 0.8660254038f;
+        float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        Vector3 cameraPosition = camera.Position;
+
+        int farSamples = ChunkCells * LodFarStep;
+        int middleSamples = ChunkCells * LodMiddleStep;
+        int nearSamples = ChunkCells * LodNearStep;
+
+        // The outer grid advances by a full Step=16 chunk. Only blocks whose
+        // AABB reaches the 256 m LOD band are subdivided into Step=4 children.
+        for (int originZ = 0; originZ < field.Depth; originZ += farSamples)
+        for (int originY = 0; originY < field.Height; originY += farSamples)
+        for (int originX = 0; originX < field.Width; originX += farSamples)
+        {
+            float farSizeMeters = farSamples * voxelSize;
+            Vector3 farCenter = new(
+                (originX + farSamples * 0.5f) * voxelSize,
+                (originY + farSamples * 0.5f) * voxelSize,
+                (originZ + farSamples * 0.5f) * voxelSize);
+
+            frustumTests++;
+            if (!TerrainFrustum.IsSphereVisible(
+                camera,
+                farCenter,
+                farSizeMeters * sphereScale,
+                viewportWidth,
+                viewportHeight,
+                maximumViewDistanceMeters))
+                continue;
+
+            if (!BlockIntersectsRadius(
+                cameraPosition,
+                field,
+                originX,
+                originY,
+                originZ,
+                farSamples,
+                LodMiddleRadiusSquared))
+            {
+                AddCandidate(
+                    candidates,
+                    originX,
+                    originY,
+                    originZ,
+                    LodFarStep,
+                    cameraPosition);
+                continue;
+            }
+
+            int farEndX = Math.Min(originX + farSamples, field.Width);
+            int farEndY = Math.Min(originY + farSamples, field.Height);
+            int farEndZ = Math.Min(originZ + farSamples, field.Depth);
+
+            // Step=4 grid is nested inside the Step=16 parent, so origins remain
+            // aligned and neighboring LOD blocks cover the field exactly once.
+            for (int middleZ = originZ; middleZ < farEndZ; middleZ += middleSamples)
+            for (int middleY = originY; middleY < farEndY; middleY += middleSamples)
+            for (int middleX = originX; middleX < farEndX; middleX += middleSamples)
+            {
+                float middleSizeMeters = middleSamples * voxelSize;
+                Vector3 middleCenter = new(
+                    (middleX + middleSamples * 0.5f) * voxelSize,
+                    (middleY + middleSamples * 0.5f) * voxelSize,
+                    (middleZ + middleSamples * 0.5f) * voxelSize);
+
+                frustumTests++;
+                if (!TerrainFrustum.IsSphereVisible(
+                    camera,
+                    middleCenter,
+                    middleSizeMeters * sphereScale,
+                    viewportWidth,
+                    viewportHeight,
+                    maximumViewDistanceMeters))
+                    continue;
+
+                if (!BlockIntersectsRadius(
+                    cameraPosition,
+                    field,
+                    middleX,
+                    middleY,
+                    middleZ,
+                    middleSamples,
+                    LodNearRadiusSquared))
+                {
+                    AddCandidate(
+                        candidates,
+                        middleX,
+                        middleY,
+                        middleZ,
+                        LodMiddleStep,
+                        cameraPosition);
+                    continue;
+                }
+
+                int middleEndX = Math.Min(middleX + middleSamples, field.Width);
+                int middleEndY = Math.Min(middleY + middleSamples, field.Height);
+                int middleEndZ = Math.Min(middleZ + middleSamples, field.Depth);
+
+                // Only the 64 m inner band is expanded to Step=1.
+                for (int nearZ = middleZ; nearZ < middleEndZ; nearZ += nearSamples)
+                for (int nearY = middleY; nearY < middleEndY; nearY += nearSamples)
+                for (int nearX = middleX; nearX < middleEndX; nearX += nearSamples)
+                {
+                    float nearSizeMeters = nearSamples * voxelSize;
+                    Vector3 nearCenter = new(
+                        (nearX + nearSamples * 0.5f) * voxelSize,
+                        (nearY + nearSamples * 0.5f) * voxelSize,
+                        (nearZ + nearSamples * 0.5f) * voxelSize);
+
+                    frustumTests++;
+                    if (!TerrainFrustum.IsSphereVisible(
+                        camera,
+                        nearCenter,
+                        nearSizeMeters * sphereScale,
+                        viewportWidth,
+                        viewportHeight,
+                        maximumViewDistanceMeters))
+                        continue;
+
+                    AddCandidate(
+                        candidates,
+                        nearX,
+                        nearY,
+                        nearZ,
+                        LodNearStep,
+                        cameraPosition);
+                }
+            }
+        }
+    }
+
+    private static void AddCandidate(
+        List<Candidate> candidates,
+        int originX,
+        int originY,
+        int originZ,
+        int step,
+        Vector3 cameraPosition)
+    {
+        float sizeMeters =
+            ChunkCells * step * SparseVoxelField.VoxelSizeMeters;
+        Vector3 center = new(
+            (originX + ChunkCells * step * 0.5f) * SparseVoxelField.VoxelSizeMeters,
+            (originY + ChunkCells * step * 0.5f) * SparseVoxelField.VoxelSizeMeters,
+            (originZ + ChunkCells * step * 0.5f) * SparseVoxelField.VoxelSizeMeters);
+
+        int chunkSize = ChunkCells * step;
+        ChunkKey key = new(
+            step,
+            originX / chunkSize,
+            originY / chunkSize,
+            originZ / chunkSize);
+
+        candidates.Add(new Candidate(
+            key,
+            center,
+            sizeMeters * 0.8660254038f,
+            Vector3.DistanceSquared(center, cameraPosition)));
+    }
+
+    private static bool BlockIntersectsRadius(
+        Vector3 point,
+        SparseVoxelField field,
+        int originX,
+        int originY,
+        int originZ,
+        int sizeSamples,
+        float radiusSquared)
+    {
+        float voxelSize = SparseVoxelField.VoxelSizeMeters;
+
+        float minX = originX * voxelSize;
+        float minY = originY * voxelSize;
+        float minZ = originZ * voxelSize;
+        float maxX = Math.Min(originX + sizeSamples, field.Width) * voxelSize;
+        float maxY = Math.Min(originY + sizeSamples, field.Height) * voxelSize;
+        float maxZ = Math.Min(originZ + sizeSamples, field.Depth) * voxelSize;
+
+        float dx = point.X < minX ? minX - point.X :
+            point.X > maxX ? point.X - maxX : 0f;
+        float dy = point.Y < minY ? minY - point.Y :
+            point.Y > maxY ? point.Y - maxY : 0f;
+        float dz = point.Z < minZ ? minZ - point.Z :
+            point.Z > maxZ ? point.Z - maxZ : 0f;
+
+        return dx * dx + dy * dy + dz * dz <= radiusSquared;
+    }
+
+    private void EvictObsoleteLodEntries(
+        SparseVoxelField field,
+        Vector3 cameraPosition)
+    {
+        _lodEvictionScratch.Clear();
+
+        // Retain meshes whose aligned block still belongs to the current
+        // hierarchical LOD band, even while temporarily outside the frustum.
+        foreach (ChunkKey key in _chunks.Keys)
+        {
+            if (!IsChunkInCurrentLodBand(key, field, cameraPosition))
+                _lodEvictionScratch.Add(key);
+        }
+
+        foreach (ChunkKey key in _lodEvictionScratch)
+            RemoveCachedChunk(key, "lod-transition");
+    }
+
+    private static bool IsChunkInCurrentLodBand(
+        ChunkKey key,
+        SparseVoxelField field,
+        Vector3 cameraPosition)
+    {
+        int blockSize = ChunkCells * key.Step;
+        int originX = key.X * blockSize;
+        int originY = key.Y * blockSize;
+        int originZ = key.Z * blockSize;
+
+        switch (key.Step)
+        {
+            case LodNearStep:
+                return BlockIntersectsRadius(
+                    cameraPosition, field,
+                    originX, originY, originZ, blockSize,
+                    LodNearRadiusSquared);
+
+            case LodMiddleStep:
+            {
+                int farSize = ChunkCells * LodFarStep;
+                int parentX = originX / farSize * farSize;
+                int parentY = originY / farSize * farSize;
+                int parentZ = originZ / farSize * farSize;
+
+                bool parentInMiddleBand = BlockIntersectsRadius(
+                    cameraPosition, field,
+                    parentX, parentY, parentZ, farSize,
+                    LodMiddleRadiusSquared);
+
+                bool chunkInNearBand = BlockIntersectsRadius(
+                    cameraPosition, field,
+                    originX, originY, originZ, blockSize,
+                    LodNearRadiusSquared);
+
+                return parentInMiddleBand && !chunkInNearBand;
+            }
+
+            case LodFarStep:
+                return !BlockIntersectsRadius(
+                    cameraPosition, field,
+                    originX, originY, originZ, blockSize,
+                    LodMiddleRadiusSquared);
+
+            default:
+                return true;
+        }
+    }
+
+    private void RemoveCachedChunk(ChunkKey key, string reason)
+    {
+        if (!_chunks.Remove(key, out ChunkEntry? entry))
+            return;
+
+        _gpuMeshHashCache.Remove(key);
+
+        int residentMeshes = entry.Surface.Length + entry.CutCap.Length;
+        int partialMeshes = entry.UploadingSurface.Count + entry.UploadingCutCap.Count;
+
+        // Cancels work, returns any staged CPU arrays and unloads partial uploads.
+        // Resident meshes are unloaded by Dispose immediately below.
+        InvalidatePendingBuild(entry);
+
+        _totalGpuUnloads += residentMeshes;
+        _logger.Write(
+            "MESH_GPU_EVICT",
+            $"reason={reason} step={key.Step} chunk=({key.X},{key.Y},{key.Z}) meshes={residentMeshes + partialMeshes}");
+
+        entry.Dispose();
     }
 
     private void RequestBuild(
@@ -1084,7 +1382,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.UploadingSurface.Clear();
             entry.UploadingCutCap.Clear();
 
-            EnqueueReadyUpload(request.Key);
+            EnqueueReadyUpload(request.Key, entry);
         }
     }
 
@@ -1176,10 +1474,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ReturnMeshData(build.CutCap);
     }
 
-    private void EnqueueReadyUpload(ChunkKey key)
+    private void EnqueueReadyUpload(ChunkKey key, ChunkEntry entry)
     {
-        if (_readyUploadKeys.Add(key))
-            _readyUploadQueue.Enqueue(key);
+        if (entry.UploadQueued)
+            return;
+
+        entry.UploadQueued = true;
+        long generation = ++entry.UploadQueueGeneration;
+        _readyUploadQueue.Enqueue(new ReadyUpload(key, entry, generation));
     }
 
     private void UploadReadyMeshes()
@@ -1198,14 +1500,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                 break;
 
-            if (!_readyUploadQueue.TryDequeue(out ChunkKey key))
+            if (!_readyUploadQueue.TryDequeue(out ReadyUpload queued))
                 break;
 
-            _readyUploadKeys.Remove(key);
             visited++;
+            ChunkKey key = queued.Key;
 
-            if (!_chunks.TryGetValue(key, out ChunkEntry? entry) ||
-                !entry.ReadyBuild.HasValue)
+            if (!_chunks.TryGetValue(key, out ChunkEntry? currentEntry) ||
+                !ReferenceEquals(currentEntry, queued.Entry) ||
+                queued.Generation != queued.Entry.UploadQueueGeneration)
+                continue;
+
+            ChunkEntry entry = queued.Entry;
+            entry.UploadQueued = false;
+
+            if (!entry.ReadyBuild.HasValue)
                 continue;
 
             VoxelMeshBuildResult result = entry.ReadyBuild.Value;
@@ -1300,7 +1609,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             {
                 // Round-robin tail insertion: all other ready chunks get a turn
                 // before this chunk can receive another upload.
-                EnqueueReadyUpload(key);
+                EnqueueReadyUpload(key, entry);
                 continue;
             }
 
@@ -1364,6 +1673,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.RunningBuild = null;
         }
         entry.BuildQueued = false;
+        entry.UploadQueued = false;
+        entry.UploadQueueGeneration++;
         if (entry.ReadyBuild is VoxelMeshBuildResult readyBuild)
             ReturnBuildCpuData(readyBuild);
         entry.ReadyBuild = null;
@@ -1391,12 +1702,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.BaseVersion == field.BaseVersion &&
         entry.PaletteVersion == _paletteVersion;
 
-    private void AddVisible(
-        ChunkKey key,
-        ChunkEntry entry,
-        HashSet<ChunkKey> visibleKeys)
+    private void AddVisible(ChunkKey key, ChunkEntry entry)
     {
-        if (entry.Built && visibleKeys.Add(key))
+        if (entry.Built)
         {
             entry.LastSeenFrame = _frame;
             _visible.Add((key, entry));
@@ -1405,15 +1713,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private bool AreCachedMeshesCurrent(
         SparseVoxelField.VoxelBounds bounds,
-        SparseVoxelField field,
-        int step)
+        SparseVoxelField field)
     {
-        int span = ChunkCells * step;
         foreach (ChunkKey key in _visibleCandidateKeys)
         {
-            if (key.Step != step)
-                continue;
-
+            int span = ChunkCells * key.Step;
             int minX = key.X * span;
             int minY = key.Y * span;
             int minZ = key.Z * span;
@@ -1502,45 +1806,35 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void EvictUnusedChunks()
     {
-        // Keep all unchanged GPU meshes resident until actual cache pressure.
-        // Age alone is never a reason to unload a chunk: scrolling away and
-        // back must not cause a VAO upload cycle for unchanged voxel data.
         if (_chunks.Count <= MaximumCachedChunks)
             return;
 
-        HashSet<ChunkKey> protectedKeys = new(_visibleCandidateKeys);
+        _lodEvictionScratch.Clear();
+
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (HasPendingWork(entry))
-                protectedKeys.Add(key);
+            bool protectedChunk = _visibleCandidateKeys.Contains(key) ||
+                HasPendingWork(entry);
+
+            if (!protectedChunk)
+                _lodEvictionScratch.Add(key);
         }
 
         int excess = _chunks.Count - MaximumCachedChunks;
-        foreach ((ChunkKey key, ChunkEntry entry) in _chunks
-            .Where(pair => !protectedKeys.Contains(pair.Key))
-            .OrderBy(pair => pair.Value.LastSeenFrame)
-            .Take(excess)
-            .ToArray())
+        int removeCount = Math.Min(excess, _lodEvictionScratch.Count);
+
+        // Oldest chunks first without allocating LINQ iterators or arrays.
+        _lodEvictionScratch.Sort((left, right) =>
         {
-            if (!_chunks.Remove(key))
-                continue;
+            long leftFrame = _chunks.TryGetValue(left, out ChunkEntry? leftEntry)
+                ? leftEntry.LastSeenFrame : long.MinValue;
+            long rightFrame = _chunks.TryGetValue(right, out ChunkEntry? rightEntry)
+                ? rightEntry.LastSeenFrame : long.MinValue;
+            return leftFrame.CompareTo(rightFrame);
+        });
 
-            _gpuMeshHashCache.Remove(key);
-
-            if (entry.ReadyBuild is VoxelMeshBuildResult readyBuild)
-                ReturnBuildCpuData(readyBuild);
-
-            int gpuMeshCount =
-                entry.Surface.Length +
-                entry.CutCap.Length +
-                entry.UploadingSurface.Count +
-                entry.UploadingCutCap.Count;
-            _totalGpuUnloads += gpuMeshCount;
-            _logger.Write(
-                "MESH_GPU_EVICT",
-                $"reason=hard-cache-limit step={key.Step} chunk=({key.X},{key.Y},{key.Z}) meshes={gpuMeshCount}");
-            entry.Dispose();
-        }
+        for (int i = 0; i < removeCount; i++)
+            RemoveCachedChunk(_lodEvictionScratch[i], "hard-cache-limit");
     }
 
     private void EnsureFieldSubscription(SparseVoxelField field)
@@ -1646,7 +1940,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _chunks.Clear();
         _gpuMeshHashCache.Clear();
         _readyUploadQueue.Clear();
-        _readyUploadKeys.Clear();
         _buildSignal.Dispose();
         _workerShutdown.Dispose();
 
