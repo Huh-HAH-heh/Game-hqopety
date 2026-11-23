@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Collections.Concurrent;
 using Core.Map;
 using RimClone.Render.Raylib;
