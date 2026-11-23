@@ -350,6 +350,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         WorkerBuildMillisecondsLastFrame = 0d;
         BuildsCompletedLastFrame = 0;
         GpuUploadsLastFrame = 0;
+
+        // Consume CPU results before visibility selection and new build requests.
+        // GPU uploads remain on the render thread later in this frame.
+        CollectCompletedBuilds(field);
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
         const int step = FixedRenderStep;
         _activeStep = step;
@@ -545,7 +549,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 AddVisible(candidate.Key, entry, visibleKeys);
         }
 
-        CollectCompletedBuilds(field);
         UploadReadyMeshes();
         double remainingUploadBudget = Math.Max(
             0d,
@@ -733,20 +736,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void ProcessBuildQueue()
     {
-        while (!_workerShutdown.IsCancellationRequested)
+        CancellationToken shutdownToken = _workerShutdown.Token;
+
+        // One semaphore permit corresponds to one queued BuildRequest.
+        // Wait blocks this dedicated background thread; it never blocks the frame thread.
+        while (true)
         {
             try
             {
-                _buildSignal.Wait();
+                _buildSignal.Wait(shutdownToken);
             }
-            catch (ObjectDisposedException)
+            catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
             {
                 return;
             }
 
-            if (_workerShutdown.IsCancellationRequested)
+            if (shutdownToken.IsCancellationRequested)
                 return;
 
+            // Never split Count/TryDequeue: only TryDequeue is safe under contention.
             if (!_buildQueue.TryDequeue(out BuildRequest? request))
                 continue;
 
@@ -754,6 +762,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Interlocked.Increment(ref _activeMeshWorkers);
             Interlocked.Increment(ref _totalBuildStarted);
             long workerStarted = Stopwatch.GetTimestamp();
+
             try
             {
                 CancellationToken token = request.Cancellation.Token;
@@ -1462,8 +1471,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach (ChunkEntry entry in _chunks.Values)
             entry.RunningBuild?.Cancellation.Cancel();
 
+        // CancellationToken wakes every worker blocked in SemaphoreSlim.Wait.
+        // Join is used only during renderer shutdown, never during a frame.
         _workerShutdown.Cancel();
-        _buildSignal.Release(_workerThreads.Length);
         foreach (Thread worker in _workerThreads)
             worker.Join();
 
