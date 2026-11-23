@@ -78,7 +78,7 @@ internal static class Program
     private static (bool Passed, string Detail) TestCutCapBorders()
     {
         const int step = 4;
-        const float cutHeightMeters = 49f;
+        const float cutHeightMeters = 5f;
         const float voxelSizeMeters = SparseVoxelField.VoxelSizeMeters;
         SyntheticTerrainField field = new(1024, 1024, 1024);
         TerrainPalette palette = new();
