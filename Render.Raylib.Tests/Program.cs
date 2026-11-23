@@ -205,11 +205,11 @@ internal static class Program
         foreach (VoxelMeshData mesh in meshes)
         foreach (Vector3 vertex in mesh.Vertices)
         {
-            if (MathF.Abs(vertex.X - sharedX) > 0.0001f ||
-                MathF.Abs(vertex.Y - expectedY) > 0.0001f)
+            if (vertex.X != sharedX || vertex.Y != expectedY)
                 continue;
 
-            points.Add((int)MathF.Round(vertex.Z * 10000f));
+            // Bitwise comparison detects even sub-voxel cracks at the seam.
+            points.Add(BitConverter.SingleToInt32Bits(vertex.Z));
         }
         return points;
     }
