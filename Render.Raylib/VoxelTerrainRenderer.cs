@@ -1090,6 +1090,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
+    private static bool IsChildOf(ChunkKey child, ChunkKey parent)
+    {
+        if (child.Step >= parent.Step || parent.Step % child.Step != 0)
+            return false;
+
+        int ratio = parent.Step / child.Step;
+        return child.X / ratio == parent.X &&
+            child.Y / ratio == parent.Y &&
+            child.Z / ratio == parent.Z;
+    }
+
     private static ChunkKey GetParentKey(ChunkKey child, int parentStep)
     {
         int ratio = parentStep / child.Step;
