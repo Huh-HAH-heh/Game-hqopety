@@ -1920,6 +1920,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.CutDirty = true;
     }
 
+    private static bool HasPendingWork(ChunkEntry entry) =>
+        entry.RunningBuild != null ||
+        entry.BuildQueued ||
+        entry.ReadyBuild.HasValue ||
+        entry.UploadingSurface.Count > 0 ||
+        entry.UploadingCutCap.Count > 0;
+
     private void EvictUnusedChunks(Vector3 cameraPosition)
     {
         if (_chunks.Count <= MaximumCachedChunks)
