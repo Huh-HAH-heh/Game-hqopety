@@ -422,6 +422,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         CandidateOverflowLastFrame = 0;
         _visible.Clear();
         _visibleCandidateKeys.Clear();
+        HashSet<ChunkKey> visibleKeys = new();
 
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
             new(candidates.Count);
