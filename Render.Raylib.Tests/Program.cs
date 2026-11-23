@@ -96,7 +96,7 @@ internal static class Program
         VoxelMeshData[] rightCap = VoxelChunkMesher.BuildCutCapData(
             right, cutHeightMeters, palette);
 
-        float sharedX = SparseVoxelField.ChunkSize * step * voxelSizeMeters;
+        float sharedX = (SparseVoxelField.ChunkSize * step + 0.5f) * voxelSizeMeters;
         HashSet<int> leftBoundary = CollectCapBoundaryZ(leftCap, sharedX, cutHeightMeters);
         HashSet<int> rightBoundary = CollectCapBoundaryZ(rightCap, sharedX, cutHeightMeters);
 
