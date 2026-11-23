@@ -918,6 +918,16 @@ internal static class VoxelChunkMesher
 
     private static SlicePoint Intersect(SlicePoint a, SlicePoint b)
     {
+        // Canonical endpoint order makes the same shared SDF edge produce
+        // bit-identical intersection coordinates from either chunk/winding.
+        if (a.Position.X > b.Position.X ||
+            (a.Position.X == b.Position.X && a.Position.Y > b.Position.Y) ||
+            (a.Position.X == b.Position.X && a.Position.Y == b.Position.Y &&
+             a.Position.Z > b.Position.Z))
+        {
+            (a, b) = (b, a);
+        }
+
         float denominator = a.Density - b.Density;
         float t = MathF.Abs(denominator) > 1e-8f
             ? Math.Clamp(a.Density / denominator, 0f, 1f)
@@ -925,6 +935,7 @@ internal static class VoxelChunkMesher
         Vector3 position = Vector3.Lerp(a.Position, b.Position, t);
         if (!IsFinite(position))
             position = IsFinite(a.Position) ? a.Position : b.Position;
+
         return new SlicePoint(position, 0f);
     }
 
