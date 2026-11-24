@@ -20,7 +20,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 {
     private const int MaximumBodies = 16;
     private const int MaximumChunksPerBody = 64;
-    private const int DynamicChunkCells = SparseVoxelField.ChunkSize * 4;
+    private const int DynamicChunkCells = SparseVoxelField.ChunkSize;
     private const long MaximumDynamicSnapshotBytes = 32L * 1024 * 1024;
     private const float Gravity = 9.81f;
     private const float MaximumFallSpeed = 45f;
@@ -225,13 +225,12 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 for (int x = 0; x < chunksX; x++)
                 {
                     meshToken.ThrowIfCancellationRequested();
-                    VoxelChunkBuildInput input = new(
-                        snapshot, x, y, z, DynamicChunkCells);
-                    while (!input.IsComplete)
-                    {
-                        meshToken.ThrowIfCancellationRequested();
-                        input.CaptureNext(snapshot, input.CaptureCount);
-                    }
+                    using VoxelChunkBuildInput input = new(
+                        snapshot, x, y, z);
+                    input.CaptureAll(snapshot);
+
+                    if (!input.HasPotentialSurface)
+                        continue;
 
                     result.AddRange(VoxelChunkMesher.BuildSurfaceData(
                         input, palette, meshToken));
