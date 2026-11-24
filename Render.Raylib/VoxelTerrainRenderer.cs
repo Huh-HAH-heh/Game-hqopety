@@ -444,7 +444,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 : int.MinValue;
 
             bool cutStateStale = entry.CutLayer != targetCutLayer;
-            bool needsSurfaceBuild = surfaceStale || cutStateStale;
+            bool needsSurfaceBuild =
+                surfaceStale ||
+                cutStateStale ||
+                entry.CutDirty;
 
             if (needsSurfaceBuild && !HasPendingWork(entry))
             {
