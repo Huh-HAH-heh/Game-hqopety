@@ -423,7 +423,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? chunk) &&
             Volatile.Read(ref chunk.DensityMask[index]) != 0)
-            return chunk.Density[index] / DensityScale;
+            return Volatile.Read(ref chunk.Density[index]) / DensityScale;
 
         return _baseDensity(x, y, z);
     }
@@ -1145,10 +1145,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     int densityIndex = localX +
                         localY * DensitySamplesPerAxis +
                         localZ * SamplePlane;
-                    if (chunk.DensityMask[densityIndex] != 0)
+                    if (Volatile.Read(ref chunk.DensityMask[densityIndex]) != 0)
                     {
-                        chunk.DensityMask[densityIndex] = 0;
-                        chunk.Density[densityIndex] = 0;
+                        Volatile.Write(ref chunk.DensityMask[densityIndex], (byte)0);
+                        Volatile.Write(ref chunk.Density[densityIndex], (short)0);
                         changed = true;
                     }
 
