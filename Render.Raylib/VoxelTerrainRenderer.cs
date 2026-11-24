@@ -301,6 +301,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public long TotalEmptyChunks => _totalEmptyChunks;
 
     public int FrustumCandidatesLastFrame { get; private set; }
+    public int MacroFrustumTestsLastFrame { get; private set; }
+    public int VisibleMacroRegionsLastFrame { get; private set; }
     public int CandidateOverflowLastFrame { get; private set; }
     public string DiagnosticsLogPath => _logger.LogPath;
     public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
@@ -405,6 +407,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         candidates.Clear();
 
         int frustumTests = 0;
+        int macroFrustumTests = 0;
+        int visibleMacroRegions = 0;
         CollectVisibleCandidates(
             field,
             camera,
@@ -412,12 +416,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             viewportHeight,
             maximumViewDistanceMeters,
             candidates,
-            ref frustumTests);
+            ref frustumTests,
+            ref macroFrustumTests,
+            ref visibleMacroRegions);
 
         candidates.Sort(static (a, b) =>
             a.DistanceSquared.CompareTo(b.DistanceSquared));
 
         FrustumCandidatesLastFrame = frustumTests;
+        MacroFrustumTestsLastFrame = macroFrustumTests;
+        VisibleMacroRegionsLastFrame = visibleMacroRegions;
         CandidateOverflowLastFrame = 0;
         Step1ChunksLastFrame = candidates.Count;
         _visibleCandidateKeys.Clear();
@@ -512,6 +520,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             string summary =
                 $"frame={_frame} resolution=Step1 chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
+                $"macroFrustum={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkFrustum={FrustumCandidatesLastFrame} " +
                 $"emptyChunks={_totalEmptyChunks} mainThreadCopyMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"workerMs={WorkerBuildMillisecondsLastFrame:0.000} lastWorkerMs={LastWorkerBuildMilliseconds:0.000} " +
                 $"queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
@@ -596,11 +605,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int viewportHeight,
         float maximumViewDistanceMeters,
         List<Candidate> candidates,
-        ref int frustumTests)
+        ref int frustumTests,
+        ref int macroFrustumTests,
+        ref int visibleMacroRegions)
     {
+        const int macroChunkCount = 4;
         const float sphereScale = 0.8660254038f;
+
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
-        float chunkSizeSamples = ChunkCells;
         float chunkSizeMeters = ChunkCells * voxelSize;
         float chunkRadiusMeters = chunkSizeMeters * sphereScale;
         float viewDistance = float.IsFinite(maximumViewDistanceMeters)
@@ -633,63 +645,139 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             (int)MathF.Floor((cameraPosition.Z + scanRadius) / chunkSizeMeters),
             0, chunksZ - 1);
 
-        for (int z = firstZ; z <= lastZ; z++)
-        for (int y = firstY; y <= lastY; y++)
-        for (int x = firstX; x <= lastX; x++)
-        {
-            int originX = x * ChunkCells;
-            int originY = y * ChunkCells;
-            int originZ = z * ChunkCells;
+        int macroCells = ChunkCells * macroChunkCount;
+        int firstMacroX = firstX / macroChunkCount;
+        int lastMacroX = lastX / macroChunkCount;
+        int firstMacroY = firstY / macroChunkCount;
+        int lastMacroY = lastY / macroChunkCount;
+        int firstMacroZ = firstZ / macroChunkCount;
+        int lastMacroZ = lastZ / macroChunkCount;
 
-            float nearestDistanceSquared = BlockNearestDistanceSquared(
+        // Coarse pass: reject whole 4x4x4 chunk regions before touching leaf chunks.
+        for (int macroZ = firstMacroZ; macroZ <= lastMacroZ; macroZ++)
+        for (int macroY = firstMacroY; macroY <= lastMacroY; macroY++)
+        for (int macroX = firstMacroX; macroX <= lastMacroX; macroX++)
+        {
+            int firstChunkX = macroX * macroChunkCount;
+            int firstChunkY = macroY * macroChunkCount;
+            int firstChunkZ = macroZ * macroChunkCount;
+            int endChunkX = Math.Min(firstChunkX + macroChunkCount, chunksX);
+            int endChunkY = Math.Min(firstChunkY + macroChunkCount, chunksY);
+            int endChunkZ = Math.Min(firstChunkZ + macroChunkCount, chunksZ);
+
+            int originX = firstChunkX * ChunkCells;
+            int originY = firstChunkY * ChunkCells;
+            int originZ = firstChunkZ * ChunkCells;
+            int sizeX = Math.Min(macroCells, field.Width - originX);
+            int sizeY = Math.Min(macroCells, field.Height - originY);
+            int sizeZ = Math.Min(macroCells, field.Depth - originZ);
+
+            float nearestDistanceSquared = BoundsNearestDistanceSquared(
                 cameraPosition,
                 originX,
                 originY,
                 originZ,
-                field);
+                sizeX,
+                sizeY,
+                sizeZ);
 
             if (nearestDistanceSquared > viewDistanceSquared)
                 continue;
 
-            Vector3 center = new(
-                (originX + ChunkCells * 0.5f) * voxelSize,
-                (originY + ChunkCells * 0.5f) * voxelSize,
-                (originZ + ChunkCells * 0.5f) * voxelSize);
+            float halfX = sizeX * voxelSize * 0.5f;
+            float halfY = sizeY * voxelSize * 0.5f;
+            float halfZ = sizeZ * voxelSize * 0.5f;
+            Vector3 macroCenter = new(
+                (originX * voxelSize) + halfX,
+                (originY * voxelSize) + halfY,
+                (originZ * voxelSize) + halfZ);
+            float macroRadius = MathF.Sqrt(
+                halfX * halfX +
+                halfY * halfY +
+                halfZ * halfZ);
 
-            frustumTests++;
+            macroFrustumTests++;
             if (!TerrainFrustum.IsSphereVisible(
                 camera,
-                center,
-                chunkRadiusMeters,
+                macroCenter,
+                macroRadius,
                 viewportWidth,
                 viewportHeight,
                 viewDistance))
                 continue;
 
-            ChunkKey key = new(x, y, z);
-            candidates.Add(new Candidate(
-                key,
-                center,
-                chunkRadiusMeters,
-                Vector3.DistanceSquared(center, cameraPosition)));
+            visibleMacroRegions++;
+
+            // Fine pass: only chunks belonging to a visible macro region are tested.
+            int childFirstX = Math.Max(firstX, firstChunkX);
+            int childLastX = Math.Min(lastX, endChunkX - 1);
+            int childFirstY = Math.Max(firstY, firstChunkY);
+            int childLastY = Math.Min(lastY, endChunkY - 1);
+            int childFirstZ = Math.Max(firstZ, firstChunkZ);
+            int childLastZ = Math.Min(lastZ, endChunkZ - 1);
+
+            for (int z = childFirstZ; z <= childLastZ; z++)
+            for (int y = childFirstY; y <= childLastY; y++)
+            for (int x = childFirstX; x <= childLastX; x++)
+            {
+                int chunkOriginX = x * ChunkCells;
+                int chunkOriginY = y * ChunkCells;
+                int chunkOriginZ = z * ChunkCells;
+
+                float chunkNearestDistanceSquared = BoundsNearestDistanceSquared(
+                    cameraPosition,
+                    chunkOriginX,
+                    chunkOriginY,
+                    chunkOriginZ,
+                    ChunkCells,
+                    ChunkCells,
+                    ChunkCells);
+
+                if (chunkNearestDistanceSquared > viewDistanceSquared)
+                    continue;
+
+                Vector3 center = new(
+                    (chunkOriginX + ChunkCells * 0.5f) * voxelSize,
+                    (chunkOriginY + ChunkCells * 0.5f) * voxelSize,
+                    (chunkOriginZ + ChunkCells * 0.5f) * voxelSize);
+
+                frustumTests++;
+                if (!TerrainFrustum.IsSphereVisible(
+                    camera,
+                    center,
+                    chunkRadiusMeters,
+                    viewportWidth,
+                    viewportHeight,
+                    viewDistance))
+                    continue;
+
+                ChunkKey key = new(x, y, z);
+                candidates.Add(new Candidate(
+                    key,
+                    center,
+                    chunkRadiusMeters,
+                    Vector3.DistanceSquared(center, cameraPosition)));
+            }
         }
     }
 
-    private static float BlockNearestDistanceSquared(
+    private static float BoundsNearestDistanceSquared(
         Vector3 point,
         int originX,
         int originY,
         int originZ,
-        SparseVoxelField field)
+        int sizeX,
+        int sizeY,
+        int sizeZ)
     {
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
 
         float minX = originX * voxelSize;
         float minY = originY * voxelSize;
         float minZ = originZ * voxelSize;
-        float maxX = Math.Min(originX + ChunkCells, field.Width) * voxelSize;
-        float maxY = Math.Min(originY + ChunkCells, field.Height) * voxelSize;
-        float maxZ = Math.Min(originZ + ChunkCells, field.Depth) * voxelSize;
+        float maxX = (originX + sizeX) * voxelSize;
+        float maxY = (originY + sizeY) * voxelSize;
+        float maxZ = (originZ + sizeZ) * voxelSize;
 
         float dx = point.X < minX ? minX - point.X :
             point.X > maxX ? point.X - maxX : 0f;
