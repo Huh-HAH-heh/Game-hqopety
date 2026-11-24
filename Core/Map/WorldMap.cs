@@ -1255,7 +1255,7 @@ public sealed class WorldMap
                 int index = GetColumnIndex(
                     region.TileOriginX,
                     region.TileOriginY + row);
-                Array.Fill(_surfaceHeights, normalizedHeight, index, region.TileWidth);
+                WriteSurfaceHeights(index, region.TileWidth, normalizedHeight);
                 Array.Clear(_voxelSurfaceCacheState, index, region.TileWidth);
                 Array.Clear(_voxelSurfaceHeightCache, index, region.TileWidth);
                 Array.Clear(_volumeSurfaceHeights, index, region.TileWidth);
@@ -1339,7 +1339,7 @@ public sealed class WorldMap
                             ? materialId
                             : (ushort)0;
 
-                        Array.Fill(_surfaceHeights, storedHeight, targetIndex, patchSize);
+                        WriteSurfaceHeights(targetIndex, patchSize, storedHeight);
                         Array.Clear(_voxelSurfaceCacheState, targetIndex, patchSize);
                         Array.Clear(_voxelSurfaceHeightCache, targetIndex, patchSize);
                         Array.Fill(_columnMaterialIds, storedMaterial, targetIndex, patchSize);
@@ -1402,7 +1402,7 @@ public sealed class WorldMap
             // Keep ordinary terrain in the compact surface arrays. The detailed
             // volume tree is created only when a column receives a complex edit.
             Blocks.Volumes.ClearColumn(globalX, globalY);
-            _surfaceHeights[index] = storedHeight;
+            Volatile.Write(ref _surfaceHeights[index], storedHeight);
             _volumeSurfaceHeights[index] = 0;
             _voxelSurfaceCacheState[index] = 0;
             _voxelSurfaceHeightCache[index] = 0;
@@ -1509,7 +1509,7 @@ public sealed class WorldMap
         int index = GetColumnIndex(globalX, globalY);
         Blocks.Volumes.ClearColumn(globalX, globalY);
         _volumeSurfaceHeights[index] = 0;
-        _surfaceHeights[index] = 0;
+        Volatile.Write(ref _surfaceHeights[index], (ushort)0);
         _rangeCache[index] = null;
         _voxelSurfaceCacheState[index] = 0;
         _voxelSurfaceHeightCache[index] = 0;
@@ -1535,8 +1535,9 @@ public sealed class WorldMap
                 out ushort topExclusive,
                 out ushort simpleMaterial))
         {
-            _surfaceHeights[columnIndex] =
-                checked((ushort)(topExclusive * LayerHeightUnits));
+            Volatile.Write(
+                ref _surfaceHeights[columnIndex],
+                checked((ushort)(topExclusive * LayerHeightUnits)));
             _simpleFillColumns[columnIndex] = true;
             _columnMaterialIds[columnIndex] = simpleMaterial;
             return;
@@ -1886,6 +1887,16 @@ public sealed class WorldMap
         {
             _voxelBaseSamplerLock.ExitWriteLock();
         }
+    }
+
+    private void WriteSurfaceHeights(
+        int startIndex,
+        int count,
+        ushort value)
+    {
+        int end = startIndex + count;
+        for (int index = startIndex; index < end; index++)
+            Volatile.Write(ref _surfaceHeights[index], value);
     }
 
     private int GetColumnIndex(
