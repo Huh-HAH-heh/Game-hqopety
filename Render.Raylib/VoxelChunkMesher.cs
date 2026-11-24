@@ -144,17 +144,22 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         CellCount = checked(cellsPerAxis * cellsPerAxis * cellsPerAxis);
 
         float[]? densities = null;
+        ushort[]? materials = null;
         try
         {
             densities = ArrayPool<float>.Shared.Rent(SampleCount);
-            Materials = ArrayPool<ushort>.Shared.Rent(CellCount);
-            Array.Clear(Materials, 0, CellCount);
+            materials = ArrayPool<ushort>.Shared.Rent(CellCount);
+            Array.Clear(materials, 0, CellCount);
+
             DensitySamples = densities;
+            Materials = materials;
         }
         catch
         {
             if (densities != null)
                 ArrayPool<float>.Shared.Return(densities);
+            if (materials != null)
+                ArrayPool<ushort>.Shared.Return(materials);
             throw;
         }
     }
@@ -328,6 +333,7 @@ internal readonly record struct VoxelMeshBuildResult(
 internal static class VoxelChunkMesher
 {
     private const int MaximumVerticesPerMesh = 60_000;
+    private const int MaximumIndicesPerMesh = 180_000;
     private const float InterpolationEpsilon = 1e-20f;
     private const float NormalEpsilon = 1e-20f;
 
@@ -385,7 +391,7 @@ internal static class VoxelChunkMesher
             _vertices = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
             _normals = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
             _colors = ArrayPool<byte>.Shared.Rent(MaximumVerticesPerMesh * 4);
-            _indices = ArrayPool<ushort>.Shared.Rent(MaximumVerticesPerMesh * 3);
+            _indices = ArrayPool<ushort>.Shared.Rent(MaximumIndicesPerMesh);
         }
 
         public void AddQuad(int a, int b, int c, int d, bool solidAtEdgeStart)
@@ -419,8 +425,11 @@ internal static class VoxelChunkMesher
                 (_localIndexBySource[b] < 0 ? 1 : 0) +
                 (_localIndexBySource[c] < 0 ? 1 : 0);
 
-            if (_vertexCount + missing > MaximumVerticesPerMesh)
+            if (_vertexCount + missing > MaximumVerticesPerMesh ||
+                _indexCount + 3 > MaximumIndicesPerMesh)
+            {
                 Flush();
+            }
 
             ushort ia = GetLocalIndex(a);
             ushort ib = GetLocalIndex(b);
