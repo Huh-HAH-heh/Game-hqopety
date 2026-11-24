@@ -472,6 +472,33 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         return _baseMaterial(x, y, z);
     }
 
+    /// <summary>
+    /// Renderer fast path. Resolves occupancy from byte-sized material overrides
+    /// and the procedural base material; no float SDF sampling is performed.
+    /// </summary>
+    public byte GetBlockId(int x, int y, int z)
+    {
+        if (!IsInsideCell(x, y, z))
+            return 0;
+
+        ChunkCoordinate densityKey = GetSampleChunk(x, y, z, out int densityIndex);
+        if (_chunks.TryGetValue(densityKey, out Chunk? densityChunk) &&
+            Volatile.Read(ref densityChunk.DensityMask[densityIndex]) != 0 &&
+            Volatile.Read(ref densityChunk.Density[densityIndex]) <= 0)
+        {
+            return 0;
+        }
+
+        ChunkCoordinate materialKey = GetCellChunk(x, y, z, out int materialIndex);
+        if (_chunks.TryGetValue(materialKey, out Chunk? materialChunk) &&
+            Volatile.Read(ref materialChunk.MaterialMask[materialIndex]) != 0)
+        {
+            return checked((byte)Volatile.Read(ref materialChunk.Materials[materialIndex]));
+        }
+
+        return checked((byte)_baseMaterial(x, y, z));
+    }
+
 
 
     /// <summary>
