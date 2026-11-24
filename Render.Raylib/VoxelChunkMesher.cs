@@ -712,10 +712,12 @@ internal static class VoxelChunkMesher
     {
         int cells = input.CellsPerAxis;
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        // SDF samples are located at voxel centres, not grid corners.
+        // Surface Nets cells lie between sample centres.
         Vector3 origin = new(
-            input.OriginX * voxelSize,
-            input.OriginY * voxelSize,
-            input.OriginZ * voxelSize);
+            (input.OriginX + 0.5f) * voxelSize,
+            (input.OriginY + 0.5f) * voxelSize,
+            (input.OriginZ + 0.5f) * voxelSize);
 
         Span<float> cornerDensities = stackalloc float[8];
         int vertexCount = 0;
