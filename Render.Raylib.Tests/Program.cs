@@ -183,7 +183,7 @@ internal static class Program
             // The shared cell centre is half a voxel inside the left chunk,
             // and is also the right chunk's negative-X halo cell.
             float sharedCellX =
-                (2 * 64 - 0.5f) * SparseVoxelField.VoxelSizeMeters;
+                (2 * 64) * SparseVoxelField.VoxelSizeMeters;
             const float surfaceY = 8f;
 
             HashSet<int> leftBoundary = CollectBoundaryZ(left, sharedCellX, surfaceY);
