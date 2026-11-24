@@ -204,7 +204,10 @@ internal static class VoxelChunkMesher
     {
         Vector3.UnitX,
         Vector3.UnitY,
-        Vector3.UnitZ
+        Vector3.UnitZ,
+        -Vector3.UnitX,
+        -Vector3.UnitY,
+        -Vector3.UnitZ
     };
 
     private sealed class MeshBatch : IDisposable
@@ -580,7 +583,7 @@ internal static class VoxelChunkMesher
         Vector3 p2 = MakePoint(origin, axis, uAxis, vAxis, slice, u + width, v + height);
         Vector3 p3 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v + height);
 
-        Vector3 normal = AxisNormals[axis] * normalSign;
+        Vector3 normal = AxisNormals[axis + (normalSign < 0 ? 3 : 0)];
         batch.AddQuad(
             p0,
             p1,
