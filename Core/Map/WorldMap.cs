@@ -1749,25 +1749,43 @@ public sealed class WorldMap
 
     private ushort SampleBaseVoxelMaterial(int voxelX, int voxelY, int voxelZ)
     {
+        if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
+            voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
+            return 0;
+
+        int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
+        int tileZ = Math.Clamp(voxelZ / 10, 0, MaxTileY);
+        int column = GetColumnIndex(tileX, tileZ);
+
+        // Ordinary terrain is an immutable height/material pair between edits.
+        // Read it directly; only complex edited columns need the volume-tree lock.
+        if (Volatile.Read(ref _simpleFillColumns[column]))
+        {
+            ushort materialId = Volatile.Read(ref _columnMaterialIds[column]);
+            if (materialId == 0)
+                return 0;
+
+            float surfaceHeight = SampleBaseSurfaceHeight(
+                voxelX, voxelZ,
+                out _, out _);
+
+            return voxelY + 0.5f < surfaceHeight
+                ? materialId
+                : (ushort)0;
+        }
+
         _voxelBaseSamplerLock.EnterReadLock();
         try
         {
-            if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-                voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
-                return 0;
-
-            int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
-            int tileZ = Math.Clamp(voxelZ / 10, 0, MaxTileY);
-            int column = GetColumnIndex(tileX, tileZ);
-
-            if (_simpleFillColumns[column])
+            if (Volatile.Read(ref _simpleFillColumns[column]))
             {
+                ushort materialId = Volatile.Read(ref _columnMaterialIds[column]);
                 float surfaceHeight = SampleBaseSurfaceHeight(
                     voxelX, voxelZ,
                     out _, out _);
 
-                return voxelY + 0.5f < surfaceHeight
-                    ? _columnMaterialIds[column]
+                return materialId != 0 && voxelY + 0.5f < surfaceHeight
+                    ? materialId
                     : (ushort)0;
             }
 
