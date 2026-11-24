@@ -87,7 +87,7 @@ internal static class Program
         for (int y = 0; y < side; y++)
         {
             byte a = left.Blocks[side - 1 + y * side + z * plane];
-            byte b = right.Blocks[y * side + z * plane];
+            byte b = right.Blocks[1 + y * side + z * plane];
             if (a != b)
                 mismatches++;
         }
