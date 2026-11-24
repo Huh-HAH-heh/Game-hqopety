@@ -386,8 +386,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         CollectCompletedBuilds(field);
 
-        int cutSampleY = (int)MathF.Floor(
-            cutHeightMeters / SparseVoxelField.VoxelSizeMeters - 0.5f);
         int cutLayer = cutEnabled
             ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
             : -1;
@@ -517,8 +515,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
 
+        float renderCutHeightMeters = cutEnabled && stableCutLayer >= 0
+            ? stableCutLayer * SparseVoxelField.VoxelSizeMeters
+            : cutHeightMeters;
+
         SetLighting();
-        SetCutShader(cutEnabled, cutHeightMeters);
+        SetCutShader(cutEnabled, renderCutHeightMeters);
 
         float worldRadius = 0.5f * MathF.Sqrt(
             field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
@@ -543,24 +545,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
-        if (cutEnabled)
-        {
-            SetCutShader(enabled: false, cutHeightMeters);
-
-            foreach ((ChunkKey _, ChunkEntry entry) in _visible)
-            {
-                if (entry.CutLayer != stableCutLayer)
-                    continue;
-
-                foreach (Mesh mesh in entry.CutCap)
-                {
-                    DrawMesh(mesh, _material, Matrix4x4.Identity);
-                    draws++;
-                }
-            }
-        }
-
-        SetCutShader(cutEnabled, cutHeightMeters);
+        SetCutShader(cutEnabled, renderCutHeightMeters);
         _dynamicFragments.Draw(_material);
         EndMode3D();
 
@@ -1100,6 +1085,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.CutLayer = request.CutLayer;
                 entry.CutDirty = false;
                 entry.Built = true;
+                DiscardLegacyCutCap(request.Key, entry);
                 uploadSurface = false;
 
                 _totalEmptyChunks++;
@@ -1119,6 +1105,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.SurfaceDirty = false;
                 entry.CutLayer = request.CutLayer;
                 entry.CutDirty = false;
+                DiscardLegacyCutCap(request.Key, entry);
                 uploadSurface = false;
                 _totalIdenticalSurfaceSkips++;
             }
@@ -1291,20 +1278,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.CutDirty = false;
                 entry.Built = true;
 
-                foreach (Mesh oldCap in entry.CutCap)
-                {
-                    UnloadMesh(oldCap);
-                    _totalGpuUnloads++;
-                }
-                entry.CutCap = Array.Empty<Mesh>();
-
-                _gpuMeshHashCache.TryGetValue(queued.Key, out ChunkGpuHashes currentHashes);
-                _gpuMeshHashCache[queued.Key] = currentHashes with
-                {
-                    HasCutCap = false,
-                    CutCapHash = 0UL,
-                    CutLayer = int.MinValue
-                };
+                DiscardLegacyCutCap(queued.Key, entry);
 
                 RebuiltChunks++;
             }
@@ -1461,6 +1435,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _cutHeightLocation,
             height,
             ShaderUniformDataType.Float);
+    }
+
+    private void DiscardLegacyCutCap(ChunkKey key, ChunkEntry entry)
+    {
+        foreach (Mesh mesh in entry.CutCap)
+        {
+            UnloadMesh(mesh);
+            _totalGpuUnloads++;
+        }
+
+        entry.CutCap = Array.Empty<Mesh>();
+
+        _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
+        _gpuMeshHashCache[key] = current with
+        {
+            HasCutCap = false,
+            CutCapHash = 0UL,
+            CutLayer = int.MinValue
+        };
     }
 
     private void ClearCutCap(ChunkKey key, ChunkEntry entry)
