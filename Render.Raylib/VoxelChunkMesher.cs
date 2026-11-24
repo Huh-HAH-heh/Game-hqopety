@@ -143,11 +143,10 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         SampleCount = checked(SamplePlane * SampleSide);
         CellCount = checked(cellsPerAxis * cellsPerAxis * cellsPerAxis);
 
-        float[]? densities = null;
+        float[] densities = ArrayPool<float>.Shared.Rent(SampleCount);
         ushort[]? materials = null;
         try
         {
-            densities = ArrayPool<float>.Shared.Rent(SampleCount);
             materials = ArrayPool<ushort>.Shared.Rent(CellCount);
             Array.Clear(materials, 0, CellCount);
 
@@ -156,8 +155,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         }
         catch
         {
-            if (densities != null)
-                ArrayPool<float>.Shared.Return(densities);
+            ArrayPool<float>.Shared.Return(densities);
             if (materials != null)
                 ArrayPool<ushort>.Shared.Return(materials);
             throw;
@@ -670,7 +668,6 @@ internal static class VoxelChunkMesher
             BuildConnectivity(
                 input,
                 cellVertices,
-                vertices,
                 batch,
                 side,
                 cancellationToken);
@@ -920,7 +917,6 @@ internal static class VoxelChunkMesher
     private static void BuildConnectivity(
         VoxelChunkBuildInput input,
         int[] cellVertices,
-        Vector3[] vertices,
         SurfaceMeshBatch batch,
         int side,
         CancellationToken cancellationToken)
