@@ -1723,6 +1723,12 @@ public sealed class WorldMap
     public void SmoothVoxelSphere(Vector3 centerMeters, float radiusMeters, float strength = 0.5f) =>
         Voxels.SmoothSphere(centerMeters, radiusMeters, strength);
 
+    /// <summary>
+    /// Samples the procedural base as a continuous signed-distance approximation.
+    /// Surface anchors are stored at 1 m tile centres, then reconstructed bilinearly
+    /// on the shared 0.1 m voxel lattice. Positive values are solid; negative are air.
+    /// Density is measured in voxel units, matching SparseVoxelField's edit scale.
+    /// </summary>
     private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
     {
         _voxelBaseSamplerLock.EnterReadLock();
@@ -1732,14 +1738,17 @@ public sealed class WorldMap
                 voxelX >= Voxels.Width || voxelY > Voxels.Height || voxelZ >= Voxels.Depth)
                 return -1f;
 
-            // The procedural base is authored at 1 m XY resolution. Keep each
-            // base map tile constant across its 10x10 horizontal voxel footprint;
-            // local edits are the full 0.1 m 3D detail layer.
-            int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
-            int tileY = Math.Clamp(voxelZ / 10, 0, MaxTileY);
-            ushort surfaceHeight = _surfaceHeights[GetColumnIndex(tileX, tileY)];
-            return surfaceHeight - (voxelY + 0.5f);
-        
+            float surfaceHeight = SampleBaseSurfaceHeight(
+                voxelX, voxelZ,
+                out float slopeX,
+                out float slopeZ);
+
+            // First-order signed distance to the local tangent plane of y=h(x,z).
+            // The slopes are measured in voxel units, so all axes share one scale.
+            float gradientLength = MathF.Sqrt(
+                1f + slopeX * slopeX + slopeZ * slopeZ);
+
+            return (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
         }
         finally
         {
@@ -1756,24 +1765,74 @@ public sealed class WorldMap
                 voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
                 return 0;
 
-            int tileX = voxelX / 10;
-            int tileY = voxelZ / 10;
-            int column = GetColumnIndex(tileX, tileY);
+            int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
+            int tileZ = Math.Clamp(voxelZ / 10, 0, MaxTileY);
+            int column = GetColumnIndex(tileX, tileZ);
+
             if (_simpleFillColumns[column])
             {
-                int filledLayers = Math.Clamp(
-                    (_surfaceHeights[column] + LayerHeightUnits - 1) / LayerHeightUnits,
-                    0, LayerCount);
-                return voxelY < filledLayers ? _columnMaterialIds[column] : (ushort)0;
+                float surfaceHeight = SampleBaseSurfaceHeight(
+                    voxelX, voxelZ,
+                    out _, out _);
+
+                return voxelY + 0.5f < surfaceHeight
+                    ? _columnMaterialIds[column]
+                    : (ushort)0;
             }
 
-            return Blocks.Volumes.GetMaterialId(tileX, tileY, voxelY);
-        
+            return Blocks.Volumes.GetMaterialId(tileX, tileZ, voxelY);
         }
         finally
         {
             _voxelBaseSamplerLock.ExitReadLock();
         }
+    }
+
+    /// <summary>
+    /// Reconstructs the 1 m height anchors at a voxel-centre position.
+    /// Returns height in vertical voxel units and slopes per horizontal voxel.
+    /// </summary>
+    private float SampleBaseSurfaceHeight(
+        int voxelX,
+        int voxelZ,
+        out float slopeX,
+        out float slopeZ)
+    {
+        // Height anchors are located at tile centres, not tile corners.
+        float gridX = (voxelX + 0.5f) * SparseVoxelField.VoxelSizeMeters - 0.5f;
+        float gridZ = (voxelZ + 0.5f) * SparseVoxelField.VoxelSizeMeters - 0.5f;
+
+        int rawX0 = (int)MathF.Floor(gridX);
+        int rawZ0 = (int)MathF.Floor(gridZ);
+        float tx = gridX - rawX0;
+        float tz = gridZ - rawZ0;
+
+        int x0 = Math.Clamp(rawX0, 0, MaxTileX);
+        int x1 = Math.Clamp(rawX0 + 1, 0, MaxTileX);
+        int z0 = Math.Clamp(rawZ0, 0, MaxTileY);
+        int z1 = Math.Clamp(rawZ0 + 1, 0, MaxTileY);
+
+        float h00 = _surfaceHeights[GetColumnIndex(x0, z0)];
+        float h10 = _surfaceHeights[GetColumnIndex(x1, z0)];
+        float h01 = _surfaceHeights[GetColumnIndex(x0, z1)];
+        float h11 = _surfaceHeights[GetColumnIndex(x1, z1)];
+
+        float row0 = h00 + (h10 - h00) * tx;
+        float row1 = h01 + (h11 - h01) * tx;
+        float height = row0 + (row1 - row0) * tz;
+
+        float derivativeTileX =
+            (h10 - h00) * (1f - tz) +
+            (h11 - h01) * tz;
+        float derivativeTileZ =
+            (h01 - h00) * (1f - tx) +
+            (h11 - h10) * tx;
+
+        // One voxel step spans 0.1 m while one height anchor spans 1 m.
+        slopeX = derivativeTileX * SparseVoxelField.VoxelSizeMeters;
+        slopeZ = derivativeTileZ * SparseVoxelField.VoxelSizeMeters;
+
+        return height;
     }
 
     private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
