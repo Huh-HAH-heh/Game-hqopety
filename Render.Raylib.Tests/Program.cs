@@ -24,6 +24,8 @@ internal static class Program
             TestGreedyCutCap, ref failures);
         Run("Fully enclosed solid chunk emits no faces",
             TestEnclosedChunkEarlyOut, ref failures);
+        Run("Greedy meshing creates the six internal tunnel walls",
+            TestEnclosedTunnel, ref failures);
         Run("Empty chunk exits before greedy meshing",
             TestEmptyChunkEarlyOut, ref failures);
         Run("Greedy mesher writes only axis-aligned constant normals",
@@ -197,6 +199,49 @@ internal static class Program
         }
     }
 
+    private static (bool Passed, string Detail) TestEnclosedTunnel()
+    {
+        SyntheticBlockField field = new(128, 128, 128, solidAll: true, tunnel: true);
+        using VoxelChunkBuildInput input = Capture(field, 1, 4, 1);
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
+            input, new TerrainPalette());
+
+        try
+        {
+            int vertices = CountVertices(meshes);
+            int triangles = CountTriangles(meshes);
+            bool internalWall = false;
+
+            foreach (VoxelMeshData mesh in meshes)
+            {
+                ReadOnlySpan<Vector3> positions = mesh.Vertices;
+                ReadOnlySpan<Vector3> normals = mesh.Normals;
+                for (int i = 0; i < positions.Length; i++)
+                {
+                    if (MathF.Abs(positions[i].X - 2f) < 1e-5f &&
+                        positions[i].Y >= 6.8f && positions[i].Y <= 7.2f &&
+                        positions[i].Z >= 2f && positions[i].Z <= 2.8f &&
+                        normals[i] == Vector3.UnitX)
+                    {
+                        internalWall = true;
+                        break;
+                    }
+                }
+
+                if (internalWall)
+                    break;
+            }
+
+            return (
+                vertices == 24 && triangles == 12 && internalWall,
+                $"vertices={vertices}, triangles={triangles}, internalTunnelWall={internalWall}");
+        }
+        finally
+        {
+            ReturnMeshData(meshes);
+        }
+    }
+
     private static (bool Passed, string Detail) TestEmptyChunkEarlyOut()
     {
         SyntheticBlockField field = new(128, 128, 128, empty: true);
@@ -343,6 +388,7 @@ internal static class Program
         private readonly int _materialSplit;
         private readonly bool _empty;
         private readonly bool _solidAll;
+        private readonly bool _tunnel;
         private readonly int _surfaceHeight;
 
         public SyntheticBlockField(
@@ -352,6 +398,7 @@ internal static class Program
             int materialSplit = int.MaxValue,
             bool empty = false,
             bool solidAll = false,
+            bool tunnel = false,
             int surfaceHeight = 20)
         {
             Width = width;
@@ -360,6 +407,7 @@ internal static class Program
             _materialSplit = materialSplit;
             _empty = empty;
             _solidAll = solidAll;
+            _tunnel = tunnel;
             _surfaceHeight = surfaceHeight;
         }
 
@@ -374,6 +422,14 @@ internal static class Program
                 x >= Width || y >= Height || z >= Depth ||
                 _empty ||
                 (!_solidAll && y >= _surfaceHeight))
+            {
+                return 0;
+            }
+
+            if (_tunnel &&
+                x >= 20 && x < 28 &&
+                y >= 68 && y < 72 &&
+                z >= 20 && z < 28)
             {
                 return 0;
             }
