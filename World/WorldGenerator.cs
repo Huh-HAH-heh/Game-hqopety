@@ -93,7 +93,7 @@ public static class WorldGenerator
 
                 float broadRelief = FractalNoise(sampleX, sampleY, 0.0028f, 101);
                 float mediumRelief = FractalNoise(sampleX, sampleY, 0.0085f, 211);
-                float fineRelief = ValueNoise(
+                float fineRelief = PerlinNoise(
                     sampleX * 0.032f,
                     sampleY * 0.032f,
                     307);
@@ -577,7 +577,7 @@ public static class WorldGenerator
 
                 float broadRelief = FractalNoise(x, y, 0.0028f, 101);
                 float mediumRelief = FractalNoise(x, y, 0.0085f, 211);
-                float fineRelief = ValueNoise(x * 0.032f, y * 0.032f, 307);
+                float fineRelief = PerlinNoise(x * 0.032f, y * 0.032f, 307);
 
                 float warpedOffset =
                     y - canyonFloorY[x] +
@@ -755,7 +755,7 @@ public static class WorldGenerator
 
         for (int octave = 0; octave < 3; octave++)
         {
-            total += ValueNoise(
+            total += PerlinNoise(
                 x * frequency,
                 y * frequency,
                 seed + octave * 1013) * amplitude;
@@ -768,7 +768,11 @@ public static class WorldGenerator
         return total / amplitudeSum;
     }
 
-    private static float ValueNoise(
+    /// <summary>
+    /// Deterministic 2D gradient Perlin noise in approximately [-1, 1].
+    /// Quintic fade keeps both value and first derivative continuous at cell edges.
+    /// </summary>
+    private static float PerlinNoise(
         float x,
         float y,
         int seed)
@@ -778,26 +782,46 @@ public static class WorldGenerator
         float tx = x - x0;
         float ty = y - y0;
 
-        tx = tx * tx * (3f - 2f * tx);
-        ty = ty * ty * (3f - 2f * ty);
+        float u = Fade(tx);
+        float v = Fade(ty);
 
-        float top = Lerp(
-            HashNoise(x0, y0, seed),
-            HashNoise(x0 + 1, y0, seed),
-            tx);
+        float n00 = GradientDot(x0, y0, tx, ty, seed);
+        float n10 = GradientDot(x0 + 1, y0, tx - 1f, ty, seed);
+        float n01 = GradientDot(x0, y0 + 1, tx, ty - 1f, seed);
+        float n11 = GradientDot(x0 + 1, y0 + 1, tx - 1f, ty - 1f, seed);
 
-        float bottom = Lerp(
-            HashNoise(x0, y0 + 1, seed),
-            HashNoise(x0 + 1, y0 + 1, seed),
-            tx);
-
-        return Lerp(top, bottom, ty);
+        float top = Lerp(n00, n10, u);
+        float bottom = Lerp(n01, n11, u);
+        return Math.Clamp(
+            (top + (bottom - top) * v) * 1.41421356f,
+            -1f,
+            1f);
     }
 
-    private static float HashNoise(
-        int x,
-        int y,
+    private static float GradientDot(
+        int latticeX,
+        int latticeY,
+        float dx,
+        float dy,
         int seed)
+    {
+        int gradient = HashGradient(latticeX, latticeY, seed) & 7;
+        const float diagonal = 0.70710678f;
+
+        return gradient switch
+        {
+            0 => dx,
+            1 => -dx,
+            2 => dy,
+            3 => -dy,
+            4 => (dx + dy) * diagonal,
+            5 => (-dx + dy) * diagonal,
+            6 => (dx - dy) * diagonal,
+            _ => (-dx - dy) * diagonal
+        };
+    }
+
+    private static int HashGradient(int x, int y, int seed)
     {
         int hash = unchecked(
             x * 374761393 ^
@@ -805,10 +829,11 @@ public static class WorldGenerator
             seed * 1442695041);
 
         hash = unchecked((hash ^ (hash >> 13)) * 1274126177);
-        hash ^= hash >> 16;
-
-        return (hash & 0x7fffffff) / 1073741823.5f - 1f;
+        return hash ^ (hash >> 16);
     }
+
+    private static float Fade(float t) =>
+        t * t * t * (t * (t * 6f - 15f) + 10f);
 
     private static float Lerp(
         float a,
