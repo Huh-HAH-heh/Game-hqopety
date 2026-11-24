@@ -150,6 +150,34 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
             return _baseMaterial(x, y, z);
         }
+
+        public byte GetBlockId(int x, int y, int z)
+        {
+            if (x < 0 || y < 0 || z < 0 ||
+                x >= Width || y >= Height || z >= Depth)
+                return 0;
+
+            ChunkCoordinate densityKey = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
+            int densityIndex = x % ChunkSize +
+                (y % ChunkSize) * DensitySamplesPerAxis +
+                (z % ChunkSize) * SamplePlane;
+
+            if (_chunks.TryGetValue(densityKey, out ChunkSnapshot? densityChunk) &&
+                densityChunk.DensityMask[densityIndex] != 0 &&
+                densityChunk.Density[densityIndex] <= 0)
+                return 0;
+
+            ChunkCoordinate materialKey = densityKey;
+            int materialIndex = x % ChunkSize +
+                (y % ChunkSize) * ChunkSize +
+                (z % ChunkSize) * CellPlane;
+
+            if (_chunks.TryGetValue(materialKey, out ChunkSnapshot? materialChunk) &&
+                materialChunk.MaterialMask[materialIndex] != 0)
+                return checked((byte)materialChunk.Materials[materialIndex]);
+
+            return checked((byte)_baseMaterial(x, y, z));
+        }
     }
 
     private sealed class EditHistoryCapture
