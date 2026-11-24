@@ -17,10 +17,9 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
-    private const int ChunkCells = SparseVoxelField.ChunkSize * 4;
+    private const int ChunkCells = SparseVoxelField.ChunkSize;
     private const int MaximumPendingMeshJobs = 128;
     private const int MaximumGpuMeshUploadsPerFrame = 4;
-    private const int CaptureValuesPerWorkerBatch = 512;
     
     private const double GpuUploadBudgetMilliseconds = 3.0;
     private const int CutCapSettleFrames = 8;
@@ -60,14 +59,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
                 discard;
-            float diffuse = max(
-                dot(normalize(fragWorldNormal), normalize(uSunDirection)),
-                0.0);
-            float illumination = clamp(
+
+            vec3 n = normalize(fragWorldNormal);
+            float faceAO = 0.85;
+
+            if (n.y > 0.5)
+                faceAO = 1.0;
+            else if (n.y < -0.5)
+                faceAO = 0.5;
+            else if (abs(n.z) > 0.5)
+                faceAO = 0.75;
+
+            float diffuse = max(dot(n, normalize(uSunDirection)), 0.0);
+            float lighting = max(
                 uAmbientLight + diffuse * uSunIntensity,
-                0.05,
-                1.5);
-            finalColor = vec4(fragColor.rgb * illumination, fragColor.a);
+                0.05);
+
+            finalColor = vec4(
+                fragColor.rgb * faceAO * lighting,
+                fragColor.a);
         }
         """;
 
@@ -334,14 +344,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _workerThreads[i] = new Thread(ProcessBuildQueue)
             {
                 IsBackground = true,
-                Name = $"RimClone Surface Nets voxel mesh {i + 1}"
+                Name = $"RimClone greedy byte voxel mesh {i + 1}"
             };
             _workerThreads[i].Start();
         }
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=Step1;chunkCells={ChunkCells};chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=naive-surface-nets;signal=SemaphoreSlim");
+            $"resolution=Step1;chunkCells={ChunkCells};chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=greedy-byte;blockSize=16;signal=SemaphoreSlim");
         Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
@@ -828,42 +838,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 token.ThrowIfCancellationRequested();
 
                 Stopwatch workerTimer = Stopwatch.StartNew();
-                float cutHeightMeters = request.CutLayer == int.MinValue
-                    ? float.PositiveInfinity
-                    : request.CutLayer * SparseVoxelField.VoxelSizeMeters;
 
                 using VoxelChunkBuildInput input = new(
                     request.Source,
                     request.Key.X,
                     request.Key.Y,
                     request.Key.Z,
-                    request.CellsPerAxis,
-                    cutHeightMeters);
+                    request.CutLayer);
 
-                while (!input.DensityCaptureComplete)
-                {
-                    token.ThrowIfCancellationRequested();
-                    input.CaptureNext(
-                        request.Source,
-                        CaptureValuesPerWorkerBatch,
-                        captureMaterials: false);
-                }
+                input.CaptureAll(request.Source);
 
                 bool hasPotentialSurface =
                     request.BuildSurface && input.HasPotentialSurface;
-                bool needsMaterials = hasPotentialSurface;
-
-                if (needsMaterials)
-                {
-                    while (!input.IsComplete)
-                    {
-                        token.ThrowIfCancellationRequested();
-                        input.CaptureNext(
-                            request.Source,
-                            CaptureValuesPerWorkerBatch,
-                            captureMaterials: true);
-                    }
-                }
 
                 surface = hasPotentialSurface
                     ? VoxelChunkMesher.BuildSurfaceData(
@@ -872,7 +858,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         token)
                     : Array.Empty<VoxelMeshData>();
 
-                // The cut is part of the scalar field; no independent flat mesh is emitted.
+                // The horizontal section is created by Greedy Meshing where
+                // retained blocks meet the zero-valued cut half-space.
                 cutCap = Array.Empty<VoxelMeshData>();
 
                 int vertices = SumVertices(surface) + SumVertices(cutCap);
