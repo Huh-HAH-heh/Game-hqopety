@@ -74,6 +74,18 @@ public sealed class VoxelFragmentSnapshot : IVoxelFieldSource
         return _materials[x + y * Width + z * Width * Height];
     }
 
+    public byte GetBlockId(int x, int y, int z)
+    {
+        if (!IsInside(x, y, z))
+            return 0;
+
+        int index = x + y * Width + z * Width * Height;
+        if (_density[index] <= 0)
+            return 0;
+
+        return checked((byte)_materials[index]);
+    }
+
     /// <summary>
     /// Trilinearly samples local metres measured from the fragment's lower
     /// corner. Source and destination use voxel-centre coordinates.
