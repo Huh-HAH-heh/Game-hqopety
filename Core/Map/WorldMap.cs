@@ -1731,29 +1731,19 @@ public sealed class WorldMap
     /// </summary>
     private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
     {
-        _voxelBaseSamplerLock.EnterReadLock();
-        try
-        {
-            if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-                voxelX >= Voxels.Width || voxelY > Voxels.Height || voxelZ >= Voxels.Depth)
-                return -1f;
+        if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
+            voxelX >= Voxels.Width || voxelY > Voxels.Height || voxelZ >= Voxels.Depth)
+            return -1f;
 
-            float surfaceHeight = SampleBaseSurfaceHeight(
-                voxelX, voxelZ,
-                out float slopeX,
-                out float slopeZ);
+        float surfaceHeight = SampleBaseSurfaceHeight(
+            voxelX, voxelZ,
+            out float slopeX,
+            out float slopeZ);
 
-            // First-order signed distance to the local tangent plane of y=h(x,z).
-            // The slopes are measured in voxel units, so all axes share one scale.
-            float gradientLength = MathF.Sqrt(
-                1f + slopeX * slopeX + slopeZ * slopeZ);
+        float gradientLength = MathF.Sqrt(
+            1f + slopeX * slopeX + slopeZ * slopeZ);
 
-            return (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
-        }
-        finally
-        {
-            _voxelBaseSamplerLock.ExitReadLock();
-        }
+        return (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
     }
 
     private ushort SampleBaseVoxelMaterial(int voxelX, int voxelY, int voxelZ)
@@ -1812,10 +1802,10 @@ public sealed class WorldMap
         int z0 = Math.Clamp(rawZ0, 0, MaxTileY);
         int z1 = Math.Clamp(rawZ0 + 1, 0, MaxTileY);
 
-        float h00 = _surfaceHeights[GetColumnIndex(x0, z0)];
-        float h10 = _surfaceHeights[GetColumnIndex(x1, z0)];
-        float h01 = _surfaceHeights[GetColumnIndex(x0, z1)];
-        float h11 = _surfaceHeights[GetColumnIndex(x1, z1)];
+        float h00 = Volatile.Read(ref _surfaceHeights[GetColumnIndex(x0, z0)]);
+        float h10 = Volatile.Read(ref _surfaceHeights[GetColumnIndex(x1, z0)]);
+        float h01 = Volatile.Read(ref _surfaceHeights[GetColumnIndex(x0, z1)]);
+        float h11 = Volatile.Read(ref _surfaceHeights[GetColumnIndex(x1, z1)]);
 
         float row0 = h00 + (h10 - h00) * tx;
         float row1 = h01 + (h11 - h01) * tx;
