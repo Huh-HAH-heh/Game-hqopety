@@ -157,24 +157,28 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 x >= Width || y >= Height || z >= Depth)
                 return 0;
 
-            ChunkCoordinate densityKey = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
-            int densityIndex = x % ChunkSize +
-                (y % ChunkSize) * DensitySamplesPerAxis +
-                (z % ChunkSize) * SamplePlane;
+            ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
+            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+            {
+                int localX = x % ChunkSize;
+                int localY = y % ChunkSize;
+                int localZ = z % ChunkSize;
 
-            if (_chunks.TryGetValue(densityKey, out ChunkSnapshot? densityChunk) &&
-                densityChunk.DensityMask[densityIndex] != 0 &&
-                densityChunk.Density[densityIndex] <= 0)
-                return 0;
+                int densityIndex = localX +
+                    localY * DensitySamplesPerAxis +
+                    localZ * SamplePlane;
 
-            ChunkCoordinate materialKey = densityKey;
-            int materialIndex = x % ChunkSize +
-                (y % ChunkSize) * ChunkSize +
-                (z % ChunkSize) * CellPlane;
+                if (chunk.DensityMask[densityIndex] != 0 &&
+                    chunk.Density[densityIndex] <= 0)
+                    return 0;
 
-            if (_chunks.TryGetValue(materialKey, out ChunkSnapshot? materialChunk) &&
-                materialChunk.MaterialMask[materialIndex] != 0)
-                return checked((byte)materialChunk.Materials[materialIndex]);
+                int materialIndex = localX +
+                    localY * ChunkSize +
+                    localZ * CellPlane;
+
+                if (chunk.MaterialMask[materialIndex] != 0)
+                    return checked((byte)chunk.Materials[materialIndex]);
+            }
 
             return checked((byte)_baseMaterial(x, y, z));
         }
@@ -509,19 +513,26 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (!IsInsideCell(x, y, z))
             return 0;
 
-        ChunkCoordinate densityKey = GetSampleChunk(x, y, z, out int densityIndex);
-        if (_chunks.TryGetValue(densityKey, out Chunk? densityChunk) &&
-            Volatile.Read(ref densityChunk.DensityMask[densityIndex]) != 0 &&
-            Volatile.Read(ref densityChunk.Density[densityIndex]) <= 0)
+        ChunkCoordinate key = GetSampleChunk(x, y, z, out int densityIndex);
+        if (_chunks.TryGetValue(key, out Chunk? chunk))
         {
-            return 0;
-        }
+            if (Volatile.Read(ref chunk.DensityMask[densityIndex]) != 0 &&
+                Volatile.Read(ref chunk.Density[densityIndex]) <= 0)
+            {
+                return 0;
+            }
 
-        ChunkCoordinate materialKey = GetCellChunk(x, y, z, out int materialIndex);
-        if (_chunks.TryGetValue(materialKey, out Chunk? materialChunk) &&
-            Volatile.Read(ref materialChunk.MaterialMask[materialIndex]) != 0)
-        {
-            return checked((byte)Volatile.Read(ref materialChunk.Materials[materialIndex]));
+            int localX = x % ChunkSize;
+            int localY = y % ChunkSize;
+            int localZ = z % ChunkSize;
+            int materialIndex = localX +
+                localY * ChunkSize +
+                localZ * CellPlane;
+
+            if (Volatile.Read(ref chunk.MaterialMask[materialIndex]) != 0)
+            {
+                return checked((byte)Volatile.Read(ref chunk.Materials[materialIndex]));
+            }
         }
 
         return checked((byte)_baseMaterial(x, y, z));
