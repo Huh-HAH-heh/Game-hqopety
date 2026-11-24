@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Numerics;
 using System.Text;
+using System.Threading;
 
 namespace Core.Map;
 
@@ -126,7 +128,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 (z % ChunkSize) * SamplePlane;
             if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk) &&
                 chunk.DensityMask[index] != 0)
-                return chunk.Density[index] / DensityScale;
+                return Volatile.Read(ref chunk.Density[index]) / DensityScale;
 
             return _baseDensity(x, y, z);
         }
@@ -239,7 +241,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         SampleCount * (sizeof(short) + sizeof(byte)) +
         CellCount * (sizeof(ushort) + sizeof(byte));
 
-    private readonly Dictionary<ChunkCoordinate, Chunk> _chunks = new();
+    private readonly ConcurrentDictionary<ChunkCoordinate, Chunk> _chunks = new();
     private readonly HashSet<(int X, int Z)> _editedChunkColumns = new();
     private readonly List<EditHistoryEntry> _undoHistory = new();
     private readonly List<EditHistoryEntry> _redoHistory = new();
@@ -420,7 +422,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? chunk) &&
-            chunk.DensityMask[index] != 0)
+            Volatile.Read(ref chunk.DensityMask[index]) != 0)
             return chunk.Density[index] / DensityScale;
 
         return _baseDensity(x, y, z);
@@ -937,7 +939,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _historyCapture = null;
         _chunks.Clear();
         foreach ((ChunkCoordinate key, Chunk chunk) in loaded)
-            _chunks.Add(key, chunk);
+            _chunks[key] = chunk;
         _editedChunkColumns.Clear();
         foreach ((int x, int z) in editedColumns)
             _editedChunkColumns.Add((x, z));
@@ -1178,7 +1180,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (removeChunks != null)
         {
             foreach (ChunkCoordinate key in removeChunks)
-                _chunks.Remove(key);
+                _chunks.TryRemove(key, out _);
         }
 
         for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
@@ -2372,8 +2374,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        chunk.Density[index] = Quantize(density);
-        chunk.DensityMask[index] = 1;
+        Volatile.Write(ref chunk.Density[index], Quantize(density));
+        Volatile.Write(ref chunk.DensityMask[index], (byte)1);
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
@@ -2522,7 +2524,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             {
                 if (snapshot == null)
                 {
-                    _chunks.Remove(key);
+                    _chunks.TryRemove(key, out _);
                     continue;
                 }
 
@@ -2546,9 +2548,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (_chunks.TryGetValue(key, out Chunk? chunk))
             return chunk;
 
-        chunk = new Chunk();
-        _chunks.Add(key, chunk);
-        return chunk;
+        return _chunks.GetOrAdd(key, static _ => new Chunk());
     }
 
     private ChunkCoordinate GetSampleChunk(int x, int y, int z, out int index)
