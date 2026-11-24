@@ -803,12 +803,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int originY = key.Y * ChunkCells;
             int originZ = key.Z * ChunkCells;
 
-            float distanceSquared = BlockNearestDistanceSquared(
+            float distanceSquared = BoundsNearestDistanceSquared(
                 cameraPosition,
                 originX,
                 originY,
                 originZ,
-                field);
+                Math.Min(ChunkCells, field.Width - originX),
+                Math.Min(ChunkCells, field.Height - originY),
+                Math.Min(ChunkCells, field.Depth - originZ));
 
             if (distanceSquared > radiusSquared)
                 _outsideRadiusScratch.Add(key);
