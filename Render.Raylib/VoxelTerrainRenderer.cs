@@ -21,8 +21,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumPendingMeshJobs = 128;
     private const int MaximumGpuMeshUploadsPerFrame = 4;
     private const int CaptureValuesPerWorkerBatch = 512;
-    private const float CutCapHeightOffsetMeters = 0.006f;
-
+    
     private const double GpuUploadBudgetMilliseconds = 3.0;
     private const int CutCapSettleFrames = 8;
 
@@ -335,14 +334,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _workerThreads[i] = new Thread(ProcessBuildQueue)
             {
                 IsBackground = true,
-                Name = $"RimClone greedy voxel mesh {i + 1}"
+                Name = $"RimClone Surface Nets voxel mesh {i + 1}"
             };
             _workerThreads[i].Start();
         }
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=Step1;chunkCells={ChunkCells};chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=greedy;signal=SemaphoreSlim");
+            $"resolution=Step1;chunkCells={ChunkCells};chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=naive-surface-nets;signal=SemaphoreSlim");
         Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
@@ -442,28 +441,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
 
-            int chunkMinY = key.Y * ChunkCells;
-            int chunkMaxY = chunkMinY + ChunkCells;
-            bool containsCutPlane =
-                cutEnabled &&
-                stableCutLayer >= 0 &&
-                cutSampleY >= chunkMinY &&
-                cutSampleY < chunkMaxY;
+            int targetCutLayer = cutEnabled && stableCutLayer >= 0
+                ? stableCutLayer
+                : int.MinValue;
 
-            bool needsCutCap = containsCutPlane &&
-                (entry.CutLayer != stableCutLayer || entry.CutDirty);
+            bool cutStateStale = entry.CutLayer != targetCutLayer;
+            bool needsSurfaceBuild = surfaceStale || cutStateStale;
 
-            if ((surfaceStale || needsCutCap) &&
-                !HasPendingWork(entry))
+            if (needsSurfaceBuild && !HasPendingWork(entry))
             {
                 RequestBuild(
                     field,
                     key,
                     entry,
-                    surfaceStale,
-                    needsCutCap,
-                    stableCutLayer);
-
+                    buildSurface: true,
+                    buildCutCap: false,
+                    cutLayer: targetCutLayer);
             }
 
             if (!cutEnabled && entry.CutCap.Length > 0)
@@ -785,14 +778,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             return;
         }
 
-        Stopwatch snapshotTimer = Stopwatch.StartNew();
-        IVoxelFieldSource source = field.CreateRegionSnapshot(
-            key.X * ChunkCells,
-            key.Y * ChunkCells,
-            key.Z * ChunkCells,
-            ChunkCells);
-        snapshotTimer.Stop();
-        CpuCaptureMillisecondsLastFrame += snapshotTimer.Elapsed.TotalMilliseconds;
+        IVoxelFieldSource source = field;
 
         BuildRequest request = new()
         {
@@ -806,7 +792,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             CellsPerAxis = ChunkCells,
             BuildSurface = buildSurface,
             BuildCutCap = buildCutCap,
-            CutLayer = buildCutCap ? cutLayer : int.MinValue,
+            CutLayer = cutLayer,
             Palette = _palette,
             EnqueuedTimestamp = Stopwatch.GetTimestamp()
         };
@@ -854,12 +840,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 token.ThrowIfCancellationRequested();
 
                 Stopwatch workerTimer = Stopwatch.StartNew();
-                VoxelChunkBuildInput input = new(
+                float cutHeightMeters = request.CutLayer == int.MinValue
+                    ? float.PositiveInfinity
+                    : request.CutLayer * SparseVoxelField.VoxelSizeMeters;
+
+                using VoxelChunkBuildInput input = new(
                     request.Source,
                     request.Key.X,
                     request.Key.Y,
                     request.Key.Z,
-                    request.CellsPerAxis);
+                    request.CellsPerAxis,
+                    cutHeightMeters);
 
                 while (!input.DensityCaptureComplete)
                 {
@@ -872,8 +863,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
                 bool hasPotentialSurface =
                     request.BuildSurface && input.HasPotentialSurface;
-                bool needsMaterials =
-                    hasPotentialSurface || request.BuildCutCap;
+                bool needsMaterials = hasPotentialSurface;
 
                 if (needsMaterials)
                 {
@@ -894,13 +884,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         token)
                     : Array.Empty<VoxelMeshData>();
 
-                cutCap = request.BuildCutCap
-                    ? VoxelChunkMesher.BuildCutCapData(
-                        input,
-                        request.CutLayer * SparseVoxelField.VoxelSizeMeters,
-                        request.Palette,
-                        token)
-                    : Array.Empty<VoxelMeshData>();
+                // The cut is part of the scalar field; no independent flat mesh is emitted.
+                cutCap = Array.Empty<VoxelMeshData>();
 
                 int vertices = SumVertices(surface) + SumVertices(cutCap);
                 int triangles = SumTriangles(surface) + SumTriangles(cutCap);
@@ -908,9 +893,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 ulong surfaceHash = hasSurfaceMesh
                     ? ComputeMeshHash(surface)
                     : 0UL;
-                ulong cutCapHash = request.BuildCutCap
-                    ? ComputeMeshHash(cutCap)
-                    : 0UL;
+                ulong cutCapHash = 0UL;
 
                 workerTimer.Stop();
 
@@ -918,7 +901,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     surface,
                     cutCap,
                     hasSurfaceMesh,
-                    request.BuildCutCap,
+                    false,
                     request.BuildSurface && !hasSurfaceMesh,
                     request.CutLayer,
                     workerTimer.Elapsed.TotalMilliseconds,
@@ -1114,6 +1097,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.BaseVersion = request.BaseVersion;
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
+                entry.CutLayer = request.CutLayer;
+                entry.CutDirty = false;
                 entry.Built = true;
                 uploadSurface = false;
 
@@ -1132,6 +1117,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.BaseVersion = request.BaseVersion;
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
+                entry.CutLayer = request.CutLayer;
+                entry.CutDirty = false;
                 uploadSurface = false;
                 _totalIdenticalSurfaceSkips++;
             }
@@ -1300,7 +1287,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.BaseVersion = request.BaseVersion;
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
+                entry.CutLayer = request.CutLayer;
+                entry.CutDirty = false;
                 entry.Built = true;
+
+                foreach (Mesh oldCap in entry.CutCap)
+                {
+                    UnloadMesh(oldCap);
+                    _totalGpuUnloads++;
+                }
+                entry.CutCap = Array.Empty<Mesh>();
+
+                _gpuMeshHashCache.TryGetValue(queued.Key, out ChunkGpuHashes currentHashes);
+                _gpuMeshHashCache[queued.Key] = currentHashes with
+                {
+                    HasCutCap = false,
+                    CutCapHash = 0UL,
+                    CutLayer = int.MinValue
+                };
+
                 RebuiltChunks++;
             }
 
