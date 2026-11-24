@@ -140,7 +140,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required long Generation { get; init; }
         public required int PaletteVersion { get; init; }
         public required long BaseVersion { get; init; }
-        public required int CellsPerAxis { get; init; }
         public required bool BuildSurface { get; init; }
         public required bool BuildCutCap { get; init; }
         public required int CutLayer { get; init; }
@@ -513,7 +512,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             string summary =
                 $"frame={_frame} resolution=Step1 chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
-                $"emptyChunks={_totalEmptyChunks} snapshotMs={CpuCaptureMillisecondsLastFrame:0.000} " +
+                $"emptyChunks={_totalEmptyChunks} mainThreadCopyMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"workerMs={WorkerBuildMillisecondsLastFrame:0.000} lastWorkerMs={LastWorkerBuildMilliseconds:0.000} " +
                 $"queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
@@ -787,7 +786,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Generation = ++entry.BuildGeneration,
             PaletteVersion = _paletteVersion,
             BaseVersion = field.BaseVersion,
-            CellsPerAxis = ChunkCells,
             BuildSurface = buildSurface,
             BuildCutCap = buildCutCap,
             CutLayer = cutLayer,
