@@ -112,7 +112,7 @@ public sealed class WorldMap
         Blocks = new BlockTerrain(width, height, layerCount);
         _navigationBlocked = new bool[columnCount];
         _simpleFillColumns = new bool[columnCount];
-        Array.Fill(_simpleFillColumns, true);
+        WriteSimpleFillFlags(0, _simpleFillColumns.Length, true);
         _columnMaterialIds = new ushort[columnCount];
         _voxelSurfaceCacheState = new byte[columnCount];
         _voxelSurfaceHeightCache = new ushort[columnCount];
@@ -631,7 +631,7 @@ public sealed class WorldMap
                 Blocks.Volumes.SetSurfaceColumn(
                     x, y,
                     _surfaceHeights[index], _columnMaterialIds[index]);
-                _simpleFillColumns[index] = false;
+                Volatile.Write(ref _simpleFillColumns[index], false);
             }
 
             Blocks.Volumes.SetVoxel(x, y, z, materialId);
@@ -1128,7 +1128,7 @@ public sealed class WorldMap
                 Blocks.Volumes.SetSurfaceColumn(
                     globalX, globalY,
                     _surfaceHeights[index], _columnMaterialIds[index]);
-                _simpleFillColumns[index] = false;
+                Volatile.Write(ref _simpleFillColumns[index], false);
             }
 
             Blocks.Volumes.SetVolume(
@@ -1180,7 +1180,7 @@ public sealed class WorldMap
                 Blocks.Volumes.SetSurfaceColumn(
                     globalX, globalY,
                     _surfaceHeights[index], _columnMaterialIds[index]);
-                _simpleFillColumns[index] = false;
+                Volatile.Write(ref _simpleFillColumns[index], false);
             }
 
             Blocks.Volumes.SetVolume(
@@ -1259,8 +1259,8 @@ public sealed class WorldMap
                 Array.Clear(_voxelSurfaceCacheState, index, region.TileWidth);
                 Array.Clear(_voxelSurfaceHeightCache, index, region.TileWidth);
                 Array.Clear(_volumeSurfaceHeights, index, region.TileWidth);
-                Array.Fill(_columnMaterialIds, normalizedMaterial, index, region.TileWidth);
-                Array.Fill(_simpleFillColumns, true, index, region.TileWidth);
+                WriteColumnMaterials(index, region.TileWidth, normalizedMaterial);
+                WriteSimpleFillFlags(index, region.TileWidth, true);
                 Array.Clear(_rangeCache, index, region.TileWidth);
             }
 
@@ -1342,8 +1342,8 @@ public sealed class WorldMap
                         WriteSurfaceHeights(targetIndex, patchSize, storedHeight);
                         Array.Clear(_voxelSurfaceCacheState, targetIndex, patchSize);
                         Array.Clear(_voxelSurfaceHeightCache, targetIndex, patchSize);
-                        Array.Fill(_columnMaterialIds, storedMaterial, targetIndex, patchSize);
-                        Array.Fill(_simpleFillColumns, true, targetIndex, patchSize);
+                        WriteColumnMaterials(targetIndex, patchSize, storedMaterial);
+                        WriteSimpleFillFlags(targetIndex, patchSize, true);
                         Array.Clear(_rangeCache, targetIndex, patchSize);
                     }
                 }
@@ -1406,14 +1406,14 @@ public sealed class WorldMap
             _volumeSurfaceHeights[index] = 0;
             _voxelSurfaceCacheState[index] = 0;
             _voxelSurfaceHeightCache[index] = 0;
-            _simpleFillColumns[index] = true;
-            _columnMaterialIds[index] = storedMaterial;
+            Volatile.Write(ref _simpleFillColumns[index], true);
+            Volatile.Write(ref _columnMaterialIds[index], storedMaterial);
             _rangeCache[index] = null;
 
             Voxels.ResetBaseColumn(globalX, globalY);
             Voxels.InvalidateBaseField();
-            _simpleFillColumns[index] = true;
-            _columnMaterialIds[index] = storedMaterial;
+            Volatile.Write(ref _simpleFillColumns[index], true);
+            Volatile.Write(ref _columnMaterialIds[index], storedMaterial);
             MarkTerrainChanged(globalX, globalY);
         
         }
@@ -1513,12 +1513,12 @@ public sealed class WorldMap
         _rangeCache[index] = null;
         _voxelSurfaceCacheState[index] = 0;
         _voxelSurfaceHeightCache[index] = 0;
-        _simpleFillColumns[index] = true;
-        _columnMaterialIds[index] = 0;
+        Volatile.Write(ref _simpleFillColumns[index], true);
+        Volatile.Write(ref _columnMaterialIds[index], (ushort)0);
         Voxels.ResetBaseColumn(globalX, globalY);
         Voxels.InvalidateBaseField();
-        _simpleFillColumns[index] = true;
-        _columnMaterialIds[index] = 0;
+        Volatile.Write(ref _simpleFillColumns[index], true);
+        Volatile.Write(ref _columnMaterialIds[index], (ushort)0);
     }
 
     private void RecalculateSurfaceHeight(int columnIndex)
@@ -1538,15 +1538,15 @@ public sealed class WorldMap
             Volatile.Write(
                 ref _surfaceHeights[columnIndex],
                 checked((ushort)(topExclusive * LayerHeightUnits)));
-            _simpleFillColumns[columnIndex] = true;
-            _columnMaterialIds[columnIndex] = simpleMaterial;
+            Volatile.Write(ref _simpleFillColumns[columnIndex], true);
+            Volatile.Write(ref _columnMaterialIds[columnIndex], simpleMaterial);
             return;
         }
 
         // _surfaceHeights is also the procedural SDF base input. Keep it intact:
         // the effective top surface is derived on demand from Voxels below.
-        _simpleFillColumns[columnIndex] = false;
-        _columnMaterialIds[columnIndex] = 0;
+        Volatile.Write(ref _simpleFillColumns[columnIndex], false);
+        Volatile.Write(ref _columnMaterialIds[columnIndex], (ushort)0);
     }
 
 
@@ -1854,7 +1854,7 @@ public sealed class WorldMap
                 bounds.MaxY >= Voxels.Height &&
                 bounds.MaxZ >= Voxels.Depth)
             {
-                Array.Fill(_simpleFillColumns, true);
+                WriteSimpleFillFlags(0, _simpleFillColumns.Length, true);
                 Array.Clear(_voxelSurfaceCacheState);
                 Array.Clear(_voxelSurfaceHeightCache);
                 Array.Clear(_rangeCache);
@@ -1893,7 +1893,7 @@ public sealed class WorldMap
                             _columnMaterialIds[columnIndex]);
                     }
 
-                    _simpleFillColumns[columnIndex] = false;
+                    Volatile.Write(ref _simpleFillColumns[columnIndex], false);
                     MarkTerrainChanged(tileX, tileY);
                 }
             }
@@ -1915,6 +1915,26 @@ public sealed class WorldMap
         int end = startIndex + count;
         for (int index = startIndex; index < end; index++)
             Volatile.Write(ref _surfaceHeights[index], value);
+    }
+
+    private void WriteColumnMaterials(
+        int startIndex,
+        int count,
+        ushort value)
+    {
+        int end = startIndex + count;
+        for (int index = startIndex; index < end; index++)
+            Volatile.Write(ref _columnMaterialIds[index], value);
+    }
+
+    private void WriteSimpleFillFlags(
+        int startIndex,
+        int count,
+        bool value)
+    {
+        int end = startIndex + count;
+        for (int index = startIndex; index < end; index++)
+            Volatile.Write(ref _simpleFillColumns[index], value);
     }
 
     private int GetColumnIndex(
