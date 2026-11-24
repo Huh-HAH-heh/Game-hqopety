@@ -466,8 +466,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? chunk) &&
-            chunk.MaterialMask[index] != 0)
-            return chunk.Materials[index];
+            Volatile.Read(ref chunk.MaterialMask[index]) != 0)
+            return Volatile.Read(ref chunk.Materials[index]);
 
         return _baseMaterial(x, y, z);
     }
@@ -1153,10 +1153,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     }
 
                     int materialIndex = cellColumn + localY * CellPlane;
-                    if (chunk.MaterialMask[materialIndex] != 0)
+                    if (Volatile.Read(ref chunk.MaterialMask[materialIndex]) != 0)
                     {
-                        chunk.MaterialMask[materialIndex] = 0;
-                        chunk.Materials[materialIndex] = 0;
+                        Volatile.Write(ref chunk.MaterialMask[materialIndex], (byte)0);
+                        Volatile.Write(ref chunk.Materials[materialIndex], (ushort)0);
                         changed = true;
                     }
                 }
@@ -2392,14 +2392,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? existing) &&
-            existing.MaterialMask[index] != 0 &&
-            existing.Materials[index] == materialId)
+            Volatile.Read(ref existing.MaterialMask[index]) != 0 &&
+            Volatile.Read(ref existing.Materials[index]) == materialId)
             return;
 
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        chunk.Materials[index] = materialId;
-        chunk.MaterialMask[index] = 1;
+        Volatile.Write(ref chunk.Materials[index], materialId);
+        Volatile.Write(ref chunk.MaterialMask[index], (byte)1);
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
