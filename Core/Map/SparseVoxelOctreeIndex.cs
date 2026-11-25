@@ -117,7 +117,7 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
         if (removed == null)
             return false;
 
-        _nodes.TryRemove(new KeyValuePair<ulong, Node>(leafKey, leafNode));
+        _nodes.TryRemove(leafKey, out _);
         Interlocked.Decrement(ref _leafCount);
         RemoveEmptyParents(leaf);
         return true;
@@ -163,7 +163,7 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
 
             childBecameEmpty = Interlocked.Decrement(ref node.LeafCount) == 0;
             if (childBecameEmpty)
-                _nodes.TryRemove(new KeyValuePair<ulong, Node>(nodeKey, node));
+                _nodes.TryRemove(nodeKey, out _);
         }
     }
 
