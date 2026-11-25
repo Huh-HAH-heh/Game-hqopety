@@ -1003,7 +1003,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                             if (oldMaterials[i] > byte.MaxValue)
                                 throw new InvalidDataException("The voxel save contains an unsupported material ID.");
 
-                            chunk.Material[i] = (byte)oldMaterials[i];
+                            chunk.Material[i] = oldMaterials[i] == 0
+                            ? byte.MaxValue
+                            : (byte)oldMaterials[i];
                         }
                     }
                     else
@@ -1031,7 +1033,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                             for (int i = 0; i < CellCount; i++)
                             {
                                 if (oldMaterial[i] != byte.MaxValue)
-                                    chunk.Material[i] = oldMaterial[i];
+                                    chunk.Material[i] = oldMaterial[i] == 0
+                                        ? byte.MaxValue
+                                        : oldMaterial[i];
                             }
                         }
                     }
