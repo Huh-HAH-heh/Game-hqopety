@@ -46,7 +46,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         float ClearanceMeters);
 
     private const int SaveMagic = 0x31585652;
-    private const int SaveFormatVersion = 4;
+    private const int SaveFormatVersion = 5;
     private const int LegacyContentMaskWordCount = (SampleCount + 63) >> 6;
     private const byte ContentIsoLevel = 127;
 
@@ -113,7 +113,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 x >= Width || y > Height || z >= Depth)
                 return -1f;
             if (y == Height)
-                return _baseDensity(x, y, z);
+                return DecodeContent(EncodeContent(_baseDensity(x, y, z)));
 
             ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
             int index = x % ChunkSize +
@@ -122,7 +122,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
             return _chunks.TryGetValue(key, out ChunkSnapshot? chunk)
                 ? DecodeContent(chunk.Content[index])
-                : _baseDensity(x, y, z);
+                : DecodeContent(EncodeContent(_baseDensity(x, y, z)));
         }
 
         public ushort GetMaterialId(int x, int y, int z)
@@ -142,7 +142,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                         ? chunk.Material[index]
                         : (ushort)0;
 
-            if (_baseDensity(x, y, z) <= 0f)
+            byte baseContent = EncodeContent(_baseDensity(x, y, z));
+            if (baseContent <= ContentIsoLevel)
                 return 0;
             return DecodeMaterial(EncodeMaterial(_baseMaterial(x, y, z)));
         }
@@ -164,7 +165,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                         ? chunk.Material[index]
                         : (byte)0;
 
-            if (_baseDensity(x, y, z) <= 0f)
+            if (EncodeContent(_baseDensity(x, y, z)) <= ContentIsoLevel)
                 return 0;
 
             byte baseMaterial = EncodeMaterial(_baseMaterial(x, y, z));
@@ -443,13 +444,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             x >= Width || y > Height || z >= Depth)
             return -1f;
         if (y == Height)
-            return _baseDensity(x, y, z);
+            return DecodeContent(EncodeContent(_baseDensity(x, y, z)));
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
             return DecodeContent(Volatile.Read(ref chunk.Content[index]));
 
-        return _baseDensity(x, y, z);
+        return DecodeContent(EncodeContent(_baseDensity(x, y, z)));
     }
 
     /// <summary>Trilinearly samples the same scalar field used by the mesher.</summary>
@@ -497,7 +498,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     : (ushort)0;
         }
 
-        if (_baseDensity(x, y, z) <= 0f)
+        if (EncodeContent(_baseDensity(x, y, z)) <= ContentIsoLevel)
             return 0;
         return DecodeMaterial(EncodeMaterial(_baseMaterial(x, y, z)));
     }
@@ -521,7 +522,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     : (byte)0;
         }
 
-        if (_baseDensity(x, y, z) <= 0f)
+        if (EncodeContent(_baseDensity(x, y, z)) <= ContentIsoLevel)
             return 0;
 
         byte baseMaterial = EncodeMaterial(_baseMaterial(x, y, z));
@@ -955,7 +956,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     throw new InvalidDataException("The voxel save contains a duplicate chunk.");
 
                 Chunk chunk;
-                if (formatVersion == 4)
+                if (formatVersion == 5)
                 {
                     chunk = new Chunk { Revision = revision };
                     byte[] content = reader.ReadBytes(SampleCount);
@@ -967,8 +968,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 }
                 else
                 {
-                    // V2/V3 pages stored partial overrides. Expand them over
-                    // the current provider data to produce a complete LOD0 leaf.
                     chunk = CreateChunkData(key, revision);
 
                     if (formatVersion == 2)
@@ -1006,12 +1005,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                             if (oldMaterials[i] > byte.MaxValue)
                                 throw new InvalidDataException("The voxel save contains an unsupported material ID.");
 
-                            chunk.Material[i] = oldMaterials[i] == 0
-                            ? byte.MaxValue
-                            : (byte)oldMaterials[i];
+                            chunk.Material[i] =
+                                chunk.Content[i] <= ContentIsoLevel || oldMaterials[i] == 0
+                                    ? byte.MaxValue
+                                    : (byte)oldMaterials[i];
                         }
                     }
-                    else
+                    else if (formatVersion == 3)
                     {
                         byte[] oldContent = reader.ReadBytes(SampleCount);
                         if (oldContent.Length != SampleCount)
@@ -1024,7 +1024,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                         for (int i = 0; i < SampleCount; i++)
                         {
                             if ((oldContentMask[i >> 6] & (1L << (i & 63))) != 0)
-                                chunk.Content[i] = oldContent[i];
+                            {
+                                float legacyDensity = (oldContent[i] - ContentIsoLevel) / DensityScale;
+                                chunk.Content[i] = EncodeContent(legacyDensity);
+                            }
                         }
 
                         if (reader.ReadBoolean())
@@ -1035,16 +1038,40 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
                             for (int i = 0; i < CellCount; i++)
                             {
-                                if (oldMaterial[i] != byte.MaxValue)
-                                    chunk.Material[i] = oldMaterial[i] == 0
+                                if (oldMaterial[i] == byte.MaxValue)
+                                    continue;
+
+                                chunk.Material[i] =
+                                    chunk.Content[i] <= ContentIsoLevel || oldMaterial[i] == 0
                                         ? byte.MaxValue
                                         : oldMaterial[i];
                             }
                         }
                     }
+                    else // v4 contained full pages encoded with the earlier +/-4 density scale.
+                    {
+                        byte[] oldContent = reader.ReadBytes(SampleCount);
+                        byte[] oldMaterial = reader.ReadBytes(CellCount);
+                        if (oldContent.Length != SampleCount || oldMaterial.Length != CellCount)
+                            throw new EndOfStreamException();
+
+                        for (int i = 0; i < SampleCount; i++)
+                        {
+                            float legacyDensity = (oldContent[i] - ContentIsoLevel) / DensityScale;
+                            chunk.Content[i] = EncodeContent(legacyDensity);
+
+                            byte material = oldMaterial[i];
+                            chunk.Material[i] =
+                                chunk.Content[i] <= ContentIsoLevel ||
+                                material == 0 ||
+                                material == byte.MaxValue
+                                    ? byte.MaxValue
+                                    : material;
+                        }
+                    }
                 }
 
-                if (formatVersion != 4 && PageMatchesBase(chunk, key))
+                if (formatVersion != SaveFormatVersion && PageMatchesBase(chunk, key))
                     continue;
 
                 loaded.Add(key, chunk);
@@ -1060,9 +1087,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _octreeIndex.Clear();
 
         foreach ((ChunkCoordinate key, Chunk chunk) in loaded)
-        {
             _octreeIndex.SetLeaf(key, chunk);
-        }
 
         _editedChunkColumns.Clear();
         foreach ((int x, int z) in editedColumns)
@@ -1288,9 +1313,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     int worldY = chunkYStart + localY;
                     int index = localX + localY * ChunkSize + localZ * CellPlane;
 
-                    float baseDensity = _baseDensity(worldX, worldY, worldZ);
-                    byte baseContent = EncodeContent(baseDensity);
-                    byte baseMaterial = baseDensity > 0f
+                    byte baseContent = EncodeContent(_baseDensity(worldX, worldY, worldZ));
+                    byte baseMaterial = baseContent > ContentIsoLevel
                         ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                         : byte.MaxValue;
 
@@ -2725,13 +2749,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int worldZ = originZ + z;
             int index = x + y * ChunkSize + z * CellPlane;
 
-            float density = worldX < Width && worldY < Height && worldZ < Depth
-                ? _baseDensity(worldX, worldY, worldZ)
-                : -1f;
+            byte content = worldX < Width && worldY < Height && worldZ < Depth
+                ? EncodeContent(_baseDensity(worldX, worldY, worldZ))
+                : (byte)0;
 
-            chunk.Content[index] = EncodeContent(density);
+            chunk.Content[index] = content;
             chunk.Material[index] =
-                density > 0f && worldX < Width && worldY < Height && worldZ < Depth
+                content > ContentIsoLevel
                     ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                     : byte.MaxValue;
         }
@@ -2754,15 +2778,15 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int worldZ = originZ + z;
             int index = x + y * ChunkSize + z * CellPlane;
 
-            float density = worldX < Width && worldY <= Height && worldZ < Depth
-                ? _baseDensity(worldX, worldY, worldZ)
-                : -1f;
+            byte content = worldX < Width && worldY < Height && worldZ < Depth
+                ? EncodeContent(_baseDensity(worldX, worldY, worldZ))
+                : (byte)0;
 
-            if (chunk.Content[index] != EncodeContent(density))
+            if (chunk.Content[index] != content)
                 return false;
 
             byte material =
-                density > 0f && worldX < Width && worldY < Height && worldZ < Depth
+                content > ContentIsoLevel
                     ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                     : byte.MaxValue;
             if (chunk.Material[index] != material)
@@ -2868,12 +2892,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         if (float.IsNaN(density))
             return ContentIsoLevel;
-        float quantized = MathF.Round(density * DensityScale);
-        return (byte)Math.Clamp(ContentIsoLevel + quantized, byte.MinValue, byte.MaxValue);
+
+        float signedDistance = Math.Clamp(density, -1f, 1f);
+        float fillRatio = signedDistance * 0.5f + 0.5f;
+        return (byte)(fillRatio * byte.MaxValue);
     }
 
     private static float DecodeContent(byte content) =>
-        (content - ContentIsoLevel) / DensityScale;
+        (content - ContentIsoLevel) / (float)(byte.MaxValue - ContentIsoLevel);
 
     private static byte EncodeMaterial(ushort materialId) =>
         materialId == 0 || materialId >= byte.MaxValue
