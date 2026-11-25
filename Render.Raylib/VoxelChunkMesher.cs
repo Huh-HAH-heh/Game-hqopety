@@ -65,7 +65,7 @@ internal sealed class VoxelMeshData
 }
 
 /// <summary>
-/// Compact main-thread input: 16^3 block IDs plus a one-cell halo on all sides.
+/// Compact main-thread input: N^3 block IDs plus a one-cell halo on all sides.
 /// Zero is air; non-zero values are byte-sized material IDs.
 /// Blocks are X-contiguous: x + y * SampleSide + z * SamplePlane.
 /// </summary>
@@ -205,7 +205,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         IsCaptured = true;
     }
 
-    /// <summary>Returns a local block ID; coordinates -1..16 address the halo.</summary>
+    /// <summary>Returns a local block ID; coordinates -1..CellsPerAxis address the halo.</summary>
     public byte GetBlock(int x, int y, int z)
     {
         x += HaloSize;
@@ -220,7 +220,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         return Blocks[x + y * SampleSide + z * SamplePlane];
     }
 
-    // Mesher coordinates are bounded to -1..16 by its slice loops.
+    // Mesher coordinates are bounded to -1..CellsPerAxis by its slice loops.
     public byte GetBlockUnchecked(int x, int y, int z) =>
         Blocks[
             (x + HaloSize) +
