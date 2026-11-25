@@ -555,6 +555,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private const long ChunkSnapshotBytes = SampleCount + CellCount;
 
     private readonly SparseVoxelOctreeIndex<Chunk> _octreeIndex;
+    private readonly FlatVoxelPageDirectory<Chunk> _pageDirectory;
     private readonly HashSet<(int X, int Z)> _editedChunkColumns = new();
     private readonly List<EditHistoryEntry> _undoHistory = new();
     private readonly List<EditHistoryEntry> _redoHistory = new();
@@ -599,14 +600,21 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     public int ChunkCount => _octreeIndex.LeafCount;
     public int OctreeNodeCount => _octreeIndex.NodeCount;
     public int StorageDataCellSize => DataCellSize;
+    public int DataCellDirectoryLength => _pageDirectory.Length;
+    public int DataCellCountX => _pageDirectory.CountX;
+    public int DataCellCountY => _pageDirectory.CountY;
+    public int DataCellCountZ => _pageDirectory.CountZ;
+
+    public int GetDataCellLinearIndex(int cellX, int cellY, int cellZ) =>
+        _pageDirectory.GetLinearIndex(cellX, cellY, cellZ);
 
     public int GetDataCellStorageBytes(int cellX, int cellY, int cellZ) =>
-        _octreeIndex.TryGetLeaf(new ChunkCoordinate(cellX, cellY, cellZ), out Chunk? page)
-            ? page?.StorageBytes ?? 0
+        TryGetPage(new ChunkCoordinate(cellX, cellY, cellZ), out Chunk? page)
+            ? page!.StorageBytes
             : 0;
 
     public VoxelContentConstitution GetDataCellConstitution(int cellX, int cellY, int cellZ) =>
-        _octreeIndex.TryGetLeaf(new ChunkCoordinate(cellX, cellY, cellZ), out Chunk? page) && page != null
+        TryGetPage(new ChunkCoordinate(cellX, cellY, cellZ), out Chunk? page) && page != null
             ? page.GetContentConstitution()
             : VoxelContentConstitution.Mixed;
 
@@ -638,10 +646,17 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         Depth = depth;
         _baseDensity = baseDensity ?? throw new ArgumentNullException(nameof(baseDensity));
         _baseMaterial = baseMaterial ?? throw new ArgumentNullException(nameof(baseMaterial));
+
+        int pageCountX = (width + DataCellSize - 1) / DataCellSize;
+        int pageCountY = (height + DataCellSize - 1) / DataCellSize;
+        int pageCountZ = (depth + DataCellSize - 1) / DataCellSize;
+
+        _pageDirectory = new FlatVoxelPageDirectory<Chunk>(
+            pageCountX, pageCountY, pageCountZ);
         _octreeIndex = new SparseVoxelOctreeIndex<Chunk>(
-            (width + DataCellSize - 1) / DataCellSize,
-            (height + DataCellSize - 1) / DataCellSize,
-            (depth + DataCellSize - 1) / DataCellSize,
+            pageCountX,
+            pageCountY,
+            pageCountZ,
             static page => page.GetContentConstitution());
     }
 
@@ -683,7 +698,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         for (int x = minChunkX; x <= maxChunkX; x++)
         {
             ChunkCoordinate key = new(x, y, z);
-            if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
+            if (TryGetPage(key, out Chunk? chunk))
                 snapshots.Add(key, ChunkSnapshot.From(chunk));
         }
 
@@ -735,7 +750,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         for (int x = minChunkX; x <= maxChunkX; x++)
         {
             ChunkCoordinate key = new(x, y, z);
-            if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
+            if (TryGetPage(key, out Chunk? chunk))
                 snapshots.Add(key, ChunkSnapshot.From(chunk));
         }
 
@@ -757,7 +772,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             return DecodeContent(EncodeContent(_baseDensity(x, y, z)));
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
-        if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
+        if (TryGetPage(key, out Chunk? chunk))
             return DecodeContent(chunk.GetContent(index));
 
         return DecodeContent(EncodeContent(_baseDensity(x, y, z)));
@@ -799,7 +814,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             return 0;
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
-        if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
+        if (TryGetPage(key, out Chunk? chunk))
         {
             byte material = chunk.GetMaterial(index);
             return chunk.GetContent(index) > ContentIsoLevel &&
@@ -823,7 +838,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             return 0;
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
-        if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
+        if (TryGetPage(key, out Chunk? chunk))
         {
             byte material = chunk.GetMaterial(index);
             return chunk.GetContent(index) > ContentIsoLevel &&
@@ -1196,7 +1211,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         writer.Write(keys.Count);
         foreach (ChunkCoordinate key in keys)
         {
-            if (!_octreeIndex.TryGetLeaf(key, out Chunk? chunk) || chunk == null)
+            if (!TryGetPage(key, out Chunk? chunk) || chunk == null)
                 continue;
 
             writer.Write(key.X);
@@ -1392,10 +1407,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _redoHistory.Clear();
         _undoHistoryBytes = 0;
         _historyCapture = null;
+        _pageDirectory.Clear();
         _octreeIndex.Clear();
 
         foreach ((ChunkCoordinate key, Chunk chunk) in loaded)
+        {
+            _pageDirectory.Set(key.X, key.Y, key.Z, chunk);
             _octreeIndex.SetLeaf(key, chunk);
+        }
 
         _editedChunkColumns.Clear();
         foreach ((int x, int z) in editedColumns)
@@ -1497,15 +1516,15 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     public long GetChunkRevision(int chunkX, int chunkY, int chunkZ)
     {
-        return _octreeIndex.TryGetLeaf(
+        return TryGetPage(
             new ChunkCoordinate(chunkX, chunkY, chunkZ),
             out Chunk? chunk)
-                ? chunk.Revision
+                ? chunk!.Revision
                 : 0L;
     }
 
     public bool IsChunkKnown(int chunkX, int chunkY, int chunkZ) =>
-        _octreeIndex.ContainsLeaf(new ChunkCoordinate(chunkX, chunkY, chunkZ));
+        TryGetPage(new ChunkCoordinate(chunkX, chunkY, chunkZ), out _);
 
     /// <summary>Enumerates materialized edit leaves intersecting a chunk-space AABB.</summary>
     public void CollectEditedChunks(
@@ -1682,7 +1701,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         for (int chunkY = 0; chunkY < chunkCountY; chunkY++)
         {
             ChunkCoordinate key = new(chunkX, chunkY, chunkZ);
-            if (!_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
+            if (!TryGetPage(key, out Chunk? chunk))
                 continue;
 
             CaptureChunkBeforeWrite(key);
@@ -1738,6 +1757,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         {
             foreach (ChunkCoordinate key in removeChunks)
             {
+                _pageDirectory.Remove(key.X, key.Y, key.Z);
                 _octreeIndex.TryRemoveLeaf(key, out _);
             }
         }
@@ -1748,7 +1768,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             bool stillEdited = false;
             for (int chunkY = 0; chunkY < chunkCountY; chunkY++)
             {
-                if (_octreeIndex.ContainsLeaf(new ChunkCoordinate(chunkX, chunkY, chunkZ)))
+                if (TryGetPage(new ChunkCoordinate(chunkX, chunkY, chunkZ), out _))
                 {
                     stillEdited = true;
                     break;
@@ -1786,6 +1806,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         foreach (ChunkCoordinate key in keys)
             CaptureChunkBeforeWrite(key);
 
+        _pageDirectory.Clear();
         _octreeIndex.Clear();
         _editedChunkColumns.Clear();
         Version++;
@@ -2769,7 +2790,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         foreach (ChunkCoordinate key in touched)
         {
-            if (!_octreeIndex.TryGetLeaf(key, out Chunk? page) || page == null)
+            if (!TryGetPage(key, out Chunk? page) || page == null)
                 continue;
             page.Compress();
         }
@@ -2970,7 +2991,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         byte material = materialId == 0 ? byte.MaxValue : (byte)materialId;
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
-        if (_octreeIndex.TryGetLeaf(key, out Chunk? existing) &&
+        if (TryGetPage(key, out Chunk? existing) &&
             existing.GetMaterial(index) == material)
             return;
 
@@ -3000,7 +3021,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         foreach (ChunkCoordinate key in touched)
         {
-            if (!_octreeIndex.TryGetLeaf(key, out Chunk? page) || page == null)
+            if (!TryGetPage(key, out Chunk? page) || page == null)
                 continue;
 
             page.Compress();
@@ -3016,7 +3037,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         _historyCapture.Before.Add(
             key,
-            _octreeIndex.TryGetLeaf(key, out Chunk? chunk)
+            TryGetPage(key, out Chunk? chunk)
                 ? ChunkSnapshot.From(chunk)
                 : null);
     }
@@ -3055,7 +3076,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         bool anyDifference = false;
         foreach ((ChunkCoordinate key, ChunkSnapshot? before) in capture.Before)
         {
-            ChunkSnapshot? current = _octreeIndex.TryGetLeaf(key, out Chunk? chunk)
+            ChunkSnapshot? current = TryGetPage(key, out Chunk? chunk)
                 ? ChunkSnapshot.From(chunk)
                 : null;
             after.Add(key, current);
@@ -3114,11 +3135,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             {
                 if (snapshot == null)
                 {
+                    _pageDirectory.Remove(key.X, key.Y, key.Z);
                     _octreeIndex.TryRemoveLeaf(key, out _);
                     continue;
                 }
 
-                _octreeIndex.SetLeaf(key, snapshot.ToChunk(Version));
+                Chunk restored = snapshot.ToChunk(Version);
+                _pageDirectory.Set(key.X, key.Y, key.Z, restored);
+                _octreeIndex.SetLeaf(key, restored);
             }
         }
         finally
@@ -3142,12 +3166,17 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private Chunk GetOrCreateChunk(ChunkCoordinate key)
     {
-        if (_octreeIndex.TryGetLeaf(key, out Chunk? existing) && existing != null)
+        if (TryGetPage(key, out Chunk? existing) && existing != null)
             return existing;
 
         Chunk created = CreateChunkData(key, revision: 0);
-        return _octreeIndex.GetOrAddLeaf(key, created);
+        Chunk page = _octreeIndex.GetOrAddLeaf(key, created);
+        _pageDirectory.Set(key.X, key.Y, key.Z, page);
+        return page;
     }
+
+    private bool TryGetPage(ChunkCoordinate key, out Chunk? page) =>
+        _pageDirectory.TryGet(key.X, key.Y, key.Z, out page);
 
     private Chunk CreateChunkData(ChunkCoordinate key, long revision)
     {
