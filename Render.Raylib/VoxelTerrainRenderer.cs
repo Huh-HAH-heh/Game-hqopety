@@ -139,17 +139,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     public double CpuCaptureMillisecondsLastFrame { get; private set; }
     public double GpuUploadMillisecondsLastFrame { get; private set; }
-    public int RunningMeshJobs => 0;
     public double CpuCaptureMilliseconds => CpuCaptureMillisecondsLastFrame;
     public double GpuUploadMilliseconds => GpuUploadMillisecondsLastFrame;
-    public int PendingMeshJobs => 0;
-    public int CompletedMeshResultsPending => 0;
-    public double WorkerBuildMillisecondsLastFrame { get; private set; }
-    public double LastWorkerBuildMilliseconds { get; private set; }
-    public double MeshBuildMillisecondsLastFrame => WorkerBuildMillisecondsLastFrame;
-    public double LastMeshBuildMilliseconds => LastWorkerBuildMilliseconds;
-    public double LastWorkerQueueWaitMilliseconds => 0d;
-    public double LastWorkerResultDeliveryMilliseconds => 0d;
+    public double MeshBuildMillisecondsLastFrame { get; private set; }
+    public double LastMeshBuildMilliseconds { get; private set; }
     public int BuildsCompletedLastFrame { get; private set; }
     public int LastBuildStep { get; private set; } = 1;
     public int LastBuildVertices { get; private set; }
@@ -159,16 +152,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public long TotalBuildRequests => _totalBuildRequests;
     public long TotalBuildStarted => _totalBuildStarted;
     public long TotalBuildCompleted => _totalBuildCompleted;
-    public long TotalBuildCancelled => 0;
     public long TotalBuildFailed => _totalBuildFailed;
-    public long TotalStaleResults => 0;
-    public long TotalDuplicateRequestAttempts => 0;
-    public long TotalQueueSaturated => 0;
-    public long TotalRepeatedBuilds => 0;
     public long TotalGpuUploads => _totalGpuUploads;
     public long TotalGpuUnloads => _totalGpuUnloads;
     public long TotalIdenticalSurfaceSkips => _totalIdenticalSurfaceSkips;
-    public long TotalIdenticalCutSkips => 0;
     public long TotalEmptyChunks => _totalEmptyChunks;
 
     public int FrustumCandidatesLastFrame { get; private set; }
@@ -244,7 +231,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         RebuiltChunks = 0;
         CpuCaptureMillisecondsLastFrame = 0d;
         GpuUploadMillisecondsLastFrame = 0d;
-        WorkerBuildMillisecondsLastFrame = 0d;
+        MeshBuildMillisecondsLastFrame = 0d;
         BuildsCompletedLastFrame = 0;
         GpuUploadsLastFrame = 0;
         LastBuildVertices = 0;
@@ -327,7 +314,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             string summary =
                 $"frame={_frame} candidates={_candidates.Count} visible={_visible.Count} cache={_chunks.Count} " +
-                $"builds={BuildsCompletedLastFrame} meshMs={WorkerBuildMillisecondsLastFrame:0.000} " +
+                $"builds={BuildsCompletedLastFrame} meshMs={MeshBuildMillisecondsLastFrame:0.000} " +
                 $"captureMs={CpuCaptureMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000} " +
                 $"gpuUploads={GpuUploadsLastFrame} totalUploads={_totalGpuUploads} totalUnloads={_totalGpuUnloads} " +
                 $"empty={_totalEmptyChunks} vertices={LastBuildVertices} triangles={LastBuildTriangles}";
@@ -401,8 +388,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 ? VoxelChunkMesher.BuildSurfaceData(input, _palette)
                 : Array.Empty<VoxelMeshData>();
             meshTimer.Stop();
-            WorkerBuildMillisecondsLastFrame += meshTimer.Elapsed.TotalMilliseconds;
-            LastWorkerBuildMilliseconds = meshTimer.Elapsed.TotalMilliseconds;
+            MeshBuildMillisecondsLastFrame += meshTimer.Elapsed.TotalMilliseconds;
+            LastMeshBuildMilliseconds = meshTimer.Elapsed.TotalMilliseconds;
 
             int vertices = 0;
             int triangles = 0;
