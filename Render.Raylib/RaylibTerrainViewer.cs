@@ -871,7 +871,7 @@ public static class RaylibTerrainViewer
             if (settings.TerrainMode == TerrainRenderMode.Voxel)
             {
                 lines.Add((
-                    $"CPU CAPTURE {renderer.VoxelCpuCaptureMilliseconds:0.00} ms | CPU BUILD {renderer.VoxelWorkerBuildMilliseconds:0.00} ms | GPU UPLOAD {renderer.VoxelGpuUploadMilliseconds:0.00} ms",
+                    $"CPU CAPTURE {renderer.VoxelCpuCaptureMilliseconds:0.00} ms | CPU BUILD {renderer.VoxelMeshBuildMilliseconds:0.00} ms | GPU UPLOAD {renderer.VoxelGpuUploadMilliseconds:0.00} ms",
                     13f,
                     Color.LightGray));
                 lines.Add((
@@ -879,7 +879,7 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"MESH STEP {renderer.VoxelLastBuildStep} ({renderer.VoxelLastBuildStep * 0.1f:0.00} m) | VERTICES {renderer.VoxelLastBuildVertices} | TRIANGLES {renderer.VoxelLastBuildTriangles} | LAST BUILD {renderer.VoxelLastWorkerBuildMilliseconds:0.00} ms",
+                    $"MESH STEP {renderer.VoxelLastBuildStep} ({renderer.VoxelLastBuildStep * 0.1f:0.00} m) | VERTICES {renderer.VoxelLastBuildVertices} | TRIANGLES {renderer.VoxelLastBuildTriangles} | LAST BUILD {renderer.VoxelLastMeshBuildMilliseconds:0.00} ms",
                     13f,
                     Color.LightGray));
                 lines.Add((
@@ -891,7 +891,7 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"CACHE POLICY LRU | MEMORY LIMIT {4096} RENDER CHUNKS | REBUILD ONLY AFTER EDIT/PALETTE CHANGE",
+                    $"GPU CACHE {renderer.VoxelGpuCacheMegabytes:0.0} / 256 MB | LRU LIMIT 4096 CHUNKS",
                     13f,
                     Color.LightGray));
             }
