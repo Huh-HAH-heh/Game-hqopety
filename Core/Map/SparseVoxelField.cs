@@ -941,20 +941,18 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             writer.Write(key.Y);
             writer.Write(key.Z);
             writer.Write(chunk.Revision);
-            for (int i = 0; i < SampleCount; i++)
-                writer.Write(chunk.Density[i]);
-            writer.Write(chunk.DensityMask);
-            for (int i = 0; i < CellCount; i++)
-                writer.Write(chunk.Materials[i]);
-            writer.Write(chunk.MaterialMask);
+            writer.Write(chunk.Content);
+            for (int i = 0; i < ContentMaskWordCount; i++)
+                writer.Write(chunk.ContentMask[i]);
+
+            writer.Write(chunk.Materials != null);
+            if (chunk.Materials != null)
+                writer.Write(chunk.Materials);
         }
+
         writer.Flush();
     }
 
-    /// <summary>
-    /// Atomically replaces the current edit set after validating the complete
-    /// compressed stream. A failed or incompatible save leaves the live field intact.
-    /// </summary>
     public void LoadEdits(Stream source) => LoadEdits(source, 0UL);
 
     public void LoadEdits(Stream source, ulong expectedWorldSignature)
@@ -966,21 +964,24 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         Dictionary<ChunkCoordinate, Chunk> loaded = new();
         HashSet<(int X, int Z)> editedColumns = new();
         long maximumRevision = 0;
+
         using (GZipStream decompressed = new(source, CompressionMode.Decompress, leaveOpen: true))
         using (BinaryReader reader = new(decompressed, Encoding.UTF8, leaveOpen: true))
         {
             if (reader.ReadInt32() != SaveMagic)
                 throw new InvalidDataException("The voxel save has an invalid signature.");
-            if (reader.ReadInt32() != SaveFormatVersion)
+
+            int formatVersion = reader.ReadInt32();
+            if (formatVersion != 2 && formatVersion != SaveFormatVersion)
                 throw new InvalidDataException("The voxel save version is not supported.");
+
             if (reader.ReadInt32() != Width ||
                 reader.ReadInt32() != Height ||
                 reader.ReadInt32() != Depth)
                 throw new InvalidDataException("The voxel save belongs to a different world size.");
 
             if (reader.ReadUInt64() != expectedWorldSignature)
-                throw new InvalidDataException(
-                    "The voxel save belongs to a different base world.");
+                throw new InvalidDataException("The voxel save belongs to a different base world.");
 
             int chunkCount = reader.ReadInt32();
             long capacity = ((Width + ChunkSize - 1L) / ChunkSize) *
@@ -995,6 +996,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 int chunkY = reader.ReadInt32();
                 int chunkZ = reader.ReadInt32();
                 long revision = reader.ReadInt64();
+
                 if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
                     chunkX >= (Width + ChunkSize - 1) / ChunkSize ||
                     chunkY >= (Height + ChunkSize - 1) / ChunkSize ||
@@ -1007,34 +1009,73 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     throw new InvalidDataException("The voxel save contains a duplicate chunk.");
 
                 Chunk chunk = new() { Revision = revision };
-                for (int i = 0; i < SampleCount; i++)
-                    chunk.Density[i] = reader.ReadInt16();
+                bool hasOverrides;
 
-                byte[] densityMask = reader.ReadBytes(SampleCount);
-                if (densityMask.Length != SampleCount)
-                    throw new EndOfStreamException();
-                densityMask.CopyTo(chunk.DensityMask, 0);
-
-                for (int i = 0; i < CellCount; i++)
-                    chunk.Materials[i] = reader.ReadUInt16();
-
-                byte[] materialMask = reader.ReadBytes(CellCount);
-                if (materialMask.Length != CellCount)
-                    throw new EndOfStreamException();
-                materialMask.CopyTo(chunk.MaterialMask, 0);
-
-                bool hasOverrides = false;
-                for (int i = 0; i < SampleCount; i++)
+                if (formatVersion == 2)
                 {
-                    if (chunk.DensityMask[i] > 1)
-                        throw new InvalidDataException("The voxel save contains an invalid density mask.");
-                    hasOverrides |= chunk.DensityMask[i] != 0;
+                    short[] oldDensity = new short[SampleCount];
+                    for (int i = 0; i < SampleCount; i++)
+                        oldDensity[i] = reader.ReadInt16();
+
+                    byte[] oldDensityMask = reader.ReadBytes(SampleCount);
+                    if (oldDensityMask.Length != SampleCount)
+                        throw new EndOfStreamException();
+
+                    for (int i = 0; i < SampleCount; i++)
+                    {
+                        if (oldDensityMask[i] > 1)
+                            throw new InvalidDataException("The voxel save contains an invalid density mask.");
+                        if (oldDensityMask[i] == 0)
+                            continue;
+
+                        chunk.Content[i] = EncodeContent(oldDensity[i] / DensityScale);
+                        SetContentOverride(chunk.ContentMask, i);
+                    }
+
+                    ushort[] oldMaterials = new ushort[CellCount];
+                    for (int i = 0; i < CellCount; i++)
+                        oldMaterials[i] = reader.ReadUInt16();
+
+                    byte[] oldMaterialMask = reader.ReadBytes(CellCount);
+                    if (oldMaterialMask.Length != CellCount)
+                        throw new EndOfStreamException();
+
+                    for (int i = 0; i < CellCount; i++)
+                    {
+                        if (oldMaterialMask[i] > 1)
+                            throw new InvalidDataException("The voxel save contains an invalid material mask.");
+                        if (oldMaterialMask[i] == 0)
+                            continue;
+                        if (oldMaterials[i] >= NoMaterialOverride)
+                            throw new InvalidDataException("The voxel save contains an unsupported material ID.");
+
+                        EnsureMaterialArray(chunk);
+                        chunk.Materials![i] = (byte)oldMaterials[i];
+                    }
+
+                    hasOverrides = HasAnyContentOverride(chunk.ContentMask) ||
+                        HasAnyMaterialOverride(chunk.Materials);
                 }
-                for (int i = 0; i < CellCount; i++)
+                else
                 {
-                    if (chunk.MaterialMask[i] > 1)
-                        throw new InvalidDataException("The voxel save contains an invalid material mask.");
-                    hasOverrides |= chunk.MaterialMask[i] != 0;
+                    byte[] content = reader.ReadBytes(SampleCount);
+                    if (content.Length != SampleCount)
+                        throw new EndOfStreamException();
+                    content.CopyTo(chunk.Content, 0);
+
+                    for (int i = 0; i < ContentMaskWordCount; i++)
+                        chunk.ContentMask[i] = reader.ReadInt64();
+
+                    if (reader.ReadBoolean())
+                    {
+                        byte[] materials = reader.ReadBytes(CellCount);
+                        if (materials.Length != CellCount)
+                            throw new EndOfStreamException();
+                        chunk.Materials = materials;
+                    }
+
+                    hasOverrides = HasAnyContentOverride(chunk.ContentMask) ||
+                        HasAnyMaterialOverride(chunk.Materials);
                 }
 
                 if (!hasOverrides)
@@ -1051,8 +1092,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _undoHistoryBytes = 0;
         _historyCapture = null;
         _chunks.Clear();
+        _octreeIndex.Clear();
+
         foreach ((ChunkCoordinate key, Chunk chunk) in loaded)
+        {
             _chunks[key] = chunk;
+            _octreeIndex.AddLeaf(key);
+        }
+
         _editedChunkColumns.Clear();
         foreach ((int x, int z) in editedColumns)
             _editedChunkColumns.Add((x, z));
@@ -1060,7 +1107,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         Version = Math.Max(Version, maximumRevision) + 1;
         Changed?.Invoke(new VoxelBounds(0, 0, 0, Width, Height, Depth));
     }
-
 
     public VoxelMaterialDefinition GetMaterialDefinition(int x, int y, int z) =>
         VoxelMaterialCatalog.Get(GetMaterialId(x, y, z));
@@ -1079,6 +1125,24 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     public bool IsChunkKnown(int chunkX, int chunkY, int chunkZ) =>
         _chunks.ContainsKey(new ChunkCoordinate(chunkX, chunkY, chunkZ));
+
+    /// <summary>Enumerates materialized edit leaves intersecting a chunk-space AABB.</summary>
+    public void CollectEditedChunks(
+        int minChunkX,
+        int minChunkY,
+        int minChunkZ,
+        int maxChunkX,
+        int maxChunkY,
+        int maxChunkZ,
+        List<ChunkCoordinate> destination) =>
+        _octreeIndex.CollectLeaves(
+            Math.Max(0, minChunkX),
+            Math.Max(0, minChunkY),
+            Math.Max(0, minChunkZ),
+            Math.Min((Width - 1) / ChunkSize, maxChunkX),
+            Math.Min((Height - 1) / ChunkSize, maxChunkY),
+            Math.Min((Depth - 1) / ChunkSize, maxChunkZ),
+            destination);
 
     public bool HasEditsInArea(int minX, int maxX, int minZ, int maxZ)
     {
@@ -1252,25 +1316,28 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             for (int localZ = localMinZ; localZ < localMaxZ; localZ++)
             for (int localX = localMinX; localX < localMaxX; localX++)
             {
-                int cellColumn = localX + localZ * ChunkSize;
                 for (int localY = 0; localY < localMaxY; localY++)
                 {
                     int densityIndex = localX +
                         localY * DensitySamplesPerAxis +
                         localZ * SamplePlane;
-                    if (Volatile.Read(ref chunk.DensityMask[densityIndex]) != 0)
+                    if (IsContentOverridden(chunk.ContentMask, densityIndex))
                     {
-                        Volatile.Write(ref chunk.DensityMask[densityIndex], (byte)0);
-                        Volatile.Write(ref chunk.Density[densityIndex], (short)0);
+                        ClearContentOverride(chunk.ContentMask, densityIndex);
+                        Volatile.Write(ref chunk.Content[densityIndex], (byte)0);
                         changed = true;
                     }
 
-                    int materialIndex = cellColumn + localY * CellPlane;
-                    if (Volatile.Read(ref chunk.MaterialMask[materialIndex]) != 0)
+                    if (chunk.Materials != null)
                     {
-                        Volatile.Write(ref chunk.MaterialMask[materialIndex], (byte)0);
-                        Volatile.Write(ref chunk.Materials[materialIndex], (ushort)0);
-                        changed = true;
+                        int materialIndex = localX +
+                            localY * ChunkSize +
+                            localZ * CellPlane;
+                        if (Volatile.Read(ref chunk.Materials[materialIndex]) != NoMaterialOverride)
+                        {
+                            Volatile.Write(ref chunk.Materials[materialIndex], NoMaterialOverride);
+                            changed = true;
+                        }
                     }
                 }
             }
@@ -1280,11 +1347,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
             anyChanged = true;
             chunk.Revision = revision;
-            if (Array.IndexOf(chunk.DensityMask, (byte)1) < 0 &&
-                Array.IndexOf(chunk.MaterialMask, (byte)1) < 0)
-            {
+            if (!HasAnyContentOverride(chunk.ContentMask) &&
+                !HasAnyMaterialOverride(chunk.Materials))
                 (removeChunks ??= new List<ChunkCoordinate>()).Add(key);
-            }
         }
 
         if (!anyChanged)
@@ -1293,7 +1358,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (removeChunks != null)
         {
             foreach (ChunkCoordinate key in removeChunks)
-                _chunks.TryRemove(key, out _);
+            {
+                if (_chunks.TryRemove(key, out _))
+                    _octreeIndex.RemoveLeaf(key);
+            }
         }
 
         for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
@@ -1331,6 +1399,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             CaptureChunkBeforeWrite(key);
 
         _chunks.Clear();
+        _octreeIndex.Clear();
         _editedChunkColumns.Clear();
         Version++;
         VoxelBounds bounds = new(0, 0, 0, Width, Height, Depth);
@@ -2481,14 +2550,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         if (x < 0 || y < 0 || z < 0 ||
             x >= Width || y >= Height || z >= Depth ||
-            Quantize(density) == Quantize(previousDensity))
+            EncodeContent(density) == EncodeContent(previousDensity))
             return;
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        Volatile.Write(ref chunk.Density[index], Quantize(density));
-        Volatile.Write(ref chunk.DensityMask[index], (byte)1);
+        Volatile.Write(ref chunk.Content[index], EncodeContent(density));
+        SetContentOverride(chunk.ContentMask, index);
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
@@ -2502,17 +2571,19 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         if (!IsInsideCell(x, y, z))
             return;
+        if (materialId >= NoMaterialOverride)
+            throw new ArgumentOutOfRangeException(nameof(materialId), "Voxel material IDs must be in the range 0..254.");
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? existing) &&
-            Volatile.Read(ref existing.MaterialMask[index]) != 0 &&
-            Volatile.Read(ref existing.Materials[index]) == materialId)
+            existing.Materials != null &&
+            Volatile.Read(ref existing.Materials[index]) == (byte)materialId)
             return;
 
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        Volatile.Write(ref chunk.Materials[index], materialId);
-        Volatile.Write(ref chunk.MaterialMask[index], (byte)1);
+        EnsureMaterialArray(chunk);
+        Volatile.Write(ref chunk.Materials![index], (byte)materialId);
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
@@ -2637,11 +2708,20 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             {
                 if (snapshot == null)
                 {
-                    _chunks.TryRemove(key, out _);
+                    if (_chunks.TryRemove(key, out _))
+                        _octreeIndex.RemoveLeaf(key);
                     continue;
                 }
 
-                _chunks[key] = snapshot.ToChunk(Version);
+                if (_chunks.ContainsKey(key))
+                {
+                    _chunks[key] = snapshot.ToChunk(Version);
+                }
+                else
+                {
+                    _chunks[key] = snapshot.ToChunk(Version);
+                    _octreeIndex.AddLeaf(key);
+                }
             }
         }
         finally
@@ -2658,10 +2738,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private Chunk GetOrCreateChunk(ChunkCoordinate key)
     {
-        if (_chunks.TryGetValue(key, out Chunk? chunk))
-            return chunk;
+        if (_chunks.TryGetValue(key, out Chunk? existing))
+            return existing;
 
-        return _chunks.GetOrAdd(key, static _ => new Chunk());
+        Chunk created = new();
+        Chunk actual = _chunks.GetOrAdd(key, created);
+        if (ReferenceEquals(actual, created))
+            _octreeIndex.AddLeaf(key);
+        return actual;
     }
 
     private ChunkCoordinate GetSampleChunk(int x, int y, int z, out int index)
@@ -2754,10 +2838,54 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         }
     }
 
-    private static short Quantize(float density)
+    private static byte Quantize(float density) => EncodeContent(density);
+
+    private static byte EncodeContent(float density)
     {
-        float scaled = Math.Clamp(density * DensityScale, short.MinValue, short.MaxValue);
-        return checked((short)MathF.Round(scaled));
+        if (float.IsNaN(density))
+            return ContentIsoLevel;
+        float scaled = MathF.Round(ContentIsoLevel + density * DensityScale);
+        return (byte)Math.Clamp(scaled, byte.MinValue, byte.MaxValue);
+    }
+
+    private static float DecodeContent(byte content) =>
+        (content - ContentIsoLevel) / DensityScale;
+
+    private static bool IsContentOverridden(long[] mask, int index) =>
+        (Volatile.Read(ref mask[index >> 6]) & (1L << (index & 63))) != 0;
+
+    private static void SetContentOverride(long[] mask, int index) =>
+        Interlocked.Or(ref mask[index >> 6], 1L << (index & 63));
+
+    private static void ClearContentOverride(long[] mask, int index) =>
+        Interlocked.And(ref mask[index >> 6], ~(1L << (index & 63)));
+
+    private static bool HasAnyContentOverride(long[] mask)
+    {
+        for (int i = 0; i < mask.Length; i++)
+            if (Volatile.Read(ref mask[i]) != 0)
+                return true;
+        return false;
+    }
+
+    private static bool HasAnyMaterialOverride(byte[]? materials)
+    {
+        if (materials == null)
+            return false;
+        for (int i = 0; i < materials.Length; i++)
+            if (materials[i] != NoMaterialOverride)
+                return true;
+        return false;
+    }
+
+    private static void EnsureMaterialArray(Chunk chunk)
+    {
+        if (Volatile.Read(ref chunk.Materials) != null)
+            return;
+
+        byte[] materials = new byte[CellCount];
+        Array.Fill(materials, NoMaterialOverride);
+        Interlocked.CompareExchange(ref chunk.Materials, materials, null);
     }
 
     private static float Lerp(float a, float b, float t) => a + (b - a) * t;
