@@ -88,6 +88,47 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 : Volatile.Read(ref values[index]);
         }
 
+        public bool CopyBlockIdsRow(
+            int localX,
+            int localY,
+            int localZ,
+            int count,
+            Span<byte> destination)
+        {
+            byte[]? contentValues = Volatile.Read(ref _content);
+            byte[]? materialValues = Volatile.Read(ref _material);
+            byte uniformContent = Volatile.Read(ref _uniformContent);
+            byte uniformMaterial = Volatile.Read(ref _uniformMaterial);
+
+            if ((contentValues == null && uniformContent <= ContentIsoLevel) ||
+                (materialValues == null && uniformMaterial == byte.MaxValue))
+            {
+                destination[..count].Clear();
+                return false;
+            }
+
+            int sourceIndex = localX + localY * DataCellSize + localZ * CellPlane;
+            bool hasSolid = false;
+            for (int i = 0; i < count; i++)
+            {
+                byte content = contentValues == null
+                    ? uniformContent
+                    : Volatile.Read(ref contentValues[sourceIndex + i]);
+                byte material = materialValues == null
+                    ? uniformMaterial
+                    : Volatile.Read(ref materialValues[sourceIndex + i]);
+
+                byte blockId = content > ContentIsoLevel &&
+                    material != byte.MaxValue
+                        ? material
+                        : (byte)0;
+                destination[i] = blockId;
+                hasSolid |= blockId != 0;
+            }
+
+            return hasSolid;
+        }
+
         public void SetContent(int index, byte value)
         {
             byte[]? values = Volatile.Read(ref _content);
@@ -380,6 +421,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         private readonly Func<int, int, int, float> _baseDensity;
         private readonly Func<int, int, int, ushort> _baseMaterial;
+        private readonly Func<int, int, int, byte>? _baseBlockId;
         private readonly Dictionary<ChunkCoordinate, ChunkSnapshot> _chunks;
 
         public int Width { get; }
@@ -392,13 +434,15 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int depth,
             Func<int, int, int, float> baseDensity,
             Func<int, int, int, ushort> baseMaterial,
-            Dictionary<ChunkCoordinate, ChunkSnapshot> chunks)
+            Dictionary<ChunkCoordinate, ChunkSnapshot> chunks,
+            Func<int, int, int, byte>? baseBlockId)
         {
             Width = width;
             Height = height;
             Depth = depth;
             _baseDensity = baseDensity;
             _baseMaterial = baseMaterial;
+            _baseBlockId = baseBlockId;
             _chunks = chunks;
         }
 
@@ -436,6 +480,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     chunk.GetMaterial(index) != byte.MaxValue
                         ? chunk.GetMaterial(index)
                         : (ushort)0;
+
+            if (_baseBlockId != null)
+                return _baseBlockId(x, y, z);
 
             byte baseContent = EncodeContent(_baseDensity(x, y, z));
             if (baseContent <= ContentIsoLevel)
@@ -562,6 +609,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private readonly List<EditHistoryEntry> _redoHistory = new();
     private readonly Func<int, int, int, float> _baseDensity;
     private readonly Func<int, int, int, ushort> _baseMaterial;
+    private readonly Func<int, int, int, byte>? _baseBlockId;
     private EditHistoryCapture? _historyCapture;
     private long _undoHistoryBytes;
     private bool _isRestoringHistory;
@@ -638,7 +686,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int height,
         int depth,
         Func<int, int, int, float> baseDensity,
-        Func<int, int, int, ushort> baseMaterial)
+        Func<int, int, int, ushort> baseMaterial,
+        Func<int, int, int, byte>? baseBlockId = null)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
@@ -649,6 +698,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         Depth = depth;
         _baseDensity = baseDensity ?? throw new ArgumentNullException(nameof(baseDensity));
         _baseMaterial = baseMaterial ?? throw new ArgumentNullException(nameof(baseMaterial));
+        _baseBlockId = baseBlockId;
 
         int pageCountX = (width + DataCellSize - 1) / DataCellSize;
         int pageCountY = (height + DataCellSize - 1) / DataCellSize;
@@ -711,7 +761,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Depth,
             _baseDensity,
             _baseMaterial,
-            snapshots);
+            snapshots,
+            _baseBlockId);
     }
 
     /// <summary>
@@ -763,7 +814,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Depth,
             _baseDensity,
             _baseMaterial,
-            snapshots);
+            snapshots,
+            _baseBlockId);
     }
 
     public float GetDensity(int x, int y, int z)
@@ -850,11 +902,129 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     : (byte)0;
         }
 
+        if (_baseBlockId != null)
+            return _baseBlockId(x, y, z);
+
         if (EncodeContent(_baseDensity(x, y, z)) <= ContentIsoLevel)
             return 0;
 
         byte baseMaterial = EncodeMaterial(_baseMaterial(x, y, z));
         return baseMaterial == byte.MaxValue ? (byte)0 : baseMaterial;
+    }
+
+    /// <summary>
+    /// Copies one contiguous X/Y/Z sample region into X-major block IDs.
+    /// Page coordinates are resolved once per 8-voxel X run, not once per voxel.
+    /// No temporary objects, dictionaries or per-sample allocations are created.
+    /// </summary>
+    public bool CopyBlockIds(
+        int startX,
+        int startY,
+        int startZ,
+        int side,
+        Span<byte> destination)
+    {
+        if (side <= 0)
+            throw new ArgumentOutOfRangeException(nameof(side));
+
+        int plane = checked(side * side);
+        int sampleCount = checked(plane * side);
+        if (destination.Length < sampleCount)
+            throw new ArgumentException(
+                "Destination is smaller than the requested voxel region.",
+                nameof(destination));
+
+        bool hasSolid = false;
+        for (int z = 0; z < side; z++)
+        {
+            int worldZ = startZ + z;
+            for (int y = 0; y < side; y++)
+            {
+                int worldY = startY + y;
+                Span<byte> row = destination.Slice(z * plane + y * side, side);
+
+                if ((uint)worldY >= (uint)Height ||
+                    (uint)worldZ >= (uint)Depth)
+                {
+                    row.Clear();
+                    continue;
+                }
+
+                int x = 0;
+                while (x < side)
+                {
+                    int worldX = startX + x;
+                    if (worldX < 0)
+                    {
+                        int count = Math.Min(side - x, -worldX);
+                        row.Slice(x, count).Clear();
+                        x += count;
+                        continue;
+                    }
+
+                    if (worldX >= Width)
+                    {
+                        row[x..].Clear();
+                        break;
+                    }
+
+                    int localX = worldX & (DataCellSize - 1);
+                    int countInPage = Math.Min(
+                        Math.Min(side - x, DataCellSize - localX),
+                        Width - worldX);
+
+                    ChunkCoordinate key = new(
+                        worldX / DataCellSize,
+                        worldY / DataCellSize,
+                        worldZ / DataCellSize);
+
+                    Span<byte> target = row.Slice(x, countInPage);
+                    if (TryGetPage(key, out Chunk? page) && page != null)
+                    {
+                        hasSolid |= page.CopyBlockIdsRow(
+                            localX,
+                            worldY & (DataCellSize - 1),
+                            worldZ & (DataCellSize - 1),
+                            countInPage,
+                            target);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < countInPage; i++)
+                        {
+                            int sampleX = worldX + i;
+                            byte blockId = _baseBlockId != null
+                                ? _baseBlockId(sampleX, worldY, worldZ)
+                                : GetBaseBlockId(sampleX, worldY, worldZ);
+                            target[i] = blockId;
+                            hasSolid |= blockId != 0;
+                        }
+                    }
+
+                    x += countInPage;
+                }
+            }
+        }
+
+        return hasSolid;
+    }
+
+    private byte GetBaseBlockId(int x, int y, int z)
+    {
+        if (EncodeContent(_baseDensity(x, y, z)) <= ContentIsoLevel)
+            return 0;
+
+        byte material = EncodeMaterial(_baseMaterial(x, y, z));
+        return material == byte.MaxValue ? (byte)0 : material;
+    }
+
+    internal static byte EncodeBlockId(float density, ushort materialId)
+    {
+        byte content = EncodeContent(density);
+        byte material = EncodeMaterial(materialId);
+        return content > ContentIsoLevel && material != byte.MaxValue
+            ? material
+            : (byte)0;
     }
 
 
