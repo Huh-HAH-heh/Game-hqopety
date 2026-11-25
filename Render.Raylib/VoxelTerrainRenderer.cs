@@ -308,14 +308,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 BuildChunk(field, candidate.Key, entry, targetCutLayer);
             }
 
-            if (entry.Built && entry.Surface.Length > 0 &&
-                !entry.Dirty &&
-                entry.BaseVersion == field.BaseVersion &&
-                entry.PaletteVersion == _paletteVersion &&
-                entry.CutLayer == targetCutLayer)
-            {
+            // Keep the previous GPU mesh visible until its replacement is
+            // fully uploaded. This avoids temporary holes during edits and
+            // while the per-frame build budget catches up.
+            if (entry.Built && entry.Surface.Length > 0)
                 _visible.Add((candidate.Key, entry));
-            }
         }
 
         _dynamicFragments.ReleaseBakedBodies(bounds => AreCachedMeshesCurrent(bounds, field));
