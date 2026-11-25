@@ -23,19 +23,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private const string VertexShader = """
         #version 330
-        in vec3 vertexPosition;
-        in vec4 vertexColor;
-        in vec3 vertexNormal;
+        layout(location = 0) in vec3 vertexPosition;
+        layout(location = 3) in vec4 vertexColor;
         uniform mat4 mvp;
         uniform mat4 matModel;
         out vec3 fragWorldPosition;
-        out vec3 fragWorldNormal;
         out vec4 fragColor;
         void main()
         {
-            vec4 worldPosition = matModel * vec4(vertexPosition, 1.0);
-            fragWorldPosition = worldPosition.xyz;
-            fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
+            fragWorldPosition = (matModel * vec4(vertexPosition, 1.0)).xyz;
             fragColor = vertexColor;
             gl_Position = mvp * vec4(vertexPosition, 1.0);
         }
@@ -44,26 +40,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const string FragmentShader = """
         #version 330
         in vec3 fragWorldPosition;
-        in vec3 fragWorldNormal;
         in vec4 fragColor;
         uniform int uCutEnabled;
         uniform float uCutHeight;
-        uniform vec3 uSunDirection;
-        uniform float uAmbientLight;
-        uniform float uSunIntensity;
         out vec4 finalColor;
         void main()
         {
             if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
                 discard;
 
-            vec3 n = normalize(fragWorldNormal);
-            float faceAO = n.y > 0.5 ? 1.0 :
-                n.y < -0.5 ? 0.5 :
-                abs(n.z) > 0.5 ? 0.75 : 0.85;
-            float diffuse = max(dot(n, normalize(uSunDirection)), 0.0);
-            float lighting = max(uAmbientLight + diffuse * uSunIntensity, 0.05);
-            finalColor = vec4(fragColor.rgb * faceAO * lighting, fragColor.a);
+            finalColor = fragColor;
         }
         """;
 
@@ -105,9 +91,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Shader _shader;
     private readonly int _cutEnabledLocation;
     private readonly int _cutHeightLocation;
-    private readonly int _sunDirectionLocation;
-    private readonly int _ambientLightLocation;
-    private readonly int _sunIntensityLocation;
 
     private TerrainPalette _palette;
     private SparseVoxelField? _observedField;
@@ -184,13 +167,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
-        _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
-        _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
-        _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
 
-        if (_cutEnabledLocation < 0 || _cutHeightLocation < 0 ||
-            _sunDirectionLocation < 0 || _ambientLightLocation < 0 ||
-            _sunIntensityLocation < 0)
+        if (_cutEnabledLocation < 0 || _cutHeightLocation < 0)
         {
             UnloadShader(_shader);
             throw new InvalidOperationException("The voxel shader is missing a required uniform.");
@@ -345,7 +323,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float renderCutHeight = cutEnabled && targetCutLayer >= 0
             ? targetCutLayer * SparseVoxelField.VoxelSizeMeters
             : cutHeightMeters;
-        SetLighting();
         SetCutShader(cutEnabled, renderCutHeight);
 
         float worldRadius = 0.5f * MathF.Sqrt(
@@ -368,7 +345,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
-        SetCutShader(cutEnabled, renderCutHeight);
         _dynamicFragments.Draw(_material);
         EndMode3D();
 
@@ -862,14 +838,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static int DivideRoundUp(int value, int divisor) =>
         (value + divisor - 1) / divisor;
-
-    private void SetLighting()
-    {
-        Vector3 direction = _palette.GetSunDirection();
-        SetShaderValue(_shader, _sunDirectionLocation, direction, ShaderUniformDataType.Vec3);
-        SetShaderValue(_shader, _ambientLightLocation, _palette.AmbientLight, ShaderUniformDataType.Float);
-        SetShaderValue(_shader, _sunIntensityLocation, _palette.SunIntensity, ShaderUniformDataType.Float);
-    }
 
     private void SetCutShader(bool enabled, float height)
     {
