@@ -646,10 +646,10 @@ internal static class VoxelTerrainSelfTest
             baseDensity: static (_, _, _) => 1f,
             baseMaterial: static (_, _, _) => Rock);
 
-        field.CarveBox(
-            Vector3.Zero,
-            new Vector3(
-                SparseVoxelField.DataCellSize * SparseVoxelField.VoxelSizeMeters));
+        field.PaintSphere(
+            new Vector3(0.4f, 0.4f, 0.4f),
+            0.7f,
+            BridgeMaterial);
 
         return field.GetDataCellConstitution(0, 0, 0) ==
                    SparseVoxelField.VoxelContentConstitution.Empty &&
