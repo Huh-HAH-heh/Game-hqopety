@@ -6,9 +6,10 @@ using System.Threading;
 namespace Core.Map;
 
 /// <summary>
-/// One sparse octree owns both the spatial directory and the LOD0 page payloads.
-/// Missing leaves are provider-backed space. LOD0 pages store full Content and
-/// Material byte channels; parent nodes store only an eight-child mask.
+/// Sparse spatial octree for 8^3 voxel data cells.
+/// Leaves own content/material pages; parent nodes cache child occupancy and
+/// an Empty/Full/Mixed content constitution when a complete subtree is present.
+/// Missing leaves remain provider-backed and are never incorrectly treated as air.
 /// </summary>
 internal sealed class SparseVoxelOctreeIndex<T> where T : class
 {
@@ -19,22 +20,31 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
     {
         public int ChildMask;
         public int LeafCount;
+        public int ContentConstitution = (int)SparseVoxelField.VoxelContentConstitution.Mixed;
         public T? Page;
     }
 
     private readonly ConcurrentDictionary<ulong, Node> _nodes = new();
+    private readonly Func<T, SparseVoxelField.VoxelContentConstitution> _getConstitution;
     private readonly int _rootLevel;
     private int _leafCount;
 
     public int NodeCount => _nodes.Count;
     public int LeafCount => Volatile.Read(ref _leafCount);
 
-    public SparseVoxelOctreeIndex(int chunksX, int chunksY, int chunksZ)
+    public SparseVoxelOctreeIndex(
+        int cellsX,
+        int cellsY,
+        int cellsZ,
+        Func<T, SparseVoxelField.VoxelContentConstitution> getConstitution)
     {
-        if (chunksX <= 0 || chunksY <= 0 || chunksZ <= 0)
-            throw new ArgumentOutOfRangeException(nameof(chunksX));
+        if (cellsX <= 0 || cellsY <= 0 || cellsZ <= 0)
+            throw new ArgumentOutOfRangeException(nameof(cellsX));
 
-        int largest = Math.Max(chunksX, Math.Max(chunksY, chunksZ));
+        _getConstitution = getConstitution ??
+            throw new ArgumentNullException(nameof(getConstitution));
+
+        int largest = Math.Max(cellsX, Math.Max(cellsY, cellsZ));
         int level = 0;
         int span = 1;
         while (span < largest)
@@ -44,7 +54,7 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
         }
 
         if (level >= 32)
-            throw new ArgumentOutOfRangeException(nameof(chunksX));
+            throw new ArgumentOutOfRangeException(nameof(cellsX));
 
         _rootLevel = level;
     }
@@ -77,6 +87,9 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
         if (existing != null)
             return existing;
 
+        Volatile.Write(
+            ref leafNode.ContentConstitution,
+            (int)_getConstitution(page));
         Interlocked.Increment(ref _leafCount);
         AddParents(leaf);
         return page;
@@ -93,11 +106,50 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
             static _ => new Node());
 
         T? previous = Interlocked.Exchange(ref leafNode.Page, page);
-        if (previous != null)
-            return;
+        Volatile.Write(
+            ref leafNode.ContentConstitution,
+            (int)_getConstitution(page));
 
-        Interlocked.Increment(ref _leafCount);
-        AddParents(leaf);
+        if (previous == null)
+        {
+            Interlocked.Increment(ref _leafCount);
+            AddParents(leaf);
+        }
+        else
+        {
+            RefreshParents(leaf);
+        }
+    }
+
+    public void UpdateLeafConstitution(SparseVoxelField.ChunkCoordinate leaf, T page)
+    {
+        ulong key = Pack(0, leaf.X, leaf.Y, leaf.Z);
+        if (!_nodes.TryGetValue(key, out Node? node) ||
+            !ReferenceEquals(Volatile.Read(ref node.Page), page))
+        {
+            return;
+        }
+
+        Volatile.Write(
+            ref node.ContentConstitution,
+            (int)_getConstitution(page));
+        RefreshParents(leaf);
+    }
+
+    public SparseVoxelField.VoxelContentConstitution GetConstitution(
+        int lod,
+        int x,
+        int y,
+        int z)
+    {
+        if (lod < 0 || lod > _rootLevel ||
+            !_nodes.TryGetValue(Pack(lod, x, y, z), out Node? node))
+        {
+            return SparseVoxelField.VoxelContentConstitution.Mixed;
+        }
+
+        return (SparseVoxelField.VoxelContentConstitution)
+            Volatile.Read(ref node.ContentConstitution);
     }
 
     public bool ContainsLeaf(SparseVoxelField.ChunkCoordinate leaf) =>
@@ -132,11 +184,73 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
             int childZ = (leaf.Z >> (lod - 1)) & 1;
             int childIndex = childX | (childY << 1) | (childZ << 2);
 
-            ulong nodeKey = Pack(lod, leaf.X >> lod, leaf.Y >> lod, leaf.Z >> lod);
+            int nodeX = leaf.X >> lod;
+            int nodeY = leaf.Y >> lod;
+            int nodeZ = leaf.Z >> lod;
+            ulong nodeKey = Pack(lod, nodeX, nodeY, nodeZ);
             Node node = _nodes.GetOrAdd(nodeKey, static _ => new Node());
             Interlocked.Or(ref node.ChildMask, 1 << childIndex);
             Interlocked.Increment(ref node.LeafCount);
+            RecomputeConstitution(lod, nodeX, nodeY, nodeZ, node);
         }
+    }
+
+    private void RefreshParents(SparseVoxelField.ChunkCoordinate leaf)
+    {
+        for (int lod = 1; lod <= _rootLevel; lod++)
+        {
+            int nodeX = leaf.X >> lod;
+            int nodeY = leaf.Y >> lod;
+            int nodeZ = leaf.Z >> lod;
+            if (_nodes.TryGetValue(Pack(lod, nodeX, nodeY, nodeZ), out Node? node))
+                RecomputeConstitution(lod, nodeX, nodeY, nodeZ, node);
+        }
+    }
+
+    private void RecomputeConstitution(int lod, int x, int y, int z, Node node)
+    {
+        // A sparse or incomplete subtree is Mixed/unknown, never assumed empty.
+        long expectedLeaves = 1L << (lod * 3);
+        if (Volatile.Read(ref node.ChildMask) != byte.MaxValue ||
+            Volatile.Read(ref node.LeafCount) != expectedLeaves)
+        {
+            Volatile.Write(
+                ref node.ContentConstitution,
+                (int)SparseVoxelField.VoxelContentConstitution.Mixed);
+            return;
+        }
+
+        int constitution = -1;
+        for (int child = 0; child < 8; child++)
+        {
+            int childX = x * 2 + (child & 1);
+            int childY = y * 2 + ((child >> 1) & 1);
+            int childZ = z * 2 + ((child >> 2) & 1);
+
+            if (!_nodes.TryGetValue(
+                    Pack(lod - 1, childX, childY, childZ),
+                    out Node? childNode))
+            {
+                constitution = (int)SparseVoxelField.VoxelContentConstitution.Mixed;
+                break;
+            }
+
+            int childConstitution = Volatile.Read(ref childNode.ContentConstitution);
+            if (childConstitution == (int)SparseVoxelField.VoxelContentConstitution.Mixed ||
+                (constitution >= 0 && constitution != childConstitution))
+            {
+                constitution = (int)SparseVoxelField.VoxelContentConstitution.Mixed;
+                break;
+            }
+
+            constitution = childConstitution;
+        }
+
+        Volatile.Write(
+            ref node.ContentConstitution,
+            constitution < 0
+                ? (int)SparseVoxelField.VoxelContentConstitution.Mixed
+                : constitution);
     }
 
     private void RemoveEmptyParents(SparseVoxelField.ChunkCoordinate leaf)
@@ -163,7 +277,13 @@ internal sealed class SparseVoxelOctreeIndex<T> where T : class
 
             childBecameEmpty = Interlocked.Decrement(ref node.LeafCount) == 0;
             if (childBecameEmpty)
+            {
                 _nodes.TryRemove(nodeKey, out _);
+            }
+            else
+            {
+                RecomputeConstitution(lod, nodeX, nodeY, nodeZ, node);
+            }
         }
     }
 
