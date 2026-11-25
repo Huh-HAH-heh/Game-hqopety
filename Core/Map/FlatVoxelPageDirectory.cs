@@ -5,13 +5,13 @@ namespace Core.Map;
 
 /// <summary>
 /// Sparse two-level direct-address directory for 8x8x8 voxel pages.
-/// The root is a compact flat array of 16x16x16-page block references.
+/// The root is a compact flat array of 8x8x8-page block references.
 /// Each second-level block is allocated only when its first page is written.
 /// Reads use two array lookups; no hashing or tree traversal is involved.
 /// </summary>
 internal sealed class FlatVoxelPageDirectory<T> where T : class
 {
-    private const int BlockShift = 4;
+    private const int BlockShift = 3;
     private const int BlockSize = 1 << BlockShift;
     private const int BlockMask = BlockSize - 1;
     private const int BlockPlane = BlockSize * BlockSize;
