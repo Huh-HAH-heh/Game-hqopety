@@ -648,6 +648,7 @@ internal static class VoxelTerrainSelfTest
 
         page.SetContentData(content);
         page.SetMaterialData(material);
+        page.Compress();
         bool compressed = page.StorageBytes == 2 &&
             page.GetContentConstitution() == SparseVoxelField.VoxelContentConstitution.Full;
 
