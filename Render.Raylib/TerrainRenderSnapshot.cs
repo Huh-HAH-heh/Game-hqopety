@@ -167,17 +167,6 @@ public sealed class TerrainRenderSnapshot
         if (_initialized && SourceWorldVersion == worldMap.TerrainVersion)
             return false;
 
-        // The voxel renderer reads the authoritative 3D field directly. A
-        // local CSG edit must not trigger a 2304x2304 legacy column snapshot
-        // refresh; only a procedural base-surface revision needs this cache.
-        if (IsVoxelMode && _initialized &&
-            _lastVoxelBaseVersion == worldMap.Voxels.BaseVersion)
-        {
-            SourceWorldVersion = worldMap.TerrainVersion;
-            _complexSourceWorldVersion = worldMap.TerrainVersion;
-            return false;
-        }
-
         bool changed = false;
         ReadOnlySpan<WorldRegion> regions = worldMap.WorldRegions;
 
