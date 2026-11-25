@@ -285,17 +285,24 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
 
             entry.LastSeenFrame = _frame;
-            bool inputsChanged =
-                entry.BaseVersion != field.BaseVersion ||
-                entry.PaletteVersion != _paletteVersion ||
-                entry.CutLayer != targetCutLayer;
-            if (inputsChanged)
+            bool requestedStateChanged =
+                entry.RequestedBaseVersion != field.BaseVersion ||
+                entry.RequestedPaletteVersion != _paletteVersion ||
+                entry.RequestedCutLayer != targetCutLayer;
+
+            if (requestedStateChanged)
             {
+                entry.RequestedBaseVersion = field.BaseVersion;
+                entry.RequestedPaletteVersion = _paletteVersion;
+                entry.RequestedCutLayer = targetCutLayer;
                 entry.BlockedCacheBytes = -1;
                 entry.FailedRevision = int.MinValue;
             }
 
-            bool stale = !entry.Built || entry.Dirty || inputsChanged;
+            bool stale = !entry.Built || entry.Dirty ||
+                entry.BaseVersion != field.BaseVersion ||
+                entry.PaletteVersion != _paletteVersion ||
+                entry.CutLayer != targetCutLayer;
 
             if (!stale)
             {
