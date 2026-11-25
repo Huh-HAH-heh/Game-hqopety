@@ -2844,8 +2844,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         if (float.IsNaN(density))
             return ContentIsoLevel;
-        float scaled = MathF.Round(ContentIsoLevel + density * DensityScale);
-        return (byte)Math.Clamp(scaled, byte.MinValue, byte.MaxValue);
+        float quantized = MathF.Round(density * DensityScale);
+        return (byte)Math.Clamp(ContentIsoLevel + quantized, byte.MinValue, byte.MaxValue);
     }
 
     private static float DecodeContent(byte content) =>
