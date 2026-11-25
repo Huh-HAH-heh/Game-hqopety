@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Threading;
 using System.Numerics;
 using Core.Map;
 using Raylib_cs;
@@ -11,18 +9,16 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Fixed-resolution voxel chunk manager.
-/// Every render chunk samples the authoritative field at Step=1.
-/// Visibility is controlled only by camera radius and frustum; there is no LOD grid.
+/// Main-thread voxel renderer. Meshes are built and uploaded synchronously;
+/// unchanged GPU meshes stay resident in a bounded cache.
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
     private const int ChunkCells = SparseVoxelField.ChunkSize;
-    private const int MaximumPendingMeshJobs = 128;
-    private const int MaximumGpuMeshUploadsPerFrame = 4;
-    
-    private const double GpuUploadBudgetMilliseconds = 3.0;
-    private const int CutCapSettleFrames = 8;
+    private const int MaximumCachedChunks = 4096;
+    private const int MaximumBuildsPerFrame = 8;
+    private const double MeshBuildBudgetMilliseconds = 4.0;
+    private const int CutSettleFrames = 8;
 
     private const string VertexShader = """
         #version 330
@@ -61,164 +57,41 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 discard;
 
             vec3 n = normalize(fragWorldNormal);
-            float faceAO = 0.85;
-
-            if (n.y > 0.5)
-                faceAO = 1.0;
-            else if (n.y < -0.5)
-                faceAO = 0.5;
-            else if (abs(n.z) > 0.5)
-                faceAO = 0.75;
-
+            float faceAO = n.y > 0.5 ? 1.0 :
+                n.y < -0.5 ? 0.5 :
+                abs(n.z) > 0.5 ? 0.75 : 0.85;
             float diffuse = max(dot(n, normalize(uSunDirection)), 0.0);
-            float lighting = max(
-                uAmbientLight + diffuse * uSunIntensity,
-                0.05);
-
-            finalColor = vec4(
-                fragColor.rgb * faceAO * lighting,
-                fragColor.a);
+            float lighting = max(uAmbientLight + diffuse * uSunIntensity, 0.05);
+            finalColor = vec4(fragColor.rgb * faceAO * lighting, fragColor.a);
         }
         """;
 
     private readonly record struct ChunkKey(int X, int Y, int Z);
-
-    private sealed class ChunkEntry : IDisposable
-    {
-        public Mesh[] Surface = Array.Empty<Mesh>();
-        public Mesh[] CutCap = Array.Empty<Mesh>();
-        public long BaseVersion = long.MinValue;
-        public bool SurfaceDirty = true;
-        public bool CutDirty = true;
-        public int PaletteVersion = int.MinValue;
-        public int CutLayer = int.MinValue;
-        public long LastSeenFrame;
-        public bool Built;
-
-        public int RequestRevision;
-        public long BuildGeneration;
-        public int FailedRevision = int.MinValue;
-        public bool BuildQueued;
-        public BuildRequest? RunningBuild;
-        public VoxelMeshBuildResult? ReadyBuild;
-        public BuildRequest? ReadyRequest;
-        public List<Mesh> UploadingSurface = new();
-        public List<Mesh> UploadingCutCap = new();
-        public int SurfaceUploadIndex;
-        public int CutUploadIndex;
-        public bool UploadQueued;
-        public long UploadQueueGeneration;
-
-        public void Dispose()
-        {
-            RunningBuild?.Cancellation.Cancel();
-
-            foreach (Mesh mesh in Surface)
-                UnloadMesh(mesh);
-            foreach (Mesh mesh in CutCap)
-                UnloadMesh(mesh);
-            foreach (Mesh mesh in UploadingSurface)
-                UnloadMesh(mesh);
-            foreach (Mesh mesh in UploadingCutCap)
-                UnloadMesh(mesh);
-
-            Surface = Array.Empty<Mesh>();
-            CutCap = Array.Empty<Mesh>();
-            UploadingSurface.Clear();
-            UploadingCutCap.Clear();
-            ReadyBuild = null;
-            Built = false;
-        }
-    }
-
-    private sealed class BuildRequest
-    {
-        public required ChunkKey Key { get; init; }
-        public required ChunkEntry Entry { get; init; }
-        public required IVoxelFieldSource Source { get; init; }
-        public required int RequestRevision { get; init; }
-        public required long Generation { get; init; }
-        public required int PaletteVersion { get; init; }
-        public required long BaseVersion { get; init; }
-        public required bool BuildSurface { get; init; }
-        public required bool BuildCutCap { get; init; }
-        public required int CutLayer { get; init; }
-        public required TerrainPalette Palette { get; init; }
-        public long EnqueuedTimestamp { get; init; }
-        public int Started;
-        public CancellationTokenSource Cancellation { get; } = new();
-    }
-
-    private readonly record struct VoxelMeshBuildResult(
-        VoxelMeshData[] Surface,
-        VoxelMeshData[] CutCap,
-        bool HasSurface,
-        bool HasCutCap,
-        bool SurfaceWasEmpty,
-        int CutLayer,
-        double WorkerMilliseconds,
-        double CaptureMilliseconds,
-        int VertexCount,
-        int TriangleCount,
-        ulong SurfaceHash,
-        ulong CutCapHash);
-
-    private readonly record struct BuildCompletion(
-        BuildRequest Request,
-        VoxelMeshBuildResult? Result,
-        Exception? Error,
-        bool Cancelled,
-        long WorkerStartedTimestamp,
-        long WorkerCompletedTimestamp);
-
-    private readonly record struct BuildIdentity(
-        ChunkKey Key,
-        int RequestRevision,
-        long BaseVersion,
-        int PaletteVersion,
-        bool BuildSurface,
-        bool BuildCutCap,
-        int CutLayer);
-
-    private readonly record struct ChunkGpuHashes(
-        bool HasSurface,
-        ulong SurfaceHash,
-        bool HasCutCap,
-        ulong CutCapHash,
-        int CutLayer);
-
     private readonly record struct Candidate(
         ChunkKey Key,
         Vector3 Center,
         float Radius,
         float DistanceSquared);
 
-    private readonly record struct ReadyUpload(
-        ChunkKey Key,
-        ChunkEntry Entry,
-        long Generation);
+    private sealed class ChunkEntry
+    {
+        public Mesh[] Surface = Array.Empty<Mesh>();
+        public long BaseVersion = long.MinValue;
+        public int PaletteVersion = int.MinValue;
+        public int CutLayer = int.MinValue;
+        public long LastSeenFrame;
+        public int Revision;
+        public int FailedRevision = int.MinValue;
+        public bool Dirty = true;
+        public bool Built;
+    }
 
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
-    private readonly Dictionary<ChunkKey, ChunkGpuHashes> _gpuMeshHashCache = new();
-
-    private readonly ConcurrentQueue<ReadyUpload> _readyUploadQueue = new();
-    private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
-    private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
-    private readonly SemaphoreSlim _buildSignal = new(0);
-    private readonly CancellationTokenSource _workerShutdown = new();
-    private readonly Thread[] _workerThreads;
-
-    private static readonly int MaximumMeshWorkers =
-        Math.Clamp(Environment.ProcessorCount - 2, 2, 6);
-
-    private readonly List<Candidate> _candidateScratch = new();
-    private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
-    private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
-    private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
-
+    private readonly List<Candidate> _candidates = new(1024);
+    private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new(1024);
+    private readonly HashSet<ChunkKey> _visibleKeys = new();
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments = new();
     private readonly TerrainPipelineLogger _logger;
-    private readonly Dictionary<BuildIdentity, int> _completedBuildCounts = new();
 
     private readonly Material _material;
     private readonly Shader _shader;
@@ -238,26 +111,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _stableCutLayer = int.MinValue;
     private int _cutLayerStableFrames;
 
-    private int _activeMeshWorkers;
     private long _totalBuildRequests;
     private long _totalBuildStarted;
     private long _totalBuildCompleted;
-    private long _totalBuildCancelled;
     private long _totalBuildFailed;
-    private long _totalStaleResults;
-    private long _totalDuplicateRequestAttempts;
-    private long _totalQueueSaturated;
-    private long _totalRepeatedBuilds;
     private long _totalGpuUploads;
     private long _totalGpuUnloads;
     private long _totalIdenticalSurfaceSkips;
-    private long _totalIdenticalCutSkips;
     private long _totalEmptyChunks;
 
     public int ActiveRenderCellSize => 1;
     public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters;
-    public float RenderChunkSizeMeters =>
-        ChunkCells * SparseVoxelField.VoxelSizeMeters;
+    public float RenderChunkSizeMeters => ChunkCells * SparseVoxelField.VoxelSizeMeters;
     public bool IsUsingCoarseLod => false;
     public int Step1ChunksLastFrame { get; private set; }
     public int Step4ChunksLastFrame => 0;
@@ -265,20 +130,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleChunksLastFrame { get; private set; }
     public int RebuiltChunks { get; private set; }
-    public int RebuiltCutCaps { get; private set; }
+    public int RebuiltCutCaps => 0;
     public int LodPrewarmBuilds => 0;
 
     public double CpuCaptureMillisecondsLastFrame { get; private set; }
     public double GpuUploadMillisecondsLastFrame { get; private set; }
-    public int RunningMeshJobs => Volatile.Read(ref _activeMeshWorkers);
+    public int RunningMeshJobs => 0;
     public double CpuCaptureMilliseconds => CpuCaptureMillisecondsLastFrame;
     public double GpuUploadMilliseconds => GpuUploadMillisecondsLastFrame;
-    public int PendingMeshJobs => _buildQueue.Count;
-    public int CompletedMeshResultsPending => _completedBuildQueue.Count;
+    public int PendingMeshJobs => 0;
+    public int CompletedMeshResultsPending => 0;
     public double WorkerBuildMillisecondsLastFrame { get; private set; }
     public double LastWorkerBuildMilliseconds { get; private set; }
-    public double LastWorkerQueueWaitMilliseconds { get; private set; }
-    public double LastWorkerResultDeliveryMilliseconds { get; private set; }
+    public double LastWorkerQueueWaitMilliseconds => 0d;
+    public double LastWorkerResultDeliveryMilliseconds => 0d;
     public int BuildsCompletedLastFrame { get; private set; }
     public int LastBuildStep { get; private set; } = 1;
     public int LastBuildVertices { get; private set; }
@@ -288,24 +153,24 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public long TotalBuildRequests => _totalBuildRequests;
     public long TotalBuildStarted => _totalBuildStarted;
     public long TotalBuildCompleted => _totalBuildCompleted;
-    public long TotalBuildCancelled => _totalBuildCancelled;
+    public long TotalBuildCancelled => 0;
     public long TotalBuildFailed => _totalBuildFailed;
-    public long TotalStaleResults => _totalStaleResults;
-    public long TotalDuplicateRequestAttempts => _totalDuplicateRequestAttempts;
-    public long TotalQueueSaturated => _totalQueueSaturated;
-    public long TotalRepeatedBuilds => _totalRepeatedBuilds;
+    public long TotalStaleResults => 0;
+    public long TotalDuplicateRequestAttempts => 0;
+    public long TotalQueueSaturated => 0;
+    public long TotalRepeatedBuilds => 0;
     public long TotalGpuUploads => _totalGpuUploads;
     public long TotalGpuUnloads => _totalGpuUnloads;
     public long TotalIdenticalSurfaceSkips => _totalIdenticalSurfaceSkips;
-    public long TotalIdenticalCutSkips => _totalIdenticalCutSkips;
+    public long TotalIdenticalCutSkips => 0;
     public long TotalEmptyChunks => _totalEmptyChunks;
 
     public int FrustumCandidatesLastFrame { get; private set; }
     public int MacroFrustumTestsLastFrame { get; private set; }
     public int VisibleMacroRegionsLastFrame { get; private set; }
-    public int CandidateOverflowLastFrame { get; private set; }
+    public int CandidateOverflowLastFrame => 0;
     public string DiagnosticsLogPath => _logger.LogPath;
-    public int VisibleCandidatesLastFrame => _visibleCandidateKeys.Count;
+    public int VisibleCandidatesLastFrame => _visibleKeys.Count;
     public int CachedChunks => _chunks.Count;
     public int DynamicFragmentCount => _dynamicFragments.Count;
     public bool IsMergingFragments => _dynamicFragments.IsMerging;
@@ -316,7 +181,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _shader = LoadShaderFromMemory(VertexShader, FragmentShader);
         if (!IsShaderValid(_shader))
-            throw new InvalidOperationException("The 3D voxel surface shader could not be created.");
+            throw new InvalidOperationException("The voxel surface shader could not be created.");
 
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
@@ -324,35 +189,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
         _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
 
-        if (_cutEnabledLocation < 0 ||
-            _cutHeightLocation < 0 ||
-            _sunDirectionLocation < 0 ||
-            _ambientLightLocation < 0 ||
+        if (_cutEnabledLocation < 0 || _cutHeightLocation < 0 ||
+            _sunDirectionLocation < 0 || _ambientLightLocation < 0 ||
             _sunIntensityLocation < 0)
         {
             UnloadShader(_shader);
-            throw new InvalidOperationException("The 3D voxel shader is missing a required uniform.");
+            throw new InvalidOperationException("The voxel shader is missing a required uniform.");
         }
 
         _material = LoadMaterialDefault();
         _material.Shader = _shader;
-
         _logger = new TerrainPipelineLogger();
-        _workerThreads = new Thread[MaximumMeshWorkers];
-
-        for (int i = 0; i < _workerThreads.Length; i++)
-        {
-            _workerThreads[i] = new Thread(ProcessBuildQueue)
-            {
-                IsBackground = true,
-                Name = $"RimClone greedy byte voxel mesh {i + 1}"
-            };
-            _workerThreads[i].Start();
-        }
-
         _logger.Write(
             "RENDERER_START",
-            $"resolution=Step1;chunkCells={ChunkCells};chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={MaximumMeshWorkers};queue={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=greedy-byte;blockSize=16;signal=SemaphoreSlim");
+            $"mode=main-thread;chunk={ChunkCells};cache={MaximumCachedChunks};buildsPerFrame={MaximumBuildsPerFrame};buildBudgetMs={MeshBuildBudgetMilliseconds:0.0}");
         Console.WriteLine($"[TERRAIN] Pipeline diagnostics: {_logger.LogPath}");
     }
 
@@ -364,11 +214,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach (ChunkEntry entry in _chunks.Values)
         {
-            entry.SurfaceDirty = true;
-            entry.CutDirty = true;
-            entry.RequestRevision++;
+            entry.Dirty = true;
+            entry.Revision++;
             entry.FailedRevision = int.MinValue;
-            InvalidatePendingBuild(entry);
         }
     }
 
@@ -386,171 +234,117 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         EnsureFieldSubscription(field);
 
         _dynamicFragments.Update(field, GetFrameTime());
-
         _frame++;
         RebuiltChunks = 0;
-        RebuiltCutCaps = 0;
         CpuCaptureMillisecondsLastFrame = 0d;
+        GpuUploadMillisecondsLastFrame = 0d;
         WorkerBuildMillisecondsLastFrame = 0d;
         BuildsCompletedLastFrame = 0;
         GpuUploadsLastFrame = 0;
-
-        CollectCompletedBuilds(field);
+        LastBuildVertices = 0;
+        LastBuildTriangles = 0;
 
         int cutLayer = cutEnabled
             ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
             : -1;
-
         UpdateStableCutLayer(cutEnabled, cutLayer);
+        int targetCutLayer = cutEnabled && _cutLayerStableFrames >= CutSettleFrames
+            ? _stableCutLayer
+            : int.MinValue;
 
-        List<Candidate> candidates = _candidateScratch;
-        candidates.Clear();
-
+        _candidates.Clear();
         int frustumTests = 0;
-        int macroFrustumTests = 0;
-        int visibleMacroRegions = 0;
+        int macroTests = 0;
+        int visibleMacros = 0;
         CollectVisibleCandidates(
             field,
             camera,
             viewportWidth,
             viewportHeight,
             maximumViewDistanceMeters,
-            candidates,
+            _candidates,
             ref frustumTests,
-            ref macroFrustumTests,
-            ref visibleMacroRegions);
-
-        candidates.Sort(static (a, b) =>
-            a.DistanceSquared.CompareTo(b.DistanceSquared));
+            ref macroTests,
+            ref visibleMacros);
+        _candidates.Sort(static (a, b) => a.DistanceSquared.CompareTo(b.DistanceSquared));
 
         FrustumCandidatesLastFrame = frustumTests;
-        MacroFrustumTestsLastFrame = macroFrustumTests;
-        VisibleMacroRegionsLastFrame = visibleMacroRegions;
-        CandidateOverflowLastFrame = 0;
-        Step1ChunksLastFrame = candidates.Count;
-        _visibleCandidateKeys.Clear();
+        MacroFrustumTestsLastFrame = macroTests;
+        VisibleMacroRegionsLastFrame = visibleMacros;
+        Step1ChunksLastFrame = _candidates.Count;
 
-        List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
-            _candidateEntriesScratch;
-        candidateEntries.Clear();
-
-        int stableCutLayer = cutEnabled &&
-            _cutLayerStableFrames >= CutCapSettleFrames
-                ? _stableCutLayer
-                : -1;
-
-        foreach (Candidate candidate in candidates)
-        {
-            ChunkKey key = candidate.Key;
-            _visibleCandidateKeys.Add(key);
-
-            if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
-            {
-                entry = new ChunkEntry();
-                _chunks.Add(key, entry);
-            }
-
-            entry.LastSeenFrame = _frame;
-            bool surfaceStale = !entry.Built ||
-                entry.SurfaceDirty ||
-                entry.BaseVersion != field.BaseVersion ||
-                entry.PaletteVersion != _paletteVersion;
-
-            int targetCutLayer = cutEnabled && stableCutLayer >= 0
-                ? stableCutLayer
-                : int.MinValue;
-
-            bool cutStateStale = entry.CutLayer != targetCutLayer;
-            bool needsSurfaceBuild =
-                surfaceStale ||
-                cutStateStale ||
-                entry.CutDirty;
-
-            if (needsSurfaceBuild && !HasPendingWork(entry))
-            {
-                RequestBuild(
-                    field,
-                    key,
-                    entry,
-                    buildSurface: true,
-                    buildCutCap: false,
-                    cutLayer: targetCutLayer);
-            }
-
-            if (!cutEnabled && entry.CutCap.Length > 0)
-                ClearCutCap(key, entry);
-
-            candidateEntries.Add((candidate, entry));
-        }
-
-        UploadReadyMeshes();
+        _visibleKeys.Clear();
+        foreach (Candidate candidate in _candidates)
+            _visibleKeys.Add(candidate.Key);
 
         _visible.Clear();
-        foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
-        {
-            bool hasVisibleSurface = entry.Surface.Length > 0;
-            bool hasVisibleCutCap = cutEnabled &&
-                stableCutLayer >= 0 &&
-                entry.CutLayer == stableCutLayer &&
-                entry.CutCap.Length > 0;
+        Stopwatch buildBudget = Stopwatch.StartNew();
+        int buildsThisFrame = 0;
 
-            if (entry.Built && (hasVisibleSurface || hasVisibleCutCap))
-                AddVisible(candidate.Key, entry);
+        foreach (Candidate candidate in _candidates)
+        {
+            if (!TryGetOrCreateEntry(candidate.Key, out ChunkEntry? entry))
+                continue;
+
+            entry.LastSeenFrame = _frame;
+            bool stale = !entry.Built || entry.Dirty ||
+                entry.BaseVersion != field.BaseVersion ||
+                entry.PaletteVersion != _paletteVersion ||
+                entry.CutLayer != targetCutLayer;
+
+            if (!stale)
+            {
+                _totalIdenticalSurfaceSkips++;
+            }
+            else if (entry.FailedRevision != entry.Revision &&
+                     (buildsThisFrame == 0 ||
+                      (buildsThisFrame < MaximumBuildsPerFrame &&
+                       buildBudget.Elapsed.TotalMilliseconds < MeshBuildBudgetMilliseconds)))
+            {
+                buildsThisFrame++;
+                BuildChunk(field, candidate.Key, entry, targetCutLayer);
+            }
+
+            if (entry.Built && entry.Surface.Length > 0 &&
+                !entry.Dirty &&
+                entry.BaseVersion == field.BaseVersion &&
+                entry.PaletteVersion == _paletteVersion &&
+                entry.CutLayer == targetCutLayer)
+            {
+                _visible.Add((candidate.Key, entry));
+            }
         }
 
-        double remainingUploadBudget = Math.Max(
-            0d,
-            GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
-
-        if (remainingUploadBudget > 0d)
-        {
-            GpuUploadMillisecondsLastFrame +=
-                _dynamicFragments.UploadPendingMeshes(remainingUploadBudget);
-        }
-
-        _dynamicFragments.ReleaseBakedBodies(
-            bounds => AreCachedMeshesCurrent(bounds, field));
+        _dynamicFragments.ReleaseBakedBodies(bounds => AreCachedMeshesCurrent(bounds, field));
 
         if ((_frame % 120) == 0)
         {
             string summary =
-                $"frame={_frame} resolution=Step1 chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
-                $"macroFrustum={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkFrustum={FrustumCandidatesLastFrame} " +
-                $"emptyChunks={_totalEmptyChunks} captureMs={CpuCaptureMillisecondsLastFrame:0.000} " +
-                $"workerMs={WorkerBuildMillisecondsLastFrame:0.000} lastWorkerMs={LastWorkerBuildMilliseconds:0.000} " +
-                $"queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
-                $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
-                $"workers={RunningMeshJobs} queue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} gpuReady={_readyUploadQueue.Count} " +
-                $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
-                $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
-                $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
-                $"gpuUploads={_totalGpuUploads} gpuUnloads={_totalGpuUnloads} " +
-                $"surfaceCacheHits={_totalIdenticalSurfaceSkips} capCacheHits={_totalIdenticalCutSkips} " +
-                $"vertices={LastBuildVertices} triangles={LastBuildTriangles}";
+                $"frame={_frame} candidates={_candidates.Count} visible={_visible.Count} cache={_chunks.Count} " +
+                $"builds={BuildsCompletedLastFrame} meshMs={WorkerBuildMillisecondsLastFrame:0.000} " +
+                $"captureMs={CpuCaptureMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000} " +
+                $"gpuUploads={GpuUploadsLastFrame} totalUploads={_totalGpuUploads} totalUnloads={_totalGpuUnloads} " +
+                $"empty={_totalEmptyChunks} vertices={LastBuildVertices} triangles={LastBuildTriangles}";
             _logger.Write("FRAME_SUMMARY", summary);
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
 
-        float renderCutHeightMeters = cutEnabled && stableCutLayer >= 0
-            ? stableCutLayer * SparseVoxelField.VoxelSizeMeters
+        float renderCutHeight = cutEnabled && targetCutLayer >= 0
+            ? targetCutLayer * SparseVoxelField.VoxelSizeMeters
             : cutHeightMeters;
-
         SetLighting();
-        SetCutShader(cutEnabled, renderCutHeightMeters);
+        SetCutShader(cutEnabled, renderCutHeight);
 
         float worldRadius = 0.5f * MathF.Sqrt(
-            field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
-            field.Depth * field.Depth * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
-            field.Height * field.Height * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters);
-        float distanceToOrigin = camera.Position.Length();
+            field.Width * field.Width +
+            field.Depth * field.Depth +
+            field.Height * field.Height) * SparseVoxelField.VoxelSizeMeters;
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
-
         Rlgl.SetClipPlanes(
             Math.Clamp(cameraDistance * 0.002f, 0.02f, 2f),
-            MathF.Max(1000f, distanceToOrigin + worldRadius + 100f));
+            MathF.Max(1000f, camera.Position.Length() + worldRadius + 100f));
 
         BeginMode3D(camera);
-
         int draws = 0;
         foreach ((ChunkKey _, ChunkEntry entry) in _visible)
         {
@@ -561,7 +355,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
-        SetCutShader(cutEnabled, renderCutHeightMeters);
+        SetCutShader(cutEnabled, renderCutHeight);
         _dynamicFragments.Draw(_material);
         EndMode3D();
 
@@ -569,27 +363,176 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         VisibleChunksLastFrame = _visible.Count;
     }
 
+    private void BuildChunk(
+        SparseVoxelField field,
+        ChunkKey key,
+        ChunkEntry entry,
+        int cutLayer)
+    {
+        _totalBuildRequests++;
+        _totalBuildStarted++;
+        Stopwatch buildTimer = Stopwatch.StartNew();
+        VoxelMeshData[] data = Array.Empty<VoxelMeshData>();
+        List<Mesh> nextMeshes = new(2);
+        bool uploaded = false;
+
+        try
+        {
+            using VoxelChunkBuildInput input = new(
+                field,
+                key.X,
+                key.Y,
+                key.Z,
+                cutLayer);
+
+            Stopwatch captureTimer = Stopwatch.StartNew();
+            input.CaptureAll(field);
+            captureTimer.Stop();
+            CpuCaptureMillisecondsLastFrame += captureTimer.Elapsed.TotalMilliseconds;
+
+            Stopwatch meshTimer = Stopwatch.StartNew();
+            data = input.HasPotentialSurface
+                ? VoxelChunkMesher.BuildSurfaceData(input, _palette)
+                : Array.Empty<VoxelMeshData>();
+            meshTimer.Stop();
+            WorkerBuildMillisecondsLastFrame += meshTimer.Elapsed.TotalMilliseconds;
+            LastWorkerBuildMilliseconds = meshTimer.Elapsed.TotalMilliseconds;
+
+            int vertices = 0;
+            int triangles = 0;
+            Stopwatch uploadTimer = Stopwatch.StartNew();
+            foreach (VoxelMeshData meshData in data)
+            {
+                vertices += meshData.VertexCount;
+                triangles += meshData.TriangleCount;
+                nextMeshes.Add(VoxelChunkMesher.UploadOne(meshData));
+                GpuUploadsLastFrame++;
+                _totalGpuUploads++;
+            }
+            uploadTimer.Stop();
+            GpuUploadMillisecondsLastFrame += uploadTimer.Elapsed.TotalMilliseconds;
+
+            Mesh[] previous = entry.Surface;
+            entry.Surface = nextMeshes.ToArray();
+            nextMeshes.Clear();
+            entry.BaseVersion = field.BaseVersion;
+            entry.PaletteVersion = _paletteVersion;
+            entry.CutLayer = cutLayer;
+            entry.Dirty = false;
+            entry.Built = true;
+            entry.FailedRevision = int.MinValue;
+
+            foreach (Mesh mesh in previous)
+            {
+                UnloadMesh(mesh);
+                _totalGpuUnloads++;
+            }
+
+            LastBuildVertices = vertices;
+            LastBuildTriangles = triangles;
+            RebuiltChunks++;
+            BuildsCompletedLastFrame++;
+            _totalBuildCompleted++;
+            uploaded = true;
+
+            if (entry.Surface.Length == 0)
+                _totalEmptyChunks++;
+        }
+        catch (Exception exception)
+        {
+            entry.FailedRevision = entry.Revision;
+            _totalBuildFailed++;
+            _logger.Write("MESH_BUILD_FAILED",
+                $"chunk={key.X},{key.Y},{key.Z};error={exception.GetType().Name}:{exception.Message}");
+            Console.WriteLine($"[TERRAIN] Mesh build failed at {key}: {exception.Message}");
+        }
+        finally
+        {
+            foreach (VoxelMeshData meshData in data)
+                meshData.ReturnCpuArrays();
+
+            if (!uploaded)
+            {
+                foreach (Mesh mesh in nextMeshes)
+                {
+                    UnloadMesh(mesh);
+                    _totalGpuUnloads++;
+                }
+            }
+        }
+
+        buildTimer.Stop();
+        if (buildTimer.Elapsed.TotalMilliseconds > 0d)
+            WorkerBuildMillisecondsLastFrame += 0d;
+    }
+
+    private bool TryGetOrCreateEntry(ChunkKey key, out ChunkEntry? entry)
+    {
+        if (_chunks.TryGetValue(key, out entry))
+            return true;
+
+        if (_chunks.Count >= MaximumCachedChunks && !EvictLeastRecentlySeen())
+        {
+            entry = null;
+            return false;
+        }
+
+        entry = new ChunkEntry();
+        _chunks.Add(key, entry);
+        return true;
+    }
+
+    private bool EvictLeastRecentlySeen()
+    {
+        ChunkKey oldestKey = default;
+        ChunkEntry? oldest = null;
+
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+        {
+            if (_visibleKeys.Contains(key) || entry.LastSeenFrame == _frame)
+                continue;
+
+            if (oldest == null || entry.LastSeenFrame < oldest.LastSeenFrame)
+            {
+                oldest = entry;
+                oldestKey = key;
+            }
+        }
+
+        if (oldest == null)
+            return false;
+
+        foreach (Mesh mesh in oldest.Surface)
+        {
+            UnloadMesh(mesh);
+            _totalGpuUnloads++;
+        }
+
+        _chunks.Remove(oldestKey);
+        return true;
+    }
+
     private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
     {
         if (!cutEnabled)
         {
-            _requestedCutLayer = int.MinValue;
-            _stableCutLayer = int.MinValue;
-            _cutLayerStableFrames = 0;
+            _requestedCutLayer = -1;
+            _stableCutLayer = -1;
+            _cutLayerStableFrames = CutSettleFrames;
             return;
         }
 
-        if (cutLayer != _requestedCutLayer)
+        if (_requestedCutLayer != cutLayer)
         {
             _requestedCutLayer = cutLayer;
             _cutLayerStableFrames = 0;
             return;
         }
 
-        if (_cutLayerStableFrames < CutCapSettleFrames)
+        if (_cutLayerStableFrames < CutSettleFrames)
             _cutLayerStableFrames++;
 
-        if (_cutLayerStableFrames >= CutCapSettleFrames)
+        if (_cutLayerStableFrames >= CutSettleFrames)
             _stableCutLayer = cutLayer;
     }
 
@@ -606,52 +549,30 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         const int macroChunkCount = 4;
         const float sphereScale = 0.8660254038f;
-
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
         float chunkSizeMeters = ChunkCells * voxelSize;
-        float chunkRadiusMeters = chunkSizeMeters * sphereScale;
+        float chunkRadius = chunkSizeMeters * sphereScale;
         float viewDistance = float.IsFinite(maximumViewDistanceMeters)
             ? MathF.Max(0f, maximumViewDistanceMeters)
             : 0f;
         float viewDistanceSquared = viewDistance * viewDistance;
-        float scanRadius = viewDistance + chunkRadiusMeters;
+        float scanRadius = viewDistance + chunkRadius;
         Vector3 cameraPosition = camera.Position;
 
         int chunksX = DivideRoundUp(field.Width, ChunkCells);
         int chunksY = DivideRoundUp(field.Height, ChunkCells);
         int chunksZ = DivideRoundUp(field.Depth, ChunkCells);
-
-        int firstX = Math.Clamp(
-            (int)MathF.Floor((cameraPosition.X - scanRadius) / chunkSizeMeters),
-            0, chunksX - 1);
-        int lastX = Math.Clamp(
-            (int)MathF.Floor((cameraPosition.X + scanRadius) / chunkSizeMeters),
-            0, chunksX - 1);
-        int firstY = Math.Clamp(
-            (int)MathF.Floor((cameraPosition.Y - scanRadius) / chunkSizeMeters),
-            0, chunksY - 1);
-        int lastY = Math.Clamp(
-            (int)MathF.Floor((cameraPosition.Y + scanRadius) / chunkSizeMeters),
-            0, chunksY - 1);
-        int firstZ = Math.Clamp(
-            (int)MathF.Floor((cameraPosition.Z - scanRadius) / chunkSizeMeters),
-            0, chunksZ - 1);
-        int lastZ = Math.Clamp(
-            (int)MathF.Floor((cameraPosition.Z + scanRadius) / chunkSizeMeters),
-            0, chunksZ - 1);
+        int firstX = Math.Clamp((int)MathF.Floor((cameraPosition.X - scanRadius) / chunkSizeMeters), 0, chunksX - 1);
+        int lastX = Math.Clamp((int)MathF.Floor((cameraPosition.X + scanRadius) / chunkSizeMeters), 0, chunksX - 1);
+        int firstY = Math.Clamp((int)MathF.Floor((cameraPosition.Y - scanRadius) / chunkSizeMeters), 0, chunksY - 1);
+        int lastY = Math.Clamp((int)MathF.Floor((cameraPosition.Y + scanRadius) / chunkSizeMeters), 0, chunksY - 1);
+        int firstZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z - scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
+        int lastZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z + scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
 
         int macroCells = ChunkCells * macroChunkCount;
-        int firstMacroX = firstX / macroChunkCount;
-        int lastMacroX = lastX / macroChunkCount;
-        int firstMacroY = firstY / macroChunkCount;
-        int lastMacroY = lastY / macroChunkCount;
-        int firstMacroZ = firstZ / macroChunkCount;
-        int lastMacroZ = lastZ / macroChunkCount;
-
-        // Coarse pass: reject whole 4x4x4 chunk regions before touching leaf chunks.
-        for (int macroZ = firstMacroZ; macroZ <= lastMacroZ; macroZ++)
-        for (int macroY = firstMacroY; macroY <= lastMacroY; macroY++)
-        for (int macroX = firstMacroX; macroX <= lastMacroX; macroX++)
+        for (int macroZ = firstZ / macroChunkCount; macroZ <= lastZ / macroChunkCount; macroZ++)
+        for (int macroY = firstY / macroChunkCount; macroY <= lastY / macroChunkCount; macroY++)
+        for (int macroX = firstX / macroChunkCount; macroX <= lastX / macroChunkCount; macroX++)
         {
             int firstChunkX = macroX * macroChunkCount;
             int firstChunkY = macroY * macroChunkCount;
@@ -659,7 +580,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int endChunkX = Math.Min(firstChunkX + macroChunkCount, chunksX);
             int endChunkY = Math.Min(firstChunkY + macroChunkCount, chunksY);
             int endChunkZ = Math.Min(firstChunkZ + macroChunkCount, chunksZ);
-
             int originX = firstChunkX * ChunkCells;
             int originY = firstChunkY * ChunkCells;
             int originZ = firstChunkZ * ChunkCells;
@@ -667,43 +587,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int sizeY = Math.Min(macroCells, field.Height - originY);
             int sizeZ = Math.Min(macroCells, field.Depth - originZ);
 
-            float nearestDistanceSquared = BoundsNearestDistanceSquared(
-                cameraPosition,
-                originX,
-                originY,
-                originZ,
-                sizeX,
-                sizeY,
-                sizeZ);
-
-            if (nearestDistanceSquared > viewDistanceSquared)
+            if (BoundsNearestDistanceSquared(cameraPosition, originX, originY, originZ, sizeX, sizeY, sizeZ) > viewDistanceSquared)
                 continue;
 
             float halfX = sizeX * voxelSize * 0.5f;
             float halfY = sizeY * voxelSize * 0.5f;
             float halfZ = sizeZ * voxelSize * 0.5f;
-            Vector3 macroCenter = new(
-                (originX * voxelSize) + halfX,
-                (originY * voxelSize) + halfY,
-                (originZ * voxelSize) + halfZ);
-            float macroRadius = MathF.Sqrt(
-                halfX * halfX +
-                halfY * halfY +
-                halfZ * halfZ);
-
+            Vector3 macroCenter = new(originX * voxelSize + halfX, originY * voxelSize + halfY, originZ * voxelSize + halfZ);
+            float macroRadius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
             macroFrustumTests++;
-            if (!TerrainFrustum.IsSphereVisible(
-                camera,
-                macroCenter,
-                macroRadius,
-                viewportWidth,
-                viewportHeight,
-                viewDistance))
+
+            if (!TerrainFrustum.IsSphereVisible(camera, macroCenter, macroRadius, viewportWidth, viewportHeight, viewDistance))
                 continue;
 
             visibleMacroRegions++;
-
-            // Fine pass: only chunks belonging to a visible macro region are tested.
             int childFirstX = Math.Max(firstX, firstChunkX);
             int childLastX = Math.Min(lastX, endChunkX - 1);
             int childFirstY = Math.Max(firstY, firstChunkY);
@@ -715,42 +612,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             for (int y = childFirstY; y <= childLastY; y++)
             for (int x = childFirstX; x <= childLastX; x++)
             {
-                int chunkOriginX = x * ChunkCells;
-                int chunkOriginY = y * ChunkCells;
-                int chunkOriginZ = z * ChunkCells;
-
-                float chunkNearestDistanceSquared = BoundsNearestDistanceSquared(
-                    cameraPosition,
-                    chunkOriginX,
-                    chunkOriginY,
-                    chunkOriginZ,
-                    ChunkCells,
-                    ChunkCells,
-                    ChunkCells);
-
-                if (chunkNearestDistanceSquared > viewDistanceSquared)
+                int chunkX = x * ChunkCells;
+                int chunkY = y * ChunkCells;
+                int chunkZ = z * ChunkCells;
+                if (BoundsNearestDistanceSquared(cameraPosition, chunkX, chunkY, chunkZ, ChunkCells, ChunkCells, ChunkCells) > viewDistanceSquared)
                     continue;
 
                 Vector3 center = new(
-                    (chunkOriginX + ChunkCells * 0.5f) * voxelSize,
-                    (chunkOriginY + ChunkCells * 0.5f) * voxelSize,
-                    (chunkOriginZ + ChunkCells * 0.5f) * voxelSize);
-
+                    (chunkX + ChunkCells * 0.5f) * voxelSize,
+                    (chunkY + ChunkCells * 0.5f) * voxelSize,
+                    (chunkZ + ChunkCells * 0.5f) * voxelSize);
                 frustumTests++;
-                if (!TerrainFrustum.IsSphereVisible(
-                    camera,
-                    center,
-                    chunkRadiusMeters,
-                    viewportWidth,
-                    viewportHeight,
-                    viewDistance))
+
+                if (!TerrainFrustum.IsSphereVisible(camera, center, chunkRadius, viewportWidth, viewportHeight, viewDistance))
                     continue;
 
-                ChunkKey key = new(x, y, z);
                 candidates.Add(new Candidate(
-                    key,
+                    new ChunkKey(x, y, z),
                     center,
-                    chunkRadiusMeters,
+                    chunkRadius,
                     Vector3.DistanceSquared(center, cameraPosition)));
             }
         }
@@ -765,746 +645,57 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int sizeY,
         int sizeZ)
     {
-        float voxelSize = SparseVoxelField.VoxelSizeMeters;
-
-        float minX = originX * voxelSize;
-        float minY = originY * voxelSize;
-        float minZ = originZ * voxelSize;
-        float maxX = (originX + sizeX) * voxelSize;
-        float maxY = (originY + sizeY) * voxelSize;
-        float maxZ = (originZ + sizeZ) * voxelSize;
-
-        float dx = point.X < minX ? minX - point.X :
-            point.X > maxX ? point.X - maxX : 0f;
-        float dy = point.Y < minY ? minY - point.Y :
-            point.Y > maxY ? point.Y - maxY : 0f;
-        float dz = point.Z < minZ ? minZ - point.Z :
-            point.Z > maxZ ? point.Z - maxZ : 0f;
-
+        float size = SparseVoxelField.VoxelSizeMeters;
+        float minX = originX * size;
+        float minY = originY * size;
+        float minZ = originZ * size;
+        float maxX = (originX + sizeX) * size;
+        float maxY = (originY + sizeY) * size;
+        float maxZ = (originZ + sizeZ) * size;
+        float dx = point.X < minX ? minX - point.X : point.X > maxX ? point.X - maxX : 0f;
+        float dy = point.Y < minY ? minY - point.Y : point.Y > maxY ? point.Y - maxY : 0f;
+        float dz = point.Z < minZ ? minZ - point.Z : point.Z > maxZ ? point.Z - maxZ : 0f;
         return dx * dx + dy * dy + dz * dz;
     }
 
-    // GPU meshes remain resident after leaving the view radius.
-    // They are replaced only when voxel content or palette changes, avoiding
-    // unload/upload churn while the camera moves across the world.
-
-    private void RequestBuild(
-        SparseVoxelField field,
-        ChunkKey key,
-        ChunkEntry entry,
-        bool buildSurface,
-        bool buildCutCap,
-        int cutLayer)
+    private bool AreCachedMeshesCurrent(SparseVoxelField.VoxelBounds bounds, SparseVoxelField field)
     {
-        if (_disposed || entry.FailedRevision == entry.RequestRevision)
-            return;
-
-        if (entry.RunningBuild != null ||
-            entry.BuildQueued ||
-            entry.ReadyBuild.HasValue)
+        GetAffectedChunkRange(field, bounds, out int minX, out int minY, out int minZ, out int maxX, out int maxY, out int maxZ);
+        for (int z = minZ; z <= maxZ; z++)
+        for (int y = minY; y <= maxY; y++)
+        for (int x = minX; x <= maxX; x++)
         {
-            _totalDuplicateRequestAttempts++;
-            return;
-        }
-
-        if (_buildQueue.Count >= MaximumPendingMeshJobs)
-        {
-            _totalQueueSaturated++;
-            return;
-        }
-
-        IVoxelFieldSource source = field;
-
-        BuildRequest request = new()
-        {
-            Key = key,
-            Entry = entry,
-            Source = source,
-            RequestRevision = entry.RequestRevision,
-            Generation = ++entry.BuildGeneration,
-            PaletteVersion = _paletteVersion,
-            BaseVersion = field.BaseVersion,
-            BuildSurface = buildSurface,
-            BuildCutCap = buildCutCap,
-            CutLayer = cutLayer,
-            Palette = _palette,
-            EnqueuedTimestamp = Stopwatch.GetTimestamp()
-        };
-
-        entry.BuildQueued = true;
-        entry.RunningBuild = request;
-        _buildQueue.Enqueue(request);
-        _totalBuildRequests++;
-        _buildSignal.Release();
-    }
-
-    private void ProcessBuildQueue()
-    {
-        CancellationToken shutdownToken = _workerShutdown.Token;
-
-        while (true)
-        {
-            try
-            {
-                _buildSignal.Wait(shutdownToken);
-            }
-            catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested)
-            {
-                return;
-            }
-
-            if (shutdownToken.IsCancellationRequested)
-                return;
-
-            if (!_buildQueue.TryDequeue(out BuildRequest? request))
+            if (!_chunks.TryGetValue(new ChunkKey(x, y, z), out ChunkEntry? entry))
                 continue;
 
-            Interlocked.Exchange(ref request.Started, 1);
-            Interlocked.Increment(ref _activeMeshWorkers);
-            Interlocked.Increment(ref _totalBuildStarted);
-
-            long workerStarted = Stopwatch.GetTimestamp();
-            VoxelMeshData[] surface = Array.Empty<VoxelMeshData>();
-            VoxelMeshData[] cutCap = Array.Empty<VoxelMeshData>();
-            bool completionQueued = false;
-
-            try
-            {
-                CancellationToken token = request.Cancellation.Token;
-                token.ThrowIfCancellationRequested();
-
-                Stopwatch workerTimer = Stopwatch.StartNew();
-
-                using VoxelChunkBuildInput input = new(
-                    request.Source,
-                    request.Key.X,
-                    request.Key.Y,
-                    request.Key.Z,
-                    request.CutLayer);
-
-                Stopwatch captureTimer = Stopwatch.StartNew();
-                input.CaptureAll(request.Source);
-                captureTimer.Stop();
-
-                bool hasPotentialSurface =
-                    request.BuildSurface && input.HasPotentialSurface;
-
-                surface = hasPotentialSurface
-                    ? VoxelChunkMesher.BuildSurfaceData(
-                        input,
-                        request.Palette,
-                        token)
-                    : Array.Empty<VoxelMeshData>();
-
-                // The horizontal section is created by Greedy Meshing where
-                // retained blocks meet the zero-valued cut half-space.
-                cutCap = Array.Empty<VoxelMeshData>();
-
-                int vertices = SumVertices(surface) + SumVertices(cutCap);
-                int triangles = SumTriangles(surface) + SumTriangles(cutCap);
-                bool hasSurfaceMesh = surface.Length > 0;
-                ulong surfaceHash = hasSurfaceMesh
-                    ? ComputeMeshHash(surface)
-                    : 0UL;
-                ulong cutCapHash = 0UL;
-
-                workerTimer.Stop();
-
-                VoxelMeshBuildResult result = new(
-                    surface,
-                    cutCap,
-                    hasSurfaceMesh,
-                    false,
-                    request.BuildSurface && !hasSurfaceMesh,
-                    request.CutLayer,
-                    workerTimer.Elapsed.TotalMilliseconds,
-                    captureTimer.Elapsed.TotalMilliseconds,
-                    vertices,
-                    triangles,
-                    surfaceHash,
-                    cutCapHash);
-
-                _completedBuildQueue.Enqueue(new BuildCompletion(
-                    request,
-                    result,
-                    null,
-                    false,
-                    workerStarted,
-                    Stopwatch.GetTimestamp()));
-
-                completionQueued = true;
-                surface = Array.Empty<VoxelMeshData>();
-                cutCap = Array.Empty<VoxelMeshData>();
-            }
-            catch (OperationCanceledException)
-            {
-                ReturnMeshData(surface);
-                ReturnMeshData(cutCap);
-
-                _completedBuildQueue.Enqueue(new BuildCompletion(
-                    request,
-                    null,
-                    null,
-                    true,
-                    workerStarted,
-                    Stopwatch.GetTimestamp()));
-            }
-            catch (Exception exception)
-            {
-                ReturnMeshData(surface);
-                ReturnMeshData(cutCap);
-
-                _completedBuildQueue.Enqueue(new BuildCompletion(
-                    request,
-                    null,
-                    exception,
-                    false,
-                    workerStarted,
-                    Stopwatch.GetTimestamp()));
-            }
-            finally
-            {
-                if (!completionQueued)
-                {
-                    ReturnMeshData(surface);
-                    ReturnMeshData(cutCap);
-                }
-
-                Interlocked.Decrement(ref _activeMeshWorkers);
-            }
-        }
-    }
-
-    private void CollectCompletedBuilds(SparseVoxelField field)
-    {
-        int completionsToProcess = _completedBuildQueue.Count;
-
-        for (int completionIndex = 0;
-             completionIndex < completionsToProcess;
-             completionIndex++)
-        {
-            if (!_completedBuildQueue.TryDequeue(out BuildCompletion completion))
-                break;
-
-            BuildRequest request = completion.Request;
-            ChunkEntry entry = request.Entry;
-            request.Cancellation.Dispose();
-
-            bool wasCurrentRequest = ReferenceEquals(entry.RunningBuild, request);
-            if (wasCurrentRequest)
-            {
-                entry.RunningBuild = null;
-                entry.BuildQueued = false;
-            }
-
-            if (completion.Cancelled)
-            {
-                _totalBuildCancelled++;
-                continue;
-            }
-
-            bool isCurrentRequest = wasCurrentRequest &&
-                _chunks.TryGetValue(request.Key, out ChunkEntry? current) &&
-                ReferenceEquals(current, entry) &&
-                request.Generation == entry.BuildGeneration &&
-                request.RequestRevision == entry.RequestRevision &&
-                request.PaletteVersion == _paletteVersion &&
-                request.BaseVersion == field.BaseVersion;
-
-            if (!isCurrentRequest)
-            {
-                if (completion.Result is VoxelMeshBuildResult staleBuild)
-                    ReturnBuildCpuData(staleBuild);
-
-                _totalStaleResults++;
-                continue;
-            }
-
-            if (completion.Error != null)
-            {
-                _totalBuildFailed++;
-                entry.FailedRevision = request.RequestRevision;
-                _logger.Write(
-                    "MESH_FAILED",
-                    $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"{completion.Error.Message}\"");
-                continue;
-            }
-
-            if (!completion.Result.HasValue)
-            {
-                _totalBuildFailed++;
-                entry.FailedRevision = request.RequestRevision;
-                _logger.Write(
-                    "MESH_FAILED",
-                    $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"missing worker result\"");
-                continue;
-            }
-
-            VoxelMeshBuildResult build = completion.Result.Value;
-            CpuCaptureMillisecondsLastFrame += build.CaptureMilliseconds;
-
-            if (entry.ReadyBuild.HasValue)
-            {
-                ReturnBuildCpuData(build);
-                _totalRepeatedBuilds++;
-                continue;
-            }
-
-            BuildIdentity identity = new(
-                request.Key,
-                request.RequestRevision,
-                request.BaseVersion,
-                request.PaletteVersion,
-                request.BuildSurface,
-                request.BuildCutCap,
-                request.CutLayer);
-
-            int repeated = _completedBuildCounts.TryGetValue(identity, out int previous)
-                ? previous + 1
-                : 1;
-            _completedBuildCounts[identity] = repeated;
-
-            if (_completedBuildCounts.Count > 4096)
-                _completedBuildCounts.Clear();
-
-            if (repeated > 1)
-                _totalRepeatedBuilds++;
-
-            _totalBuildCompleted++;
-            BuildsCompletedLastFrame++;
-            WorkerBuildMillisecondsLastFrame += build.WorkerMilliseconds;
-            LastWorkerBuildMilliseconds = build.WorkerMilliseconds;
-            LastWorkerQueueWaitMilliseconds = Math.Max(
-                0d,
-                Stopwatch.GetElapsedTime(
-                    request.EnqueuedTimestamp,
-                    completion.WorkerStartedTimestamp).TotalMilliseconds);
-            LastWorkerResultDeliveryMilliseconds = Math.Max(
-                0d,
-                Stopwatch.GetElapsedTime(
-                    completion.WorkerCompletedTimestamp,
-                    Stopwatch.GetTimestamp()).TotalMilliseconds);
-
-            LastBuildStep = 1;
-            LastBuildVertices = build.VertexCount;
-            LastBuildTriangles = build.TriangleCount;
-
-            bool uploadSurface = build.HasSurface;
-            bool uploadCutCap = build.HasCutCap;
-
-            bool hasGpuHashes = _gpuMeshHashCache.TryGetValue(
-                request.Key,
-                out ChunkGpuHashes gpuHashes);
-
-            if (build.SurfaceWasEmpty)
-            {
-                if (entry.Surface.Length > 0)
-                {
-                    foreach (Mesh mesh in entry.Surface)
-                    {
-                        UnloadMesh(mesh);
-                        _totalGpuUnloads++;
-                    }
-                }
-
-                entry.Surface = Array.Empty<Mesh>();
-                SetSurfaceGpuHash(request.Key, 0UL);
-                entry.BaseVersion = request.BaseVersion;
-                entry.PaletteVersion = request.PaletteVersion;
-                entry.SurfaceDirty = false;
-                entry.CutLayer = request.CutLayer;
-                entry.CutDirty = false;
-                entry.Built = true;
-                DiscardLegacyCutCap(request.Key, entry);
-                uploadSurface = false;
-
-                _totalEmptyChunks++;
-                RebuiltChunks++;
-            }
-            else if (uploadSurface &&
-                entry.Built &&
-                hasGpuHashes &&
-                gpuHashes.HasSurface &&
-                gpuHashes.SurfaceHash == build.SurfaceHash)
-            {
-                ReturnMeshData(build.Surface);
-                build = build with { Surface = Array.Empty<VoxelMeshData>() };
-
-                entry.BaseVersion = request.BaseVersion;
-                entry.PaletteVersion = request.PaletteVersion;
-                entry.SurfaceDirty = false;
-                entry.CutLayer = request.CutLayer;
-                entry.CutDirty = false;
-                DiscardLegacyCutCap(request.Key, entry);
-                uploadSurface = false;
-                _totalIdenticalSurfaceSkips++;
-            }
-
-            if (uploadCutCap &&
-                hasGpuHashes &&
-                gpuHashes.HasCutCap &&
-                gpuHashes.CutLayer == build.CutLayer &&
-                gpuHashes.CutCapHash == build.CutCapHash)
-            {
-                ReturnMeshData(build.CutCap);
-                build = build with { CutCap = Array.Empty<VoxelMeshData>() };
-
-                entry.CutDirty = false;
-                uploadCutCap = false;
-                _totalIdenticalCutSkips++;
-            }
-
-            if (!uploadSurface && !uploadCutCap)
-            {
-                ReturnBuildCpuData(build);
-                continue;
-            }
-
-            entry.ReadyBuild = build with
-            {
-                Surface = uploadSurface ? build.Surface : Array.Empty<VoxelMeshData>(),
-                CutCap = uploadCutCap ? build.CutCap : Array.Empty<VoxelMeshData>(),
-                HasSurface = uploadSurface,
-                HasCutCap = uploadCutCap
-            };
-
-            entry.ReadyRequest = request;
-            entry.SurfaceUploadIndex = 0;
-            entry.CutUploadIndex = 0;
-            entry.UploadingSurface.Clear();
-            entry.UploadingCutCap.Clear();
-
-            EnqueueReadyUpload(request.Key, entry);
-        }
-    }
-
-    private void UploadReadyMeshes()
-    {
-        Stopwatch timer = Stopwatch.StartNew();
-        GpuUploadMillisecondsLastFrame = 0d;
-
-        int readyAtFrameStart = _readyUploadQueue.Count;
-        int visited = 0;
-
-        while (visited < readyAtFrameStart)
-        {
-            if (GpuUploadsLastFrame >= MaximumGpuMeshUploadsPerFrame ||
-                timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
-                break;
-
-            if (!_readyUploadQueue.TryDequeue(out ReadyUpload queued))
-                break;
-
-            visited++;
-
-            if (!_chunks.TryGetValue(queued.Key, out ChunkEntry? currentEntry) ||
-                !ReferenceEquals(currentEntry, queued.Entry) ||
-                queued.Generation != queued.Entry.UploadQueueGeneration)
-                continue;
-
-            ChunkEntry entry = queued.Entry;
-            entry.UploadQueued = false;
-
-            if (!entry.ReadyBuild.HasValue)
-                continue;
-
-            VoxelMeshBuildResult result = entry.ReadyBuild.Value;
-            BuildRequest? request = entry.ReadyRequest;
-
-            if (request == null ||
-                request.Generation != entry.BuildGeneration ||
-                request.RequestRevision != entry.RequestRevision ||
-                request.PaletteVersion != _paletteVersion)
-            {
-                InvalidatePendingBuild(entry);
-                continue;
-            }
-
-            if (result.HasSurface &&
-                entry.SurfaceUploadIndex < result.Surface.Length)
-            {
-                VoxelMeshData source = result.Surface[entry.SurfaceUploadIndex];
-                Mesh mesh;
-
-                try
-                {
-                    mesh = VoxelChunkMesher.UploadOne(source);
-                }
-                catch (Exception exception)
-                {
-                    _totalBuildFailed++;
-                    entry.FailedRevision = request.RequestRevision;
-                    _logger.Write(
-                        "MESH_GPU_UPLOAD_FAILED",
-                        $"kind=surface chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) error=\"{exception.Message}\"");
-                    InvalidatePendingBuild(entry);
-                    continue;
-                }
-
-                source.ReturnCpuArrays();
-                entry.SurfaceUploadIndex++;
-                entry.UploadingSurface.Add(mesh);
-                GpuUploadsLastFrame++;
-                _totalGpuUploads++;
-            }
-            else if (result.HasCutCap &&
-                entry.CutUploadIndex < result.CutCap.Length)
-            {
-                VoxelMeshData source = result.CutCap[entry.CutUploadIndex];
-                Mesh mesh;
-
-                try
-                {
-                    mesh = VoxelChunkMesher.UploadOne(source);
-                }
-                catch (Exception exception)
-                {
-                    _totalBuildFailed++;
-                    entry.FailedRevision = request.RequestRevision;
-                    _logger.Write(
-                        "MESH_GPU_UPLOAD_FAILED",
-                        $"kind=cut-cap chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) error=\"{exception.Message}\"");
-                    InvalidatePendingBuild(entry);
-                    continue;
-                }
-
-                source.ReturnCpuArrays();
-                entry.CutUploadIndex++;
-                entry.UploadingCutCap.Add(mesh);
-                GpuUploadsLastFrame++;
-                _totalGpuUploads++;
-            }
-
-            bool surfaceComplete =
-                !result.HasSurface ||
-                entry.SurfaceUploadIndex >= result.Surface.Length;
-            bool cutComplete =
-                !result.HasCutCap ||
-                entry.CutUploadIndex >= result.CutCap.Length;
-
-            if (!surfaceComplete || !cutComplete)
-            {
-                EnqueueReadyUpload(queued.Key, entry);
-                continue;
-            }
-
-            if (result.HasSurface)
-            {
-                Mesh[] oldMeshes = entry.Surface;
-                entry.Surface = entry.UploadingSurface.ToArray();
-                entry.UploadingSurface.Clear();
-
-                foreach (Mesh oldMesh in oldMeshes)
-                {
-                    UnloadMesh(oldMesh);
-                    _totalGpuUnloads++;
-                }
-
-                SetSurfaceGpuHash(queued.Key, result.SurfaceHash);
-                entry.BaseVersion = request.BaseVersion;
-                entry.PaletteVersion = request.PaletteVersion;
-                entry.SurfaceDirty = false;
-                entry.CutLayer = request.CutLayer;
-                entry.CutDirty = false;
-                entry.Built = true;
-
-                DiscardLegacyCutCap(queued.Key, entry);
-
-                RebuiltChunks++;
-            }
-
-            if (result.HasCutCap)
-            {
-                Mesh[] oldMeshes = entry.CutCap;
-                entry.CutCap = entry.UploadingCutCap.ToArray();
-                entry.UploadingCutCap.Clear();
-
-                foreach (Mesh oldMesh in oldMeshes)
-                {
-                    UnloadMesh(oldMesh);
-                    _totalGpuUnloads++;
-                }
-
-                SetCutCapGpuHash(queued.Key, result.CutCapHash, result.CutLayer);
-                entry.CutLayer = result.CutLayer;
-                entry.CutDirty = false;
-                RebuiltCutCaps++;
-            }
-
-            entry.ReadyBuild = null;
-            entry.ReadyRequest = null;
-            entry.SurfaceUploadIndex = 0;
-            entry.CutUploadIndex = 0;
-        }
-
-        GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
-    }
-
-    private void EnqueueReadyUpload(ChunkKey key, ChunkEntry entry)
-    {
-        if (entry.UploadQueued)
-            return;
-
-        entry.UploadQueued = true;
-        long generation = ++entry.UploadQueueGeneration;
-        _readyUploadQueue.Enqueue(new ReadyUpload(key, entry, generation));
-    }
-
-    private void InvalidatePendingBuild(ChunkEntry entry)
-    {
-        BuildRequest? obsolete = entry.RunningBuild;
-        if (obsolete != null)
-        {
-            obsolete.Cancellation.Cancel();
-            entry.RunningBuild = null;
-        }
-
-        entry.BuildQueued = false;
-        entry.BuildGeneration++;
-        entry.UploadQueued = false;
-        entry.UploadQueueGeneration++;
-
-        if (entry.ReadyBuild is VoxelMeshBuildResult readyBuild)
-            ReturnBuildCpuData(readyBuild);
-
-        entry.ReadyBuild = null;
-        entry.ReadyRequest = null;
-        entry.SurfaceUploadIndex = 0;
-        entry.CutUploadIndex = 0;
-
-        foreach (Mesh mesh in entry.UploadingSurface)
-        {
-            UnloadMesh(mesh);
-            _totalGpuUnloads++;
-        }
-
-        foreach (Mesh mesh in entry.UploadingCutCap)
-        {
-            UnloadMesh(mesh);
-            _totalGpuUnloads++;
-        }
-
-        entry.UploadingSurface.Clear();
-        entry.UploadingCutCap.Clear();
-    }
-
-    private static bool HasPendingWork(ChunkEntry entry) =>
-        entry.RunningBuild != null ||
-        entry.BuildQueued ||
-        entry.ReadyBuild.HasValue ||
-        entry.UploadingSurface.Count > 0 ||
-        entry.UploadingCutCap.Count > 0;
-
-    private bool IsCurrentMeshReady(ChunkEntry entry, SparseVoxelField field) =>
-        entry.Built &&
-        !entry.SurfaceDirty &&
-        entry.BaseVersion == field.BaseVersion &&
-        entry.PaletteVersion == _paletteVersion;
-
-    private void AddVisible(ChunkKey key, ChunkEntry entry)
-    {
-        if (!entry.Built)
-            return;
-
-        entry.LastSeenFrame = _frame;
-        _visible.Add((key, entry));
-    }
-
-    private bool AreCachedMeshesCurrent(
-        SparseVoxelField.VoxelBounds bounds,
-        SparseVoxelField field)
-    {
-        foreach (ChunkKey key in _visibleCandidateKeys)
-        {
-            int minX = key.X * ChunkCells;
-            int minY = key.Y * ChunkCells;
-            int minZ = key.Z * ChunkCells;
-            int maxX = minX + ChunkCells;
-            int maxY = minY + ChunkCells;
-            int maxZ = minZ + ChunkCells;
-
-            bool overlaps =
-                minX < bounds.MaxX && bounds.MinX < maxX &&
-                minY < bounds.MaxY && bounds.MinY < maxY &&
-                minZ < bounds.MaxZ && bounds.MinZ < maxZ;
-
-            if (!overlaps)
-                continue;
-
-            if (!_chunks.TryGetValue(key, out ChunkEntry? entry) ||
-                !IsCurrentMeshReady(entry, field))
+            if (entry.Dirty || !entry.Built ||
+                entry.BaseVersion != field.BaseVersion ||
+                entry.PaletteVersion != _paletteVersion)
                 return false;
         }
 
         return true;
     }
 
-    private void SetLighting()
+    private static void GetAffectedChunkRange(
+        SparseVoxelField field,
+        SparseVoxelField.VoxelBounds bounds,
+        out int minX,
+        out int minY,
+        out int minZ,
+        out int maxX,
+        out int maxY,
+        out int maxZ)
     {
-        Vector3 direction = _palette.GetSunDirection();
-        SetShaderValue(
-            _shader, _sunDirectionLocation,
-            direction, ShaderUniformDataType.Vec3);
-        SetShaderValue(
-            _shader, _ambientLightLocation,
-            _palette.AmbientLight, ShaderUniformDataType.Float);
-        SetShaderValue(
-            _shader, _sunIntensityLocation,
-            _palette.SunIntensity, ShaderUniformDataType.Float);
-    }
-
-    private void SetCutShader(bool enabled, float height)
-    {
-        SetShaderValue(
-            _shader,
-            _cutEnabledLocation,
-            enabled ? 1 : 0,
-            ShaderUniformDataType.Int);
-        SetShaderValue(
-            _shader,
-            _cutHeightLocation,
-            height,
-            ShaderUniformDataType.Float);
-    }
-
-    private void DiscardLegacyCutCap(ChunkKey key, ChunkEntry entry)
-    {
-        foreach (Mesh mesh in entry.CutCap)
-        {
-            UnloadMesh(mesh);
-            _totalGpuUnloads++;
-        }
-
-        entry.CutCap = Array.Empty<Mesh>();
-
-        _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
-        _gpuMeshHashCache[key] = current with
-        {
-            HasCutCap = false,
-            CutCapHash = 0UL,
-            CutLayer = int.MinValue
-        };
-    }
-
-    private void ClearCutCap(ChunkKey key, ChunkEntry entry)
-    {
-        foreach (Mesh mesh in entry.CutCap)
-        {
-            UnloadMesh(mesh);
-            _totalGpuUnloads++;
-        }
-
-        entry.CutCap = Array.Empty<Mesh>();
-        _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
-        _gpuMeshHashCache[key] = current with
-        {
-            HasCutCap = false,
-            CutCapHash = 0UL,
-            CutLayer = int.MinValue
-        };
-
-        entry.CutLayer = int.MinValue;
-        entry.CutDirty = true;
+        int chunksX = DivideRoundUp(field.Width, ChunkCells);
+        int chunksY = DivideRoundUp(field.Height, ChunkCells);
+        int chunksZ = DivideRoundUp(field.Depth, ChunkCells);
+        minX = Math.Clamp(Math.Max(0, bounds.MinX - 1) / ChunkCells, 0, chunksX - 1);
+        minY = Math.Clamp(Math.Max(0, bounds.MinY - 1) / ChunkCells, 0, chunksY - 1);
+        minZ = Math.Clamp(Math.Max(0, bounds.MinZ - 1) / ChunkCells, 0, chunksZ - 1);
+        maxX = Math.Clamp(bounds.MaxX / ChunkCells, 0, chunksX - 1);
+        maxY = Math.Clamp(bounds.MaxY / ChunkCells, 0, chunksY - 1);
+        maxZ = Math.Clamp(bounds.MaxZ / ChunkCells, 0, chunksZ - 1);
     }
 
     private void EnsureFieldSubscription(SparseVoxelField field)
@@ -1521,149 +712,48 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
     {
-        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+        if (_observedField == null)
+            return;
+
+        GetAffectedChunkRange(
+            _observedField,
+            bounds,
+            out int minX,
+            out int minY,
+            out int minZ,
+            out int maxX,
+            out int maxY,
+            out int maxZ);
+
+        for (int z = minZ; z <= maxZ; z++)
+        for (int y = minY; y <= maxY; y++)
+        for (int x = minX; x <= maxX; x++)
         {
-            int firstX = key.X * ChunkCells - 1;
-            int firstY = key.Y * ChunkCells - 1;
-            int firstZ = key.Z * ChunkCells - 1;
-            int lastX = (key.X + 1) * ChunkCells + 1;
-            int lastY = (key.Y + 1) * ChunkCells + 1;
-            int lastZ = (key.Z + 1) * ChunkCells + 1;
-
-            bool intersectsX = Intersects(firstX, lastX, bounds.MinX, bounds.MaxX);
-            bool intersectsY = Intersects(firstY, lastY, bounds.MinY, bounds.MaxY);
-            bool intersectsZ = Intersects(firstZ, lastZ, bounds.MinZ, bounds.MaxZ);
-
-            bool surfaceChanged = intersectsX && intersectsY && intersectsZ;
-            bool cutChanged = false;
-
-            if (entry.CutLayer != int.MinValue && intersectsX && intersectsZ)
-            {
-                int cutSample = entry.CutLayer - 1;
-                cutChanged =
-                    bounds.MinY <= cutSample + 1 &&
-                    bounds.MaxY > cutSample;
-            }
-
-            if (!surfaceChanged && !cutChanged)
+            if (!_chunks.TryGetValue(new ChunkKey(x, y, z), out ChunkEntry? entry))
                 continue;
 
-            if (surfaceChanged)
-                entry.SurfaceDirty = true;
-            if (cutChanged)
-                entry.CutDirty = true;
-
-            entry.RequestRevision++;
+            entry.Dirty = true;
+            entry.Revision++;
             entry.FailedRevision = int.MinValue;
-            InvalidatePendingBuild(entry);
         }
     }
-
-    private static bool Intersects(int minA, int maxA, int minB, int maxB) =>
-        minA < maxB && minB < maxA;
 
     private static int DivideRoundUp(int value, int divisor) =>
         (value + divisor - 1) / divisor;
 
-    private static int SumVertices(VoxelMeshData[] meshes)
+    private void SetLighting()
     {
-        int total = 0;
-        foreach (VoxelMeshData mesh in meshes)
-            total += mesh.VertexCount;
-        return total;
+        Vector3 direction = _palette.GetSunDirection();
+        SetShaderValue(_shader, _sunDirectionLocation, direction, ShaderUniformDataType.Vec3);
+        SetShaderValue(_shader, _ambientLightLocation, _palette.AmbientLight, ShaderUniformDataType.Float);
+        SetShaderValue(_shader, _sunIntensityLocation, _palette.SunIntensity, ShaderUniformDataType.Float);
     }
 
-    private static int SumTriangles(VoxelMeshData[] meshes)
+    private void SetCutShader(bool enabled, float height)
     {
-        int total = 0;
-        foreach (VoxelMeshData mesh in meshes)
-            total += mesh.TriangleCount;
-        return total;
-    }
-
-    private static ulong ComputeMeshHash(VoxelMeshData[] meshes)
-    {
-        const ulong offset = 14695981039346656037UL;
-        ulong hash = offset;
-        AddHashUInt(ref hash, (uint)meshes.Length);
-
-        foreach (VoxelMeshData mesh in meshes)
-        {
-            AddHashUInt(ref hash, (uint)mesh.VertexCount);
-            AddHashUInt(ref hash, (uint)mesh.IndexCount);
-
-            foreach (Vector3 vertex in mesh.Vertices)
-            {
-                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.X)));
-                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.Y)));
-                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.Z)));
-            }
-
-            foreach (Vector3 normal in mesh.Normals)
-            {
-                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.X)));
-                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.Y)));
-                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.Z)));
-            }
-
-            foreach (byte color in mesh.Colors)
-                AddHashByte(ref hash, color);
-
-            foreach (ushort index in mesh.Indices)
-                AddHashUInt(ref hash, index);
-        }
-
-        return hash;
-    }
-
-    private static void AddHashUInt(ref ulong hash, uint value)
-    {
-        AddHashByte(ref hash, (byte)value);
-        AddHashByte(ref hash, (byte)(value >> 8));
-        AddHashByte(ref hash, (byte)(value >> 16));
-        AddHashByte(ref hash, (byte)(value >> 24));
-    }
-
-    private static void AddHashByte(ref ulong hash, byte value)
-    {
-        unchecked
-        {
-            hash ^= value;
-            hash *= 1099511628211UL;
-        }
-    }
-
-    private void SetSurfaceGpuHash(ChunkKey key, ulong hash)
-    {
-        _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
-        _gpuMeshHashCache[key] = current with
-        {
-            HasSurface = true,
-            SurfaceHash = hash
-        };
-    }
-
-    private void SetCutCapGpuHash(ChunkKey key, ulong hash, int cutLayer)
-    {
-        _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
-        _gpuMeshHashCache[key] = current with
-        {
-            HasCutCap = true,
-            CutCapHash = hash,
-            CutLayer = cutLayer
-        };
-    }
-
-    private static void ReturnMeshData(VoxelMeshData[] meshes)
-    {
-        foreach (VoxelMeshData mesh in meshes)
-            mesh.ReturnCpuArrays();
-    }
-
-    private static void ReturnBuildCpuData(VoxelMeshBuildResult build)
-    {
-        ReturnMeshData(build.Surface);
-        ReturnMeshData(build.CutCap);
+        int cutValue = enabled ? 1 : 0;
+        SetShaderValue(_shader, _cutEnabledLocation, cutValue, ShaderUniformDataType.Int);
+        SetShaderValue(_shader, _cutHeightLocation, height, ShaderUniformDataType.Float);
     }
 
     public int DetachLooseFragments(
@@ -1680,29 +770,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             centerMeters,
             halfExtentsMeters,
             maximumFragments: 1);
-
         int detached = 0;
+
         foreach (VoxelFragmentSnapshot fragment in fragments)
         {
             if (_dynamicFragments.TryAdd(fragment, centerMeters, _palette, field))
-            {
                 detached++;
-            }
             else
-            {
                 field.RestoreFragment(fragment);
-            }
         }
 
         return detached;
     }
 
     public void BeginVoxelEdit() => _dynamicFragments.BeginEdit();
-
     public void EndVoxelEdit(bool commit) => _dynamicFragments.EndEdit(commit);
-
     public void UndoVoxelEdit() => _dynamicFragments.UndoLastEdit();
-
     public void RedoVoxelEdit() => _dynamicFragments.RedoLastEdit();
 
     public void ClearDynamicFragments()
@@ -1722,51 +805,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _observedField = null;
 
         foreach (ChunkEntry entry in _chunks.Values)
-            entry.RunningBuild?.Cancellation.Cancel();
-
-        _workerShutdown.Cancel();
-        foreach (Thread worker in _workerThreads)
-            worker.Join();
-
-        while (_buildQueue.TryDequeue(out BuildRequest? queued))
-            queued.Cancellation.Dispose();
-
-        while (_completedBuildQueue.TryDequeue(out BuildCompletion completed))
         {
-            completed.Request.Cancellation.Dispose();
-            if (completed.Result is VoxelMeshBuildResult result)
-                ReturnBuildCpuData(result);
+            foreach (Mesh mesh in entry.Surface)
+            {
+                UnloadMesh(mesh);
+                _totalGpuUnloads++;
+            }
         }
 
-        foreach (ChunkEntry entry in _chunks.Values)
-        {
-            entry.RunningBuild = null;
-            if (entry.ReadyBuild is VoxelMeshBuildResult readyBuild)
-                ReturnBuildCpuData(readyBuild);
-
-            int gpuMeshCount =
-                entry.Surface.Length +
-                entry.CutCap.Length +
-                entry.UploadingSurface.Count +
-                entry.UploadingCutCap.Count;
-            _totalGpuUnloads += gpuMeshCount;
-            entry.Dispose();
-        }
-
-        _dynamicFragments.Dispose();
         _chunks.Clear();
-        _gpuMeshHashCache.Clear();
-        _readyUploadQueue.Clear();
-        _buildSignal.Dispose();
-        _workerShutdown.Dispose();
-
+        _dynamicFragments.Dispose();
         UnloadMaterial(_material);
-
+        UnloadShader(_shader);
         _logger.Write(
             "RENDERER_STOP",
-            $"resolution=Step1 requests={_totalBuildRequests} completed={_totalBuildCompleted} " +
-            $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
-            $"gpuUploads={_totalGpuUploads} gpuUnloads={_totalGpuUnloads}");
+            $"builds={_totalBuildCompleted};failed={_totalBuildFailed};gpuUploads={_totalGpuUploads};gpuUnloads={_totalGpuUnloads}");
         _logger.Dispose();
     }
 
