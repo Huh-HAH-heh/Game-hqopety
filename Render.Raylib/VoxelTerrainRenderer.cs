@@ -213,7 +213,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private readonly List<Candidate> _candidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
-    private readonly List<ChunkKey> _outsideRadiusScratch = new();
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
     private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
 
@@ -483,11 +482,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             candidateEntries.Add((candidate, entry));
         }
-
-        EvictChunksOutsideRadius(
-            field,
-            camera.Position,
-            MathF.Max(0f, maximumViewDistanceMeters));
 
         UploadReadyMeshes();
 
@@ -790,56 +784,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return dx * dx + dy * dy + dz * dz;
     }
 
-    private void EvictChunksOutsideRadius(
-        SparseVoxelField field,
-        Vector3 cameraPosition,
-        float maximumViewDistanceMeters)
-    {
-        float radiusSquared = maximumViewDistanceMeters * maximumViewDistanceMeters;
-        _outsideRadiusScratch.Clear();
-
-        foreach (ChunkKey key in _chunks.Keys)
-        {
-            int originX = key.X * ChunkCells;
-            int originY = key.Y * ChunkCells;
-            int originZ = key.Z * ChunkCells;
-
-            float distanceSquared = BoundsNearestDistanceSquared(
-                cameraPosition,
-                originX,
-                originY,
-                originZ,
-                Math.Min(ChunkCells, field.Width - originX),
-                Math.Min(ChunkCells, field.Height - originY),
-                Math.Min(ChunkCells, field.Depth - originZ));
-
-            if (distanceSquared > radiusSquared)
-                _outsideRadiusScratch.Add(key);
-        }
-
-        foreach (ChunkKey key in _outsideRadiusScratch)
-            RemoveCachedChunk(key, "outside-view-radius");
-    }
-
-    private void RemoveCachedChunk(ChunkKey key, string reason)
-    {
-        if (!_chunks.Remove(key, out ChunkEntry? entry))
-            return;
-
-        _gpuMeshHashCache.Remove(key);
-
-        int residentMeshes = entry.Surface.Length + entry.CutCap.Length;
-        int partialMeshes = entry.UploadingSurface.Count + entry.UploadingCutCap.Count;
-
-        InvalidatePendingBuild(entry);
-        _totalGpuUnloads += residentMeshes;
-
-        _logger.Write(
-            "MESH_GPU_EVICT",
-            $"reason={reason} chunk=({key.X},{key.Y},{key.Z}) meshes={residentMeshes + partialMeshes}");
-
-        entry.Dispose();
-    }
+    // GPU meshes remain resident after leaving the view radius.
+    // They are replaced only when voxel content or palette changes, avoiding
+    // unload/upload churn while the camera moves across the world.
 
     private void RequestBuild(
         SparseVoxelField field,
