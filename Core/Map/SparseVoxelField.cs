@@ -141,9 +141,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                         ? chunk.Material[index]
                         : (ushort)0;
 
-            return _baseDensity(x, y, z) > 0f
-                ? _baseMaterial(x, y, z)
-                : (ushort)0;
+            if (_baseDensity(x, y, z) <= 0f)
+                return 0;
+            return DecodeMaterial(EncodeMaterial(_baseMaterial(x, y, z)));
         }
 
         public byte GetBlockId(int x, int y, int z)
@@ -166,7 +166,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             if (_baseDensity(x, y, z) <= 0f)
                 return 0;
 
-            return checked((byte)_baseMaterial(x, y, z));
+            byte baseMaterial = EncodeMaterial(_baseMaterial(x, y, z));
+            return baseMaterial == byte.MaxValue ? (byte)0 : baseMaterial;
         }
     }
 
@@ -493,9 +494,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     : (ushort)0;
         }
 
-        return _baseDensity(x, y, z) > 0f
-            ? _baseMaterial(x, y, z)
-            : (ushort)0;
+        if (_baseDensity(x, y, z) <= 0f)
+            return 0;
+        return DecodeMaterial(EncodeMaterial(_baseMaterial(x, y, z)));
     }
 
     /// <summary>
@@ -520,7 +521,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (_baseDensity(x, y, z) <= 0f)
             return 0;
 
-        return checked((byte)_baseMaterial(x, y, z));
+        byte baseMaterial = EncodeMaterial(_baseMaterial(x, y, z));
+        return baseMaterial == byte.MaxValue ? (byte)0 : baseMaterial;
     }
 
 
@@ -1282,7 +1284,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     float baseDensity = _baseDensity(worldX, worldY, worldZ);
                     byte baseContent = EncodeContent(baseDensity);
                     byte baseMaterial = baseDensity > 0f
-                        ? checked((byte)_baseMaterial(worldX, worldY, worldZ))
+                        ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                         : byte.MaxValue;
 
                     if (chunk.Content[index] == baseContent &&
@@ -1358,7 +1360,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         foreach (ChunkCoordinate key in keys)
             CaptureChunkBeforeWrite(key);
 
-        _octreeIndex.Clear();
         _octreeIndex.Clear();
         _editedChunkColumns.Clear();
         Version++;
@@ -2724,7 +2725,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             chunk.Content[index] = EncodeContent(density);
             chunk.Material[index] =
                 density > 0f && worldX < Width && worldY < Height && worldZ < Depth
-                    ? checked((byte)_baseMaterial(worldX, worldY, worldZ))
+                    ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                     : byte.MaxValue;
         }
 
@@ -2755,7 +2756,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
             byte material =
                 density > 0f && worldX < Width && worldY < Height && worldZ < Depth
-                    ? checked((byte)_baseMaterial(worldX, worldY, worldZ))
+                    ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                     : byte.MaxValue;
             if (chunk.Material[index] != material)
                 return false;
@@ -2866,6 +2867,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private static float DecodeContent(byte content) =>
         (content - ContentIsoLevel) / DensityScale;
+
+    private static byte EncodeMaterial(ushort materialId) =>
+        materialId == 0 || materialId >= byte.MaxValue
+            ? byte.MaxValue
+            : (byte)materialId;
+
+    private static ushort DecodeMaterial(byte materialId) =>
+        materialId == byte.MaxValue ? (ushort)0 : materialId;
 
     private static float Lerp(float a, float b, float t) => a + (b - a) * t;
 
