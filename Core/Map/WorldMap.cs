@@ -124,7 +124,8 @@ public sealed class WorldMap
             layerCount,
             checked(height * 10),
             SampleBaseVoxelDensity,
-            SampleBaseVoxelMaterial);
+            SampleBaseVoxelMaterial,
+            SampleBaseVoxelBlockId);
         Voxels.Changed += OnVoxelFieldChanged;
     }
 
@@ -1726,6 +1727,28 @@ public sealed class WorldMap
         return voxelY + 0.5f < surfaceHeight
             ? materialId
             : (ushort)0;
+    }
+
+    private byte SampleBaseVoxelBlockId(int voxelX, int voxelY, int voxelZ)
+    {
+        if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
+            voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
+            return 0;
+
+        int column = GetColumnIndex(voxelX / 10, voxelZ / 10);
+        ushort materialId = Volatile.Read(ref _columnMaterialIds[column]);
+        if (materialId == 0)
+            return 0;
+
+        float surfaceHeight = SampleBaseSurfaceHeight(
+            voxelX, voxelZ,
+            out float slopeX,
+            out float slopeZ);
+        float gradientLength = MathF.Sqrt(
+            1f + slopeX * slopeX + slopeZ * slopeZ);
+        float density = (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
+
+        return SparseVoxelField.EncodeBlockId(density, materialId);
     }
 
     /// <summary>
