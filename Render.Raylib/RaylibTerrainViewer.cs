@@ -883,7 +883,7 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"GPU CACHE HITS {renderer.VoxelTotalIdenticalSurfaceSkips} SURFACE / {renderer.VoxelTotalIdenticalCutSkips} CAP | UNLOADS {renderer.VoxelTotalGpuUnloads}",
+                    $"GPU CACHE HITS {renderer.VoxelTotalIdenticalSurfaceSkips} | UNLOADS {renderer.VoxelTotalGpuUnloads}",
                     13f,
                     Color.LightGray));
                 lines.Add((
