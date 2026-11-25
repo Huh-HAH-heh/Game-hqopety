@@ -875,11 +875,11 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"WORKERS {renderer.VoxelMeshWorkers} | QUEUED {renderer.VoxelPendingMeshJobs} | READY {renderer.VoxelCompletedMeshResultsPending} | BUILT {renderer.VoxelBuildsCompletedLastFrame}/FRAME | GPU PACKETS {renderer.VoxelGpuUploadsLastFrame}",
+                    $"MAIN-THREAD BUILDS {renderer.VoxelBuildsCompletedLastFrame}/FRAME | GPU UPLOADS {renderer.VoxelGpuUploadsLastFrame} | CACHE {renderer.CachedVoxelChunks}",
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"LAST MESH STEP {renderer.VoxelLastBuildStep} ({renderer.VoxelLastBuildStep * 0.1f:0.00} m) | VERTICES {renderer.VoxelLastBuildVertices} | TRIANGLES {renderer.VoxelLastBuildTriangles} | BUILD {renderer.VoxelLastWorkerBuildMilliseconds:0.00} ms | QUEUE {renderer.VoxelLastQueueWaitMilliseconds:0.00} ms | DELIVERY {renderer.VoxelLastResultDeliveryMilliseconds:0.00} ms",
+                    $"MESH STEP {renderer.VoxelLastBuildStep} ({renderer.VoxelLastBuildStep * 0.1f:0.00} m) | VERTICES {renderer.VoxelLastBuildVertices} | TRIANGLES {renderer.VoxelLastBuildTriangles} | LAST BUILD {renderer.VoxelLastWorkerBuildMilliseconds:0.00} ms",
                     13f,
                     Color.LightGray));
                 lines.Add((
@@ -887,11 +887,11 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"TOTAL BUILDS {renderer.VoxelTotalBuildCompleted} | REPEATS {renderer.VoxelTotalRepeatedBuilds} | CANCEL {renderer.VoxelTotalBuildCancelled} | STALE {renderer.VoxelTotalStaleResults} | FAIL {renderer.VoxelTotalBuildFailed}",
+                    $"TOTAL BUILDS {renderer.VoxelTotalBuildCompleted} | FAILED {renderer.VoxelTotalBuildFailed} | GPU UNLOADS {renderer.VoxelTotalGpuUnloads}",
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"DUP REQUESTS {renderer.VoxelTotalDuplicateRequests} | QUEUE FULL {renderer.VoxelTotalQueueSaturated}",
+                    $"CACHE POLICY LRU | MEMORY LIMIT {4096} RENDER CHUNKS | REBUILD ONLY AFTER EDIT/PALETTE CHANGE",
                     13f,
                     Color.LightGray));
             }
