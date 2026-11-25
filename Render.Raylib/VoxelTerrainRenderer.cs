@@ -287,7 +287,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.PaletteVersion != _paletteVersion ||
                 entry.CutLayer != targetCutLayer;
             if (inputsChanged)
+            {
                 entry.BlockedCacheBytes = -1;
+                entry.FailedRevision = int.MinValue;
+            }
 
             bool stale = !entry.Built || entry.Dirty || inputsChanged;
 
