@@ -89,7 +89,32 @@ internal static class VoxelTerrainSelfTest
                 return false;
         }
 
-        return hasSolid == scalarHasSolid;
+        if (hasSolid != scalarHasSolid)
+            return false;
+
+        // The renderer uses 32^3 regions plus one voxel of halo on each side.
+        const int renderSide = 34;
+        byte[] renderRegion = new byte[renderSide * renderSide * renderSide];
+        bool renderHasSolid = field.CopyBlockIds(
+            startX: 15,
+            startY: 3,
+            startZ: 15,
+            side: renderSide,
+            destination: renderRegion);
+
+        bool scalarRenderHasSolid = false;
+        for (int z = 0; z < renderSide; z++)
+        for (int y = 0; y < renderSide; y++)
+        for (int x = 0; x < renderSide; x++)
+        {
+            byte expected = field.GetBlockId(15 + x, 3 + y, 15 + z);
+            byte actual = renderRegion[x + y * renderSide + z * renderSide * renderSide];
+            if (actual != expected)
+                return false;
+            scalarRenderHasSolid |= expected != 0;
+        }
+
+        return renderHasSolid == scalarRenderHasSolid;
     }
 
     public static bool StackedSurfacesAreFound()
