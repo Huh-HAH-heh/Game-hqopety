@@ -21,38 +21,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const double MeshBuildBudgetMilliseconds = 4.0;
     private const int CutSettleFrames = 8;
 
-    private const string VertexShader = """
-        #version 330
-        layout(location = 0) in vec3 vertexPosition;
-        layout(location = 3) in vec4 vertexColor;
-        uniform mat4 mvp;
-        uniform mat4 matModel;
-        out vec3 fragWorldPosition;
-        out vec4 fragColor;
-        void main()
-        {
-            fragWorldPosition = (matModel * vec4(vertexPosition, 1.0)).xyz;
-            fragColor = vertexColor;
-            gl_Position = mvp * vec4(vertexPosition, 1.0);
-        }
-        """;
-
-    private const string FragmentShader = """
-        #version 330
-        in vec3 fragWorldPosition;
-        in vec4 fragColor;
-        uniform int uCutEnabled;
-        uniform float uCutHeight;
-        out vec4 finalColor;
-        void main()
-        {
-            if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
-                discard;
-
-            finalColor = fragColor;
-        }
-        """;
-
     private readonly record struct ChunkKey(int X, int Y, int Z);
     private readonly record struct Candidate(
         ChunkKey Key,
@@ -88,9 +56,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly TerrainPipelineLogger _logger;
 
     private readonly Material _material;
-    private readonly Shader _shader;
-    private readonly int _cutEnabledLocation;
-    private readonly int _cutHeightLocation;
 
     private TerrainPalette _palette;
     private SparseVoxelField? _observedField;
@@ -161,21 +126,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
 
-        _shader = LoadShaderFromMemory(VertexShader, FragmentShader);
-        if (!IsShaderValid(_shader))
-            throw new InvalidOperationException("The voxel surface shader could not be created.");
-
-        _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
-        _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
-
-        if (_cutEnabledLocation < 0 || _cutHeightLocation < 0)
-        {
-            UnloadShader(_shader);
-            throw new InvalidOperationException("The voxel shader is missing a required uniform.");
-        }
-
         _material = LoadMaterialDefault();
-        _material.Shader = _shader;
         _logger = new TerrainPipelineLogger();
         _logger.Write(
             "RENDERER_START",
@@ -319,11 +270,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _logger.Write("FRAME_SUMMARY", summary);
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
-
-        float renderCutHeight = cutEnabled && targetCutLayer >= 0
-            ? targetCutLayer * SparseVoxelField.VoxelSizeMeters
-            : cutHeightMeters;
-        SetCutShader(cutEnabled, renderCutHeight);
 
         float worldRadius = 0.5f * MathF.Sqrt(
             field.Width * field.Width +
@@ -839,13 +785,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private static int DivideRoundUp(int value, int divisor) =>
         (value + divisor - 1) / divisor;
 
-    private void SetCutShader(bool enabled, float height)
-    {
-        int cutValue = enabled ? 1 : 0;
-        SetShaderValue(_shader, _cutEnabledLocation, cutValue, ShaderUniformDataType.Int);
-        SetShaderValue(_shader, _cutHeightLocation, height, ShaderUniformDataType.Float);
-    }
-
     public int DetachLooseFragments(
         SparseVoxelField field,
         Vector3 centerMeters,
@@ -907,7 +846,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _chunks.Clear();
         _dynamicFragments.Dispose();
         UnloadMaterial(_material);
-        UnloadShader(_shader);
         _logger.Write(
             "RENDERER_STOP",
             $"builds={_totalBuildCompleted};failed={_totalBuildFailed};gpuUploads={_totalGpuUploads};gpuUnloads={_totalGpuUnloads}");
