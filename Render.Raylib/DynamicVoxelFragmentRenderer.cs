@@ -1,9 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using System.Diagnostics;
-using System.Threading;
-using System.Threading.Tasks;
 using Core.Map;
 using Raylib_cs;
 using static Raylib_cs.Raylib;
@@ -32,11 +29,6 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     {
         public required Mesh[] Meshes { get; set; }
         public required SparseVoxelField SourceField { get; init; }
-        public Task<VoxelMeshData[]>? MeshBuildTask;
-        public VoxelMeshData[]? ReadyMeshData;
-        public readonly List<Mesh> UploadingMeshes = new();
-        public int MeshUploadIndex;
-        public readonly CancellationTokenSource MeshBuildCancellation = new();
         public required VoxelFragmentSnapshot Snapshot { get; init; }
         public required Vector3 Position { get; set; }
         public required Vector3 HalfExtents { get; init; }
@@ -55,18 +47,13 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
 
         public void Dispose()
         {
-            MeshBuildCancellation.Cancel();
             foreach (Mesh mesh in Meshes)
                 UnloadMesh(mesh);
-            foreach (Mesh mesh in UploadingMeshes)
-                UnloadMesh(mesh);
-            UploadingMeshes.Clear();
-            MeshBuildCancellation.Dispose();
+            Meshes = Array.Empty<Mesh>();
         }
     }
 
     private readonly List<Body> _bodies = new(MaximumBodies);
-    private readonly SemaphoreSlim _meshBuildSemaphore = new(1, 1);
     private readonly List<Body[]> _undoEdits = new();
     private readonly List<Body[]> _redoEdits = new();
     private List<Body>? _pendingEdit;
@@ -200,9 +187,62 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         else
             torqueAxis = Vector3.Normalize(torqueAxis);
 
+        List<Mesh> meshes = new(4);
+        try
+        {
+            for (int z = 0; z < chunksZ; z++)
+            for (int y = 0; y < chunksY; y++)
+            for (int x = 0; x < chunksX; x++)
+            {
+                using VoxelChunkBuildInput input = new(snapshot, x, y, z);
+                input.CaptureAll(snapshot);
+                if (!input.HasPotentialSurface)
+                    continue;
+
+                VoxelMeshData[] data = VoxelChunkMesher.BuildSurfaceData(input, palette);
+                try
+                {
+                    foreach (VoxelMeshData meshData in data)
+                        meshes.Add(VoxelChunkMesher.UploadOne(meshData));
+                }
+                finally
+                {
+                    foreach (VoxelMeshData meshData in data)
+                        meshData.ReturnCpuArrays();
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            foreach (Mesh mesh in meshes)
+                UnloadMesh(mesh);
+            Console.WriteLine($"[TERRAIN] Fragment mesh build failed: {exception.Message}");
+            return false;
+        }
+
+        if (meshes.Count == 0)
+            return false;
+
+        Vector3 position = snapshot.InitialCenterMeters;
+        Vector3 launchDirection = position - impulseOriginMeters;
+        if (launchDirection.LengthSquared() < 0.0001f)
+            launchDirection = Vector3.UnitY;
+        else
+            launchDirection = Vector3.Normalize(launchDirection);
+
+        Vector3 torqueAxis = Vector3.Cross(
+            launchDirection,
+            MathF.Abs(launchDirection.Y) < 0.85f
+                ? Vector3.UnitY
+                : Vector3.UnitX);
+        if (torqueAxis.LengthSquared() < 0.0001f)
+            torqueAxis = Vector3.UnitZ;
+        else
+            torqueAxis = Vector3.Normalize(torqueAxis);
+
         Body body = new()
         {
-            Meshes = Array.Empty<Mesh>(),
+            Meshes = meshes.ToArray(),
             SourceField = sourceField,
             Snapshot = snapshot,
             Position = position,
@@ -213,116 +253,11 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             AngularVelocity = torqueAxis * 0.65f
         };
 
-        CancellationToken meshToken = body.MeshBuildCancellation.Token;
-        body.MeshBuildTask = Task.Run(async () =>
-        {
-            await _meshBuildSemaphore.WaitAsync(meshToken).ConfigureAwait(false);
-            try
-            {
-                List<VoxelMeshData> result = new();
-                for (int z = 0; z < chunksZ; z++)
-                for (int y = 0; y < chunksY; y++)
-                for (int x = 0; x < chunksX; x++)
-                {
-                    meshToken.ThrowIfCancellationRequested();
-                    using VoxelChunkBuildInput input = new(
-                        snapshot, x, y, z);
-                    input.CaptureAll(snapshot);
-
-                    if (!input.HasPotentialSurface)
-                        continue;
-
-                    result.AddRange(VoxelChunkMesher.BuildSurfaceData(
-                        input, palette, meshToken));
-                }
-
-                return result.ToArray();
-            }
-            finally
-            {
-                _meshBuildSemaphore.Release();
-            }
-        }, body.MeshBuildCancellation.Token);
-
         _bodies.Add(body);
         _activeBodyCount++;
         _snapshotBytes += snapshot.EstimatedBytes;
         _pendingEdit?.Add(body);
         return true;
-    }
-
-    /// <summary>
-    /// Transfers completed fragment CPU meshes to the GPU on the render thread.
-    /// The caller shares the terrain renderer's remaining per-frame upload budget.
-    /// </summary>
-    public double UploadPendingMeshes(double budgetMilliseconds)
-    {
-        ThrowIfDisposed();
-        if (budgetMilliseconds <= 0d)
-            return 0d;
-
-        Stopwatch timer = Stopwatch.StartNew();
-        foreach (Body body in _bodies)
-        {
-            if (!body.Active || body.Baked || body.Meshes.Length > 0)
-                continue;
-
-            Task<VoxelMeshData[]>? build = body.MeshBuildTask;
-            if (body.ReadyMeshData == null && build != null && build.IsCompleted)
-            {
-                body.MeshBuildTask = null;
-                if (build.IsFaulted || build.IsCanceled)
-                {
-                    _snapshotBytes -= body.Snapshot.EstimatedBytes;
-                    _activeBodyCount--;
-                    body.Active = false;
-                    _bodies.Remove(body);
-                    RemoveFromHistory(body);
-                    body.Dispose();
-                    body.SourceField.RestoreFragment(body.Snapshot);
-                    continue;
-                }
-
-                body.ReadyMeshData = build.GetAwaiter().GetResult();
-                body.MeshUploadIndex = 0;
-            }
-
-            VoxelMeshData[]? data = body.ReadyMeshData;
-            if (data == null)
-                continue;
-
-            while (body.MeshUploadIndex < data.Length &&
-                timer.Elapsed.TotalMilliseconds < budgetMilliseconds)
-            {
-                body.UploadingMeshes.Add(
-                    VoxelChunkMesher.UploadOne(data[body.MeshUploadIndex++]));
-            }
-
-            if (body.MeshUploadIndex < data.Length)
-                break;
-
-            if (body.UploadingMeshes.Count == 0)
-            {
-                _snapshotBytes -= body.Snapshot.EstimatedBytes;
-                _activeBodyCount--;
-                body.Active = false;
-                _bodies.Remove(body);
-                RemoveFromHistory(body);
-                body.Dispose();
-                body.SourceField.RestoreFragment(body.Snapshot);
-                continue;
-            }
-
-            body.Meshes = body.UploadingMeshes.ToArray();
-            body.UploadingMeshes.Clear();
-            body.ReadyMeshData = null;
-            body.MeshUploadIndex = 0;
-
-            if (timer.Elapsed.TotalMilliseconds >= budgetMilliseconds)
-                break;
-        }
-
-        return timer.Elapsed.TotalMilliseconds;
     }
 
     public void Update(SparseVoxelField staticField, float deltaTime)
