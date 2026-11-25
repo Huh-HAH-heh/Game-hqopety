@@ -82,6 +82,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
         public long GpuBytes;
+        public ulong SurfaceHash;
+        public bool HasSurfaceHash;
         public long BlockedCacheBytes = -1;
         public int Revision;
         public int FailedRevision = int.MinValue;
@@ -399,6 +401,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             MeshBuildMillisecondsLastFrame += meshTimer.Elapsed.TotalMilliseconds;
             LastMeshBuildMilliseconds = meshTimer.Elapsed.TotalMilliseconds;
 
+            ulong surfaceHash = ComputeMeshHash(data);
+            if (entry.Built && entry.HasSurfaceHash &&
+                entry.SurfaceHash == surfaceHash)
+            {
+                entry.BaseVersion = field.BaseVersion;
+                entry.PaletteVersion = _paletteVersion;
+                entry.CutLayer = cutLayer;
+                entry.Dirty = false;
+                entry.FailedRevision = int.MinValue;
+                entry.BlockedCacheBytes = -1;
+                _totalIdenticalSurfaceSkips++;
+                uploaded = true;
+                return;
+            }
+
             int vertices = 0;
             int triangles = 0;
             long requiredGpuBytes = 0;
@@ -439,6 +456,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.PaletteVersion = _paletteVersion;
             _gpuCacheBytes += requiredGpuBytes - entry.GpuBytes;
             entry.GpuBytes = requiredGpuBytes;
+            entry.SurfaceHash = surfaceHash;
+            entry.HasSurfaceHash = true;
             entry.BlockedCacheBytes = -1;
             entry.CutLayer = cutLayer;
             entry.Dirty = false;
@@ -484,6 +503,58 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
+    }
+
+    private static ulong ComputeMeshHash(VoxelMeshData[] meshes)
+    {
+        const ulong offset = 14695981039346656037UL;
+        ulong hash = offset;
+        AddHashUInt(ref hash, (uint)meshes.Length);
+
+        foreach (VoxelMeshData mesh in meshes)
+        {
+            AddHashUInt(ref hash, (uint)mesh.VertexCount);
+            AddHashUInt(ref hash, (uint)mesh.IndexCount);
+
+            foreach (Vector3 vertex in mesh.Vertices)
+            {
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.X)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.Y)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(vertex.Z)));
+            }
+
+            foreach (Vector3 normal in mesh.Normals)
+            {
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.X)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.Y)));
+                AddHashUInt(ref hash, unchecked((uint)BitConverter.SingleToInt32Bits(normal.Z)));
+            }
+
+            foreach (byte color in mesh.Colors)
+                AddHashByte(ref hash, color);
+
+            foreach (ushort index in mesh.Indices)
+                AddHashUInt(ref hash, index);
+        }
+
+        return hash;
+    }
+
+    private static void AddHashUInt(ref ulong hash, uint value)
+    {
+        AddHashByte(ref hash, (byte)value);
+        AddHashByte(ref hash, (byte)(value >> 8));
+        AddHashByte(ref hash, (byte)(value >> 16));
+        AddHashByte(ref hash, (byte)(value >> 24));
+    }
+
+    private static void AddHashByte(ref ulong hash, byte value)
+    {
+        unchecked
+        {
+            hash ^= value;
+            hash *= 1099511628211UL;
+        }
     }
 
     private bool EnsureGpuCacheSpace(
