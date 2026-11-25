@@ -14,7 +14,7 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
-    private const int ChunkCells = SparseVoxelField.ChunkSize;
+    private const int ChunkCells = 32;
     private const int MaximumCachedChunks = 4096;
     private const long MaximumGpuCacheBytes = 256L * 1024 * 1024;
     private const int MaximumBuildsPerFrame = 8;
@@ -388,7 +388,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 key.X,
                 key.Y,
                 key.Z,
-                cutLayer);
+                cutLayer,
+                ChunkCells);
 
             Stopwatch captureTimer = Stopwatch.StartNew();
             input.CaptureAll(field);
