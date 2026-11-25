@@ -870,12 +870,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             writer.Write(key.Z);
             writer.Write(chunk.Revision);
             writer.Write(chunk.Content);
-            for (int i = 0; i < ContentMaskWordCount; i++)
-                writer.Write(chunk.ContentMask[i]);
-
-            writer.Write(chunk.Materials != null);
-            if (chunk.Materials != null)
-                writer.Write(chunk.Materials);
+            writer.Write(chunk.Material);
         }
 
         writer.Flush();
@@ -900,7 +895,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 throw new InvalidDataException("The voxel save has an invalid signature.");
 
             int formatVersion = reader.ReadInt32();
-            if (formatVersion != 2 && formatVersion != SaveFormatVersion)
+            if (formatVersion < 2 || formatVersion > SaveFormatVersion)
                 throw new InvalidDataException("The voxel save version is not supported.");
 
             if (reader.ReadInt32() != Width ||
@@ -936,77 +931,93 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 if (loaded.ContainsKey(key))
                     throw new InvalidDataException("The voxel save contains a duplicate chunk.");
 
-                Chunk chunk = new() { Revision = revision };
-                bool hasOverrides;
-
-                if (formatVersion == 2)
+                Chunk chunk;
+                if (formatVersion == 4)
                 {
-                    short[] oldDensity = new short[SampleCount];
-                    for (int i = 0; i < SampleCount; i++)
-                        oldDensity[i] = reader.ReadInt16();
-
-                    byte[] oldDensityMask = reader.ReadBytes(SampleCount);
-                    if (oldDensityMask.Length != SampleCount)
+                    chunk = new Chunk { Revision = revision };
+                    byte[] content = reader.ReadBytes(SampleCount);
+                    byte[] material = reader.ReadBytes(CellCount);
+                    if (content.Length != SampleCount || material.Length != CellCount)
                         throw new EndOfStreamException();
-
-                    for (int i = 0; i < SampleCount; i++)
-                    {
-                        if (oldDensityMask[i] > 1)
-                            throw new InvalidDataException("The voxel save contains an invalid density mask.");
-                        if (oldDensityMask[i] == 0)
-                            continue;
-
-                        chunk.Content[i] = EncodeContent(oldDensity[i] / DensityScale);
-                        SetContentOverride(chunk.ContentMask, i);
-                    }
-
-                    ushort[] oldMaterials = new ushort[CellCount];
-                    for (int i = 0; i < CellCount; i++)
-                        oldMaterials[i] = reader.ReadUInt16();
-
-                    byte[] oldMaterialMask = reader.ReadBytes(CellCount);
-                    if (oldMaterialMask.Length != CellCount)
-                        throw new EndOfStreamException();
-
-                    for (int i = 0; i < CellCount; i++)
-                    {
-                        if (oldMaterialMask[i] > 1)
-                            throw new InvalidDataException("The voxel save contains an invalid material mask.");
-                        if (oldMaterialMask[i] == 0)
-                            continue;
-                        if (oldMaterials[i] >= NoMaterialOverride)
-                            throw new InvalidDataException("The voxel save contains an unsupported material ID.");
-
-                        EnsureMaterialArray(chunk);
-                        chunk.Materials![i] = (byte)oldMaterials[i];
-                    }
-
-                    hasOverrides = HasAnyContentOverride(chunk.ContentMask) ||
-                        HasAnyMaterialOverride(chunk.Materials);
+                    content.CopyTo(chunk.Content, 0);
+                    material.CopyTo(chunk.Material, 0);
                 }
                 else
                 {
-                    byte[] content = reader.ReadBytes(SampleCount);
-                    if (content.Length != SampleCount)
-                        throw new EndOfStreamException();
-                    content.CopyTo(chunk.Content, 0);
+                    // V2/V3 pages stored partial overrides. Expand them over
+                    // the current provider data to produce a complete LOD0 leaf.
+                    chunk = CreateChunkData(key, revision);
 
-                    for (int i = 0; i < ContentMaskWordCount; i++)
-                        chunk.ContentMask[i] = reader.ReadInt64();
-
-                    if (reader.ReadBoolean())
+                    if (formatVersion == 2)
                     {
-                        byte[] materials = reader.ReadBytes(CellCount);
-                        if (materials.Length != CellCount)
-                            throw new EndOfStreamException();
-                        chunk.Materials = materials;
-                    }
+                        short[] oldDensity = new short[SampleCount];
+                        for (int i = 0; i < SampleCount; i++)
+                            oldDensity[i] = reader.ReadInt16();
 
-                    hasOverrides = HasAnyContentOverride(chunk.ContentMask) ||
-                        HasAnyMaterialOverride(chunk.Materials);
+                        byte[] oldDensityMask = reader.ReadBytes(SampleCount);
+                        if (oldDensityMask.Length != SampleCount)
+                            throw new EndOfStreamException();
+
+                        for (int i = 0; i < SampleCount; i++)
+                        {
+                            if (oldDensityMask[i] > 1)
+                                throw new InvalidDataException("The voxel save contains an invalid density mask.");
+                            if (oldDensityMask[i] != 0)
+                                chunk.Content[i] = EncodeContent(oldDensity[i] / DensityScale);
+                        }
+
+                        ushort[] oldMaterials = new ushort[CellCount];
+                        for (int i = 0; i < CellCount; i++)
+                            oldMaterials[i] = reader.ReadUInt16();
+
+                        byte[] oldMaterialMask = reader.ReadBytes(CellCount);
+                        if (oldMaterialMask.Length != CellCount)
+                            throw new EndOfStreamException();
+
+                        for (int i = 0; i < CellCount; i++)
+                        {
+                            if (oldMaterialMask[i] > 1)
+                                throw new InvalidDataException("The voxel save contains an invalid material mask.");
+                            if (oldMaterialMask[i] == 0)
+                                continue;
+                            if (oldMaterials[i] > byte.MaxValue)
+                                throw new InvalidDataException("The voxel save contains an unsupported material ID.");
+
+                            chunk.Material[i] = (byte)oldMaterials[i];
+                        }
+                    }
+                    else
+                    {
+                        byte[] oldContent = reader.ReadBytes(SampleCount);
+                        if (oldContent.Length != SampleCount)
+                            throw new EndOfStreamException();
+
+                        long[] oldContentMask = new long[ContentMaskWordCount];
+                        for (int i = 0; i < ContentMaskWordCount; i++)
+                            oldContentMask[i] = reader.ReadInt64();
+
+                        for (int i = 0; i < SampleCount; i++)
+                        {
+                            if ((oldContentMask[i >> 6] & (1L << (i & 63))) != 0)
+                                chunk.Content[i] = oldContent[i];
+                        }
+
+                        if (reader.ReadBoolean())
+                        {
+                            byte[] oldMaterial = reader.ReadBytes(CellCount);
+                            if (oldMaterial.Length != CellCount)
+                                throw new EndOfStreamException();
+
+                            for (int i = 0; i < CellCount; i++)
+                            {
+                                if (oldMaterial[i] != byte.MaxValue)
+                                    chunk.Material[i] = oldMaterial[i];
+                            }
+                        }
+                    }
                 }
 
-                if (!hasOverrides)
+                if (formatVersion != 4 && PageMatchesBase(chunk, key))
                     continue;
 
                 loaded.Add(key, chunk);
