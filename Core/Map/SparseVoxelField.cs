@@ -47,47 +47,38 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         float ClearanceMeters);
 
     private const int SaveMagic = 0x31585652;
-    private const int SaveFormatVersion = 3;
-    private const byte NoMaterialOverride = byte.MaxValue;
-    private const int ContentMaskWordCount = (SampleCount + 63) >> 6;
+    private const int SaveFormatVersion = 4;
     private const byte ContentIsoLevel = 127;
 
     private sealed class Chunk
     {
         public readonly byte[] Content = new byte[SampleCount];
-        public readonly long[] ContentMask = new long[ContentMaskWordCount];
-        public byte[]? Materials;
+        public readonly byte[] Material = new byte[CellCount];
         public long Revision;
     }
 
     private sealed class ChunkSnapshot
     {
         public required byte[] Content { get; init; }
-        public required long[] ContentMask { get; init; }
-        public byte[]? Materials { get; init; }
+        public required byte[] Material { get; init; }
 
         public static ChunkSnapshot From(Chunk chunk) => new()
         {
             Content = (byte[])chunk.Content.Clone(),
-            ContentMask = (long[])chunk.ContentMask.Clone(),
-            Materials = chunk.Materials == null ? null : (byte[])chunk.Materials.Clone()
+            Material = (byte[])chunk.Material.Clone()
         };
 
         public Chunk ToChunk(long revision)
         {
             Chunk chunk = new() { Revision = revision };
             Content.CopyTo(chunk.Content, 0);
-            ContentMask.CopyTo(chunk.ContentMask, 0);
-            chunk.Materials = Materials == null ? null : (byte[])Materials.Clone();
+            Material.CopyTo(chunk.Material, 0);
             return chunk;
         }
 
         public bool ContentEquals(ChunkSnapshot other) =>
             Content.AsSpan().SequenceEqual(other.Content) &&
-            ContentMask.AsSpan().SequenceEqual(other.ContentMask) &&
-            ((Materials == null && other.Materials == null) ||
-             (Materials != null && other.Materials != null &&
-              Materials.AsSpan().SequenceEqual(other.Materials)));
+            Material.AsSpan().SequenceEqual(other.Material);
     }
 
     private sealed class ChunkFieldSnapshot : IVoxelFieldSource
@@ -127,11 +118,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 (y % ChunkSize) * DensitySamplesPerAxis +
                 (z % ChunkSize) * SamplePlane;
 
-            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk) &&
-                IsContentOverridden(chunk.ContentMask, index))
-                return DecodeContent(chunk.Content[index]);
-
-            return _baseDensity(x, y, z);
+            return _chunks.TryGetValue(key, out ChunkSnapshot? chunk)
+                ? DecodeContent(chunk.Content[index])
+                : _baseDensity(x, y, z);
         }
 
         public ushort GetMaterialId(int x, int y, int z)
@@ -141,27 +130,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 return 0;
 
             ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
-            int densityIndex = x % ChunkSize +
-                (y % ChunkSize) * DensitySamplesPerAxis +
-                (z % ChunkSize) * SamplePlane;
+            int index = x % ChunkSize +
+                (y % ChunkSize) * ChunkSize +
+                (z % ChunkSize) * CellPlane;
 
             if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
-            {
-                float density = IsContentOverridden(chunk.ContentMask, densityIndex)
-                    ? DecodeContent(chunk.Content[densityIndex])
-                    : _baseDensity(x, y, z);
-                if (density <= 0f)
-                    return 0;
-
-                int materialIndex = x % ChunkSize +
-                    (y % ChunkSize) * ChunkSize +
-                    (z % ChunkSize) * CellPlane;
-                if (chunk.Materials != null &&
-                    chunk.Materials[materialIndex] != NoMaterialOverride)
-                    return chunk.Materials[materialIndex];
-
-                return _baseMaterial(x, y, z);
-            }
+                return chunk.Content[index] > ContentIsoLevel
+                    ? chunk.Material[index]
+                    : (ushort)0;
 
             return _baseDensity(x, y, z) > 0f
                 ? _baseMaterial(x, y, z)
@@ -175,36 +151,17 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 return 0;
 
             ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
+            int index = x % ChunkSize +
+                (y % ChunkSize) * ChunkSize +
+                (z % ChunkSize) * CellPlane;
+
             if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
-            {
-                int localX = x % ChunkSize;
-                int localY = y % ChunkSize;
-                int localZ = z % ChunkSize;
-                int densityIndex = localX +
-                    localY * DensitySamplesPerAxis +
-                    localZ * SamplePlane;
+                return chunk.Content[index] > ContentIsoLevel
+                    ? chunk.Material[index]
+                    : (byte)0;
 
-                if (IsContentOverridden(chunk.ContentMask, densityIndex))
-                {
-                    if (chunk.Content[densityIndex] <= ContentIsoLevel)
-                        return 0;
-                }
-                else if (_baseDensity(x, y, z) <= 0f)
-                {
-                    return 0;
-                }
-
-                int materialIndex = localX +
-                    localY * ChunkSize +
-                    localZ * CellPlane;
-                if (chunk.Materials != null &&
-                    chunk.Materials[materialIndex] != NoMaterialOverride)
-                    return chunk.Materials[materialIndex];
-            }
-            else if (_baseDensity(x, y, z) <= 0f)
-            {
+            if (_baseDensity(x, y, z) <= 0f)
                 return 0;
-            }
 
             return checked((byte)_baseMaterial(x, y, z));
         }
@@ -295,8 +252,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private const int MaximumUndoEntries = 16;
     private const long MaximumUndoBytes = 64L * 1024 * 1024;
-    private const long ChunkSnapshotBytes =
-        SampleCount + ContentMaskWordCount * sizeof(long) + CellCount;
+    private const long ChunkSnapshotBytes = SampleCount + CellCount;
 
     private readonly ConcurrentDictionary<ChunkCoordinate, Chunk> _chunks = new();
     private readonly SparseVoxelOctreeIndex _octreeIndex;
@@ -484,8 +440,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             return -1f;
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
-        if (_chunks.TryGetValue(key, out Chunk? chunk) &&
-            IsContentOverridden(chunk.ContentMask, index))
+        if (_chunks.TryGetValue(key, out Chunk? chunk))
             return DecodeContent(Volatile.Read(ref chunk.Content[index]));
 
         return _baseDensity(x, y, z);
@@ -526,27 +481,15 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (!IsInsideCell(x, y, z))
             return 0;
 
-        ChunkCoordinate key = GetSampleChunk(x, y, z, out int densityIndex);
-        _chunks.TryGetValue(key, out Chunk? chunk);
+        ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
+        if (_chunks.TryGetValue(key, out Chunk? chunk))
+            return chunk.Content[index] > ContentIsoLevel
+                ? chunk.Material[index]
+                : (ushort)0;
 
-        float density = chunk != null &&
-            IsContentOverridden(chunk.ContentMask, densityIndex)
-                ? DecodeContent(Volatile.Read(ref chunk.Content[densityIndex]))
-                : _baseDensity(x, y, z);
-        if (density <= 0f)
-            return 0;
-
-        if (chunk?.Materials is byte[] materials)
-        {
-            int materialIndex = x % ChunkSize +
-                (y % ChunkSize) * ChunkSize +
-                (z % ChunkSize) * CellPlane;
-            byte material = Volatile.Read(ref materials[materialIndex]);
-            if (material != NoMaterialOverride)
-                return material;
-        }
-
-        return _baseMaterial(x, y, z);
+        return _baseDensity(x, y, z) > 0f
+            ? _baseMaterial(x, y, z)
+            : (ushort)0;
     }
 
     /// <summary>
@@ -558,29 +501,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (!IsInsideCell(x, y, z))
             return 0;
 
-        ChunkCoordinate key = GetSampleChunk(x, y, z, out int densityIndex);
-        _chunks.TryGetValue(key, out Chunk? chunk);
+        ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
+        if (_chunks.TryGetValue(key, out Chunk? chunk))
+            return chunk.Content[index] > ContentIsoLevel
+                ? chunk.Material[index]
+                : (byte)0;
 
-        if (chunk != null &&
-            IsContentOverridden(chunk.ContentMask, densityIndex))
-        {
-            if (Volatile.Read(ref chunk.Content[densityIndex]) <= ContentIsoLevel)
-                return 0;
-        }
-        else if (_baseDensity(x, y, z) <= 0f)
-        {
+        if (_baseDensity(x, y, z) <= 0f)
             return 0;
-        }
-
-        if (chunk?.Materials is byte[] materials)
-        {
-            int materialIndex = x % ChunkSize +
-                (y % ChunkSize) * ChunkSize +
-                (z % ChunkSize) * CellPlane;
-            byte material = Volatile.Read(ref materials[materialIndex]);
-            if (material != NoMaterialOverride)
-                return material;
-        }
 
         return checked((byte)_baseMaterial(x, y, z));
     }
