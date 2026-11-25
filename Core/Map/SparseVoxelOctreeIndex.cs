@@ -45,8 +45,8 @@ internal sealed class SparseVoxelOctreeIndex
 
     public void AddLeaf(SparseVoxelField.ChunkCoordinate leaf)
     {
-        Node leafNode = _nodes.GetOrAdd(Pack(0, leaf.X, leaf.Y, leaf.Z), static _ => new Node());
-        Interlocked.Increment(ref leafNode.LeafCount);
+        if (!_nodes.TryAdd(Pack(0, leaf.X, leaf.Y, leaf.Z), new Node { LeafCount = 1 }))
+            return;
 
         for (int lod = 1; lod <= _rootLevel; lod++)
         {
