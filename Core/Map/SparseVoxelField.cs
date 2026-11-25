@@ -15,7 +15,8 @@ namespace Core.Map;
 /// sampled at voxel centres; positive density is solid, negative density is air and
 /// zero is the isosurface. Material IDs belong to cells, not to vertical columns.
 /// Unmodified terrain is evaluated by a procedural base sampler; edited areas
-/// materialize only the affected 16^3 chunks.
+/// materialize only the affected 8^3 data cells. A flat X-major page directory
+/// is the primary read path; the octree remains a secondary LOD/region index.
 ///
 /// This keeps the 2304 x 2304 x 50 m world sparse while retaining a genuine
 /// three-dimensional field for caves, arches, overhangs and CSG terrain edits.
