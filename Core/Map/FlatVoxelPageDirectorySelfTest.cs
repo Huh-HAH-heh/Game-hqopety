@@ -73,17 +73,32 @@ public static class FlatVoxelPageDirectorySelfTest
             return false;
         }
 
-        field.FillBox(
-            new Vector3(0.7f, 0.7f, 0.7f),
-            new Vector3(0.9f, 0.9f, 0.9f),
-            materialId: 7);
+        using (field.BeginUndoableEdit())
+        {
+            field.FillBox(
+                new Vector3(0.7f, 0.7f, 0.7f),
+                new Vector3(0.9f, 0.9f, 0.9f),
+                materialId: 7);
+        }
 
-        return field.GetMaterialId(7, 7, 7) == 7 &&
+        bool written = field.GetMaterialId(7, 7, 7) == 7 &&
             field.GetMaterialId(8, 8, 8) == 7 &&
             field.GetBlockId(7, 7, 7) == 7 &&
             field.GetBlockId(8, 8, 8) == 7 &&
             field.GetMaterialId(6, 7, 7) == 0 &&
             field.GetDataCellStorageBytes(0, 0, 0) > 0 &&
             field.GetDataCellStorageBytes(1, 1, 1) > 0;
+
+        if (!written || !field.Undo() ||
+            field.GetMaterialId(7, 7, 7) != 0 ||
+            field.GetDataCellStorageBytes(0, 0, 0) != 0)
+        {
+            return false;
+        }
+
+        return field.Redo() &&
+            field.GetMaterialId(7, 7, 7) == 7 &&
+            field.GetMaterialId(8, 8, 8) == 7 &&
+            field.GetDataCellStorageBytes(0, 0, 0) > 0;
     }
 }
