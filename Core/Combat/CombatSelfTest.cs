@@ -90,7 +90,7 @@ public static class CombatSelfTest
         RunTest("Vision: candidate work scales with living units", TestVisionWorkScalesWithLivingUnits, ref passed, ref failed);
         RunTest("Terrain: uniform voxel regions release dense buffers", TestTerrainRegionCompression, ref passed, ref failed);
         RunTest("Terrain: range cache avoids height-sized allocations", TestTerrainRangeCacheAllocations, ref passed, ref failed);
-        RunTest("Terrain: solid height columns stay compact and materialize on edit", TestCompactSolidHeightColumns, ref passed, ref failed);
+        RunTest("Terrain: simple columns stay implicit and voxel edits allocate sparse pages", TestVoxelPagesMaterializeOnEdit, ref passed, ref failed);
         RunTest("Voxel terrain: stacked floors, surface and bridge are distinct", VoxelTerrainSelfTest.StackedSurfacesAreFound, ref passed, ref failed);
         RunTest("Voxel terrain: vertical capsule respects tunnel clearance", VoxelTerrainSelfTest.CapsuleUsesSdfClearance, ref passed, ref failed);
         RunTest("Voxel terrain: flatten plane edits a local surface in the same density field", VoxelTerrainSelfTest.FlattenPlaneChangesLocalSurface, ref passed, ref failed);
@@ -1533,7 +1533,7 @@ public static class CombatSelfTest
         return GC.GetAllocatedBytesForCurrentThread() == before;
     }
 
-    private static bool TestCompactSolidHeightColumns()
+    private static bool TestVoxelPagesMaterializeOnEdit()
     {
         WorldMap worldMap = new WorldMap(regionsX: 1, regionsY: 1);
         worldMap.GetOrCreateRegion(0, 0);
@@ -1548,8 +1548,8 @@ public static class CombatSelfTest
 
         bool initialValid =
             generationBytes <= 256 * 1024 &&
-            worldMap.Blocks.Volumes.ChunkCount <= 144 &&
-            worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
+            worldMap.Voxels.ChunkCount == 0 &&
+            worldMap.Voxels.DataCellDirectoryAllocatedBlocks == 0 &&
             worldMap.GetMaterialId(5, 5, 0) == 1 &&
             worldMap.GetMaterialId(5, 5, 99) == 1 &&
             worldMap.GetMaterialId(5, 5, 100) == 0 &&
@@ -1558,9 +1558,9 @@ public static class CombatSelfTest
         if (!initialValid)
         {
             Console.WriteLine(
-                $"[DETAIL] compact initial bytes={generationBytes}, " +
-                $"chunks={worldMap.Blocks.Volumes.ChunkCount}, " +
-                $"complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"[DETAIL] implicit generation bytes={generationBytes}, " +
+                $"pages={worldMap.Voxels.ChunkCount}, " +
+                $"directoryBlocks={worldMap.Voxels.DataCellDirectoryAllocatedBlocks}, " +
                 $"m0={worldMap.GetMaterialId(5, 5, 0)}, " +
                 $"m99={worldMap.GetMaterialId(5, 5, 99)}, " +
                 $"m100={worldMap.GetMaterialId(5, 5, 100)}, " +
@@ -1569,10 +1569,11 @@ public static class CombatSelfTest
             return false;
         }
 
-        // Editing a single voxel must first materialize the compact column.
+        // A local voxel edit is stored only in the shared 3D voxel field.
         worldMap.SetMaterialId(5, 5, 50, 2);
         bool editedValid =
-            worldMap.Blocks.Volumes.ComplexColumnCount == 1 &&
+            worldMap.Voxels.ChunkCount > 0 &&
+            worldMap.Voxels.DataCellDirectoryAllocatedBlocks > 0 &&
             worldMap.GetMaterialId(5, 5, 49) == 1 &&
             worldMap.GetMaterialId(5, 5, 50) == 2 &&
             worldMap.GetMaterialId(5, 5, 99) == 1 &&
@@ -1580,7 +1581,8 @@ public static class CombatSelfTest
         if (!editedValid)
         {
             Console.WriteLine(
-                $"[DETAIL] material edit complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"[DETAIL] material edit pages={worldMap.Voxels.ChunkCount}, " +
+                $"directoryBlocks={worldMap.Voxels.DataCellDirectoryAllocatedBlocks}, " +
                 $"m49={worldMap.GetMaterialId(5, 5, 49)}, " +
                 $"m50={worldMap.GetMaterialId(5, 5, 50)}, " +
                 $"m99={worldMap.GetMaterialId(5, 5, 99)}, " +
@@ -1588,10 +1590,10 @@ public static class CombatSelfTest
             return false;
         }
 
-        // Replacing that edited column with a simple height must clear stale upper voxels.
+        // Replacing the edited tile with a new base height removes stale overrides.
         worldMap.SetSolidHeight(5, 5, 30, 1);
         bool resetValid =
-            worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
+            worldMap.Voxels.ChunkCount == 0 &&
             worldMap.GetMaterialId(5, 5, 29) == 1 &&
             worldMap.GetMaterialId(5, 5, 30) == 0 &&
             worldMap.GetLayer(30).GetMaterialId(5, 5) == 0 &&
@@ -1599,7 +1601,7 @@ public static class CombatSelfTest
         if (!resetValid)
         {
             Console.WriteLine(
-                $"[DETAIL] reset complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"[DETAIL] reset pages={worldMap.Voxels.ChunkCount}, " +
                 $"m29={worldMap.GetMaterialId(5, 5, 29)}, " +
                 $"m30={worldMap.GetMaterialId(5, 5, 30)}, " +
                 $"layer30={worldMap.GetLayer(30).GetMaterialId(5, 5)}, " +
