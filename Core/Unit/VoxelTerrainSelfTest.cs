@@ -639,21 +639,53 @@ internal static class VoxelTerrainSelfTest
 
     public static bool UniformDataCellsCompressToTwoBytes()
     {
+        SparseVoxelField.Chunk page = new();
+        byte[] content = new byte[SparseVoxelField.DataCellSize *
+            SparseVoxelField.DataCellSize * SparseVoxelField.DataCellSize];
+        byte[] material = new byte[content.Length];
+        Array.Fill(content, (byte)159);
+        Array.Fill(material, (byte)Rock);
+
+        page.SetContentData(content);
+        page.SetMaterialData(material);
+        bool compressed = page.StorageBytes == 2 &&
+            page.GetContentConstitution() == SparseVoxelField.VoxelContentConstitution.Full;
+
+        page.SetContent(0, 95);
+        bool expanded = page.StorageBytes == 513 &&
+            page.GetContentConstitution() == SparseVoxelField.VoxelContentConstitution.Mixed;
+
+        page.SetContent(0, 159);
+        page.Compress();
+
+        return compressed &&
+            expanded &&
+            page.StorageBytes == 2 &&
+            page.GetContentConstitution() == SparseVoxelField.VoxelContentConstitution.Full;
+    }
+
+    public static bool OctreeParentConstitutionTracksUniformChildren()
+    {
         SparseVoxelField field = new(
-            width: 64,
-            height: 64,
-            depth: 64,
-            baseDensity: static (_, _, _) => 1f,
-            baseMaterial: static (_, _, _) => Rock);
+            width: 16,
+            height: 16,
+            depth: 16,
+            baseDensity: static (_, _, _) => -1f,
+            baseMaterial: static (_, _, _) => (ushort)0);
 
-        field.PaintSphere(
-            new Vector3(0.4f, 0.4f, 0.4f),
-            0.7f,
-            BridgeMaterial);
+        field.FillBox(Vector3.Zero, new Vector3(1.6f), Rock);
 
-        return field.GetDataCellConstitution(0, 0, 0) ==
-                   SparseVoxelField.VoxelContentConstitution.Empty &&
-               field.GetDataCellStorageBytes(0, 0, 0) == 2;
+        bool full = field.ChunkCount == 8 &&
+            field.GetOctreeContentConstitution(1, 0, 0, 0) ==
+                SparseVoxelField.VoxelContentConstitution.Full;
+
+        field.CarveBox(Vector3.Zero, new Vector3(0.8f));
+
+        return full &&
+            field.GetDataCellConstitution(0, 0, 0) ==
+                SparseVoxelField.VoxelContentConstitution.Empty &&
+            field.GetOctreeContentConstitution(1, 0, 0, 0) ==
+                SparseVoxelField.VoxelContentConstitution.Mixed;
     }
 
 }
