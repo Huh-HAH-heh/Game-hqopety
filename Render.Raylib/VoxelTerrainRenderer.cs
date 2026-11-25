@@ -80,6 +80,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public long BaseVersion = long.MinValue;
         public int PaletteVersion = int.MinValue;
         public int CutLayer = int.MinValue;
+        public long RequestedBaseVersion = long.MinValue;
+        public int RequestedPaletteVersion = int.MinValue;
+        public int RequestedCutLayer = int.MinValue;
         public long LastSeenFrame;
         public long GpuBytes;
         public ulong SurfaceHash;
