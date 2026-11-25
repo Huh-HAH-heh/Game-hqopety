@@ -22,15 +22,20 @@ namespace Core.Map;
 /// </summary>
 public sealed class SparseVoxelField : IVoxelFieldSource
 {
+    // 16^3 remains the render/edit grouping; storage follows VRage's 8^3 data cells.
     public const int ChunkSize = 16;
-    public const int DensitySamplesPerAxis = ChunkSize;
+    public const int DataCellSize = 8;
+    public const int DensitySamplesPerAxis = DataCellSize;
     public const float VoxelSizeMeters = 0.1f;
     public const float DensityScale = 32f;
 
-    private const int SampleCount = DensitySamplesPerAxis * DensitySamplesPerAxis * DensitySamplesPerAxis;
-    private const int CellCount = ChunkSize * ChunkSize * ChunkSize;
-    private const int SamplePlane = DensitySamplesPerAxis * DensitySamplesPerAxis;
-    private const int CellPlane = ChunkSize * ChunkSize;
+    private const int SampleCount = DataCellSize * DataCellSize * DataCellSize;
+    private const int CellCount = SampleCount;
+    private const int SamplePlane = DataCellSize * DataCellSize;
+    private const int CellPlane = DataCellSize * DataCellSize;
+    private const int LegacyChunkSize = 16;
+    private const int LegacySampleCount = LegacyChunkSize * LegacyChunkSize * LegacyChunkSize;
+    private const int LegacyCellPlane = LegacyChunkSize * LegacyChunkSize;
     private const long MaximumEditSampleCount = 20_000_000;
 
     public readonly record struct ChunkCoordinate(int X, int Y, int Z);
@@ -52,9 +57,294 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     internal sealed class Chunk
     {
-        public readonly byte[] Content = new byte[SampleCount];
-        public readonly byte[] Material = new byte[CellCount];
+        private byte[]? _content;
+        private byte[]? _material;
+        private byte _uniformContent = DefaultEmptyContent;
+        private byte _uniformMaterial = byte.MaxValue;
+        private int _contentConstitution = -1;
+
         public long Revision;
+
+        public bool IsContentUniform => Volatile.Read(ref _content) == null;
+        public bool IsMaterialUniform => Volatile.Read(ref _material) == null;
+        public byte UniformContent => Volatile.Read(ref _uniformContent);
+        public byte UniformMaterial => Volatile.Read(ref _uniformMaterial);
+
+        public byte GetContent(int index)
+        {
+            byte[]? values = Volatile.Read(ref _content);
+            return values == null
+                ? Volatile.Read(ref _uniformContent)
+                : Volatile.Read(ref values[index]);
+        }
+
+        public byte GetMaterial(int index)
+        {
+            byte[]? values = Volatile.Read(ref _material);
+            return values == null
+                ? Volatile.Read(ref _uniformMaterial)
+                : Volatile.Read(ref values[index]);
+        }
+
+        public void SetContent(int index, byte value)
+        {
+            byte[]? values = Volatile.Read(ref _content);
+            if (values == null)
+            {
+                byte uniform = Volatile.Read(ref _uniformContent);
+                if (uniform == value)
+                    return;
+
+                byte[] candidate = new byte[SampleCount];
+                Array.Fill(candidate, uniform);
+                values = Interlocked.CompareExchange(ref _content, candidate, null) ?? candidate;
+            }
+
+            Volatile.Write(ref values[index], value);
+            Volatile.Write(ref _contentConstitution, -1);
+        }
+
+        public void SetMaterial(int index, byte value)
+        {
+            byte[]? values = Volatile.Read(ref _material);
+            if (values == null)
+            {
+                byte uniform = Volatile.Read(ref _uniformMaterial);
+                if (uniform == value)
+                    return;
+
+                byte[] candidate = new byte[CellCount];
+                Array.Fill(candidate, uniform);
+                values = Interlocked.CompareExchange(ref _material, candidate, null) ?? candidate;
+            }
+
+            Volatile.Write(ref values[index], value);
+        }
+
+        public void SetUniformContent(byte value)
+        {
+            Volatile.Write(ref _uniformContent, value);
+            Volatile.Write(ref _content, null);
+            Volatile.Write(ref _contentConstitution, -1);
+        }
+
+        public void SetUniformMaterial(byte value)
+        {
+            Volatile.Write(ref _uniformMaterial, value);
+            Volatile.Write(ref _material, null);
+        }
+
+        public void SetContentData(ReadOnlySpan<byte> source)
+        {
+            if (source.Length != SampleCount)
+                throw new ArgumentException("Invalid voxel content page size.", nameof(source));
+
+            byte first = source[0];
+            bool uniform = true;
+            for (int i = 1; i < source.Length; i++)
+            {
+                if (source[i] == first)
+                    continue;
+                uniform = false;
+                break;
+            }
+
+            if (uniform)
+            {
+                SetUniformContent(first);
+                return;
+            }
+
+            Volatile.Write(ref _uniformContent, first);
+            Volatile.Write(ref _content, source.ToArray());
+            Volatile.Write(ref _contentConstitution, -1);
+        }
+
+        public void SetMaterialData(ReadOnlySpan<byte> source)
+        {
+            if (source.Length != CellCount)
+                throw new ArgumentException("Invalid voxel material page size.", nameof(source));
+
+            byte first = source[0];
+            bool uniform = true;
+            for (int i = 1; i < source.Length; i++)
+            {
+                if (source[i] == first)
+                    continue;
+                uniform = false;
+                break;
+            }
+
+            if (uniform)
+            {
+                SetUniformMaterial(first);
+                return;
+            }
+
+            Volatile.Write(ref _uniformMaterial, first);
+            Volatile.Write(ref _material, source.ToArray());
+        }
+
+        public byte[] CopyContent()
+        {
+            byte[] result = new byte[SampleCount];
+            byte[]? values = Volatile.Read(ref _content);
+            if (values == null)
+                Array.Fill(result, Volatile.Read(ref _uniformContent));
+            else
+                values.AsSpan().CopyTo(result);
+            return result;
+        }
+
+        public byte[] CopyMaterial()
+        {
+            byte[] result = new byte[CellCount];
+            byte[]? values = Volatile.Read(ref _material);
+            if (values == null)
+                Array.Fill(result, Volatile.Read(ref _uniformMaterial));
+            else
+                values.AsSpan().CopyTo(result);
+            return result;
+        }
+
+        public void Compress()
+        {
+            byte[]? content = Volatile.Read(ref _content);
+            if (content != null)
+            {
+                byte first = content[0];
+                bool uniform = true;
+                for (int i = 1; i < content.Length; i++)
+                {
+                    if (content[i] == first)
+                        continue;
+                    uniform = false;
+                    break;
+                }
+
+                if (uniform)
+                    SetUniformContent(first);
+            }
+
+            byte[]? material = Volatile.Read(ref _material);
+            if (material != null)
+            {
+                byte first = material[0];
+                bool uniform = true;
+                for (int i = 1; i < material.Length; i++)
+                {
+                    if (material[i] == first)
+                        continue;
+                    uniform = false;
+                    break;
+                }
+
+                if (uniform)
+                    SetUniformMaterial(first);
+            }
+        }
+
+        public VoxelContentConstitution GetContentConstitution()
+        {
+            int cached = Volatile.Read(ref _contentConstitution);
+            if (cached >= 0)
+                return (VoxelContentConstitution)cached;
+
+            byte[]? content = Volatile.Read(ref _content);
+            if (content == null)
+            {
+                VoxelContentConstitution uniform =
+                    Volatile.Read(ref _uniformContent) > ContentIsoLevel
+                        ? VoxelContentConstitution.Full
+                        : VoxelContentConstitution.Empty;
+                Volatile.Write(ref _contentConstitution, (int)uniform);
+                return uniform;
+            }
+
+            bool hasSolid = false;
+            bool hasAir = false;
+            for (int i = 0; i < content.Length; i++)
+            {
+                if (Volatile.Read(ref content[i]) > ContentIsoLevel)
+                    hasSolid = true;
+                else
+                    hasAir = true;
+
+                if (hasSolid && hasAir)
+                    break;
+            }
+
+            VoxelContentConstitution result = hasSolid
+                ? hasAir ? VoxelContentConstitution.Mixed : VoxelContentConstitution.Full
+                : VoxelContentConstitution.Empty;
+            Volatile.Write(ref _contentConstitution, (int)result);
+            return result;
+        }
+
+        public int StorageBytes =>
+            (Volatile.Read(ref _content)?.Length ?? 1) +
+            (Volatile.Read(ref _material)?.Length ?? 1);
+
+        public void Write(BinaryWriter writer)
+        {
+            byte[]? content = Volatile.Read(ref _content);
+            writer.Write(content == null ? (byte)0 : (byte)1);
+            if (content == null)
+                writer.Write(Volatile.Read(ref _uniformContent));
+            else
+                writer.Write(content);
+
+            byte[]? material = Volatile.Read(ref _material);
+            writer.Write(material == null ? (byte)0 : (byte)1);
+            if (material == null)
+                writer.Write(Volatile.Read(ref _uniformMaterial));
+            else
+                writer.Write(material);
+        }
+
+        public void Read(BinaryReader reader)
+        {
+            byte contentMode = reader.ReadByte();
+            if (contentMode == 0)
+            {
+                SetUniformContent(reader.ReadByte());
+            }
+            else if (contentMode == 1)
+            {
+                byte[] values = reader.ReadBytes(SampleCount);
+                if (values.Length != SampleCount)
+                    throw new EndOfStreamException();
+                SetContentData(values);
+            }
+            else
+            {
+                throw new InvalidDataException("Invalid voxel content page encoding.");
+            }
+
+            byte materialMode = reader.ReadByte();
+            if (materialMode == 0)
+            {
+                SetUniformMaterial(reader.ReadByte());
+            }
+            else if (materialMode == 1)
+            {
+                byte[] values = reader.ReadBytes(CellCount);
+                if (values.Length != CellCount)
+                    throw new EndOfStreamException();
+                SetMaterialData(values);
+            }
+            else
+            {
+                throw new InvalidDataException("Invalid voxel material page encoding.");
+            }
+        }
+    }
+
+    internal enum VoxelContentConstitution : byte
+    {
+        Empty,
+        Full,
+        Mixed
     }
 
     private sealed class ChunkSnapshot
@@ -64,17 +354,20 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         public static ChunkSnapshot From(Chunk chunk) => new()
         {
-            Content = (byte[])chunk.Content.Clone(),
-            Material = (byte[])chunk.Material.Clone()
+            Content = chunk.CopyContent(),
+            Material = chunk.CopyMaterial()
         };
 
         public Chunk ToChunk(long revision)
         {
             Chunk chunk = new() { Revision = revision };
-            Content.CopyTo(chunk.Content, 0);
-            Material.CopyTo(chunk.Material, 0);
+            chunk.SetContentData(Content);
+            chunk.SetMaterialData(Material);
             return chunk;
         }
+
+        public byte GetContent(int index) => Content[index];
+        public byte GetMaterial(int index) => Material[index];
 
         public bool ContentEquals(ChunkSnapshot other) =>
             Content.AsSpan().SequenceEqual(other.Content) &&
@@ -115,13 +408,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             if (y == Height)
                 return DecodeContent(EncodeContent(_baseDensity(x, y, z)));
 
-            ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
-            int index = x % ChunkSize +
-                (y % ChunkSize) * DensitySamplesPerAxis +
-                (z % ChunkSize) * SamplePlane;
+            ChunkCoordinate key = new(x / DataCellSize, y / DataCellSize, z / DataCellSize);
+            int index = x % DataCellSize +
+                (y % DataCellSize) * DensitySamplesPerAxis +
+                (z % DataCellSize) * SamplePlane;
 
             return _chunks.TryGetValue(key, out ChunkSnapshot? chunk)
-                ? DecodeContent(chunk.Content[index])
+                ? DecodeContent(chunk.GetContent(index))
                 : DecodeContent(EncodeContent(_baseDensity(x, y, z)));
         }
 
@@ -131,15 +424,15 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 x >= Width || y >= Height || z >= Depth)
                 return 0;
 
-            ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
-            int index = x % ChunkSize +
-                (y % ChunkSize) * ChunkSize +
-                (z % ChunkSize) * CellPlane;
+            ChunkCoordinate key = new(x / DataCellSize, y / DataCellSize, z / DataCellSize);
+            int index = x % DataCellSize +
+                (y % DataCellSize) * DataCellSize +
+                (z % DataCellSize) * CellPlane;
 
             if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
-                return chunk.Content[index] > ContentIsoLevel &&
-                    chunk.Material[index] != byte.MaxValue
-                        ? chunk.Material[index]
+                return chunk.GetContent(index) > ContentIsoLevel &&
+                    chunk.GetMaterial(index) != byte.MaxValue
+                        ? chunk.GetMaterial(index)
                         : (ushort)0;
 
             byte baseContent = EncodeContent(_baseDensity(x, y, z));
@@ -154,15 +447,15 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 x >= Width || y >= Height || z >= Depth)
                 return 0;
 
-            ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
-            int index = x % ChunkSize +
-                (y % ChunkSize) * ChunkSize +
-                (z % ChunkSize) * CellPlane;
+            ChunkCoordinate key = new(x / DataCellSize, y / DataCellSize, z / DataCellSize);
+            int index = x % DataCellSize +
+                (y % DataCellSize) * DataCellSize +
+                (z % DataCellSize) * CellPlane;
 
             if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
-                return chunk.Content[index] > ContentIsoLevel &&
-                    chunk.Material[index] != byte.MaxValue
-                        ? chunk.Material[index]
+                return chunk.GetContent(index) > ContentIsoLevel &&
+                    chunk.GetMaterial(index) != byte.MaxValue
+                        ? chunk.GetMaterial(index)
                         : (byte)0;
 
             if (EncodeContent(_baseDensity(x, y, z)) <= ContentIsoLevel)
@@ -293,17 +586,28 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (haloSize < 1 || haloSize > 4)
             throw new ArgumentOutOfRangeException(nameof(haloSize));
         if (sampleIndex < 0 ||
-            sampleIndex >= ChunkSize + haloSize * 2 + 1)
+            sampleIndex >= DataCellSize + haloSize * 2 + 1)
             throw new ArgumentOutOfRangeException(nameof(sampleIndex));
         if (step < 1)
             throw new ArgumentOutOfRangeException(nameof(step));
 
-        return checked(chunkIndex * ChunkSize * step +
+        return checked(chunkIndex * DataCellSize * step +
             (sampleIndex - haloSize) * step);
     }
 
     public int ChunkCount => _octreeIndex.LeafCount;
     public int OctreeNodeCount => _octreeIndex.NodeCount;
+    public int StorageDataCellSize => DataCellSize;
+
+    public int GetDataCellStorageBytes(int cellX, int cellY, int cellZ) =>
+        _octreeIndex.TryGetLeaf(new ChunkCoordinate(cellX, cellY, cellZ), out Chunk? page)
+            ? page?.StorageBytes ?? 0
+            : 0;
+
+    public VoxelContentConstitution GetDataCellConstitution(int cellX, int cellY, int cellZ) =>
+        _octreeIndex.TryGetLeaf(new ChunkCoordinate(cellX, cellY, cellZ), out Chunk? page) && page != null
+            ? page.GetContentConstitution()
+            : VoxelContentConstitution.Mixed;
     public int UndoCount => _undoHistory.Count;
     public int RedoCount => _redoHistory.Count;
     public bool CanUndo => _undoHistory.Count > 0;
@@ -330,9 +634,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _baseDensity = baseDensity ?? throw new ArgumentNullException(nameof(baseDensity));
         _baseMaterial = baseMaterial ?? throw new ArgumentNullException(nameof(baseMaterial));
         _octreeIndex = new SparseVoxelOctreeIndex<Chunk>(
-            (width + ChunkSize - 1) / ChunkSize,
-            (height + ChunkSize - 1) / ChunkSize,
-            (depth + ChunkSize - 1) / ChunkSize);
+            (width + DataCellSize - 1) / DataCellSize,
+            (height + DataCellSize - 1) / DataCellSize,
+            (depth + DataCellSize - 1) / DataCellSize);
     }
 
     /// <summary>
@@ -349,23 +653,23 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (chunkX < 0 || chunkY < 0 || chunkZ < 0 || step <= 0)
             throw new ArgumentOutOfRangeException(nameof(step));
 
-        int originX = chunkX * ChunkSize * step;
-        int originY = chunkY * ChunkSize * step;
-        int originZ = chunkZ * ChunkSize * step;
+        int originX = chunkX * DataCellSize * step;
+        int originY = chunkY * DataCellSize * step;
+        int originZ = chunkZ * DataCellSize * step;
 
         int minX = Math.Max(0, originX - step * 2);
         int minY = Math.Max(0, originY - step * 2);
         int minZ = Math.Max(0, originZ - step * 2);
-        int maxX = Math.Min(Width - 1, originX + (ChunkSize + 1) * step);
-        int maxY = Math.Min(Height, originY + (ChunkSize + 1) * step);
-        int maxZ = Math.Min(Depth - 1, originZ + (ChunkSize + 1) * step);
+        int maxX = Math.Min(Width - 1, originX + (DataCellSize + 1) * step);
+        int maxY = Math.Min(Height, originY + (DataCellSize + 1) * step);
+        int maxZ = Math.Min(Depth - 1, originZ + (DataCellSize + 1) * step);
 
-        int minChunkX = minX / ChunkSize;
-        int minChunkY = minY / ChunkSize;
-        int minChunkZ = minZ / ChunkSize;
-        int maxChunkX = maxX / ChunkSize;
-        int maxChunkY = maxY / ChunkSize;
-        int maxChunkZ = maxZ / ChunkSize;
+        int minChunkX = minX / DataCellSize;
+        int minChunkY = minY / DataCellSize;
+        int minChunkZ = minZ / DataCellSize;
+        int maxChunkX = maxX / DataCellSize;
+        int maxChunkY = maxY / DataCellSize;
+        int maxChunkZ = maxZ / DataCellSize;
 
         Dictionary<ChunkCoordinate, ChunkSnapshot> snapshots = new();
         for (int z = minChunkZ; z <= maxChunkZ; z++)
@@ -412,12 +716,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int maxY = Math.Min(Height - 1, originY + cellsPerAxis);
         int maxZ = Math.Min(Depth - 1, originZ + cellsPerAxis);
 
-        int minChunkX = minX / ChunkSize;
-        int minChunkY = minY / ChunkSize;
-        int minChunkZ = minZ / ChunkSize;
-        int maxChunkX = maxX / ChunkSize;
-        int maxChunkY = maxY / ChunkSize;
-        int maxChunkZ = maxZ / ChunkSize;
+        int minChunkX = minX / DataCellSize;
+        int minChunkY = minY / DataCellSize;
+        int minChunkZ = minZ / DataCellSize;
+        int maxChunkX = maxX / DataCellSize;
+        int maxChunkY = maxY / DataCellSize;
+        int maxChunkZ = maxZ / DataCellSize;
 
         Dictionary<ChunkCoordinate, ChunkSnapshot> snapshots = new();
         for (int z = minChunkZ; z <= maxChunkZ; z++)
@@ -448,7 +752,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
-            return DecodeContent(Volatile.Read(ref chunk.Content[index]));
+            return DecodeContent(chunk.GetContent(index));
 
         return DecodeContent(EncodeContent(_baseDensity(x, y, z)));
     }
@@ -491,8 +795,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
         {
-            byte material = Volatile.Read(ref chunk.Material[index]);
-            return chunk.Content[index] > ContentIsoLevel &&
+            byte material = chunk.GetMaterial(index);
+            return chunk.GetContent(index) > ContentIsoLevel &&
                 material != byte.MaxValue
                     ? material
                     : (ushort)0;
@@ -515,8 +819,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
         {
-            byte material = Volatile.Read(ref chunk.Material[index]);
-            return chunk.Content[index] > ContentIsoLevel &&
+            byte material = chunk.GetMaterial(index);
+            return chunk.GetContent(index) > ContentIsoLevel &&
                 material != byte.MaxValue
                     ? material
                     : (byte)0;
@@ -871,9 +1175,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         List<ChunkCoordinate> keys = new();
         _octreeIndex.CollectLeaves(
             0, 0, 0,
-            (Width - 1) / ChunkSize,
-            (Height - 1) / ChunkSize,
-            (Depth - 1) / ChunkSize,
+            (Width - 1) / DataCellSize,
+            (Height - 1) / DataCellSize,
+            (Depth - 1) / DataCellSize,
             keys);
         keys.Sort(static (a, b) =>
         {
@@ -893,8 +1197,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             writer.Write(key.Y);
             writer.Write(key.Z);
             writer.Write(chunk.Revision);
-            writer.Write(chunk.Content);
-            writer.Write(chunk.Material);
+            chunk.Write(writer);
         }
 
         writer.Flush();
@@ -909,6 +1212,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             throw new ArgumentException("The source stream is not readable.", nameof(source));
 
         Dictionary<ChunkCoordinate, Chunk> loaded = new();
+        HashSet<ChunkCoordinate> serializedKeys = new();
         HashSet<(int X, int Z)> editedColumns = new();
         long maximumRevision = 0;
 
@@ -930,73 +1234,100 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             if (reader.ReadUInt64() != expectedWorldSignature)
                 throw new InvalidDataException("The voxel save belongs to a different base world.");
 
+            bool currentFormat = formatVersion == SaveFormatVersion;
+            int serializedCellSize = currentFormat ? DataCellSize : LegacyChunkSize;
             int chunkCount = reader.ReadInt32();
-            long capacity = ((Width + ChunkSize - 1L) / ChunkSize) *
-                ((Height + ChunkSize - 1L) / ChunkSize) *
-                ((Depth + ChunkSize - 1L) / ChunkSize);
+            long capacity = ((Width + serializedCellSize - 1L) / serializedCellSize) *
+                ((Height + serializedCellSize - 1L) / serializedCellSize) *
+                ((Depth + serializedCellSize - 1L) / serializedCellSize);
             if (chunkCount < 0 || chunkCount > capacity)
-                throw new InvalidDataException("The voxel save contains an invalid chunk count.");
+                throw new InvalidDataException("The voxel save contains an invalid data-cell count.");
 
-            for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+            for (int pageIndex = 0; pageIndex < chunkCount; pageIndex++)
             {
-                int chunkX = reader.ReadInt32();
-                int chunkY = reader.ReadInt32();
-                int chunkZ = reader.ReadInt32();
+                int pageX = reader.ReadInt32();
+                int pageY = reader.ReadInt32();
+                int pageZ = reader.ReadInt32();
                 long revision = reader.ReadInt64();
 
-                if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
-                    chunkX >= (Width + ChunkSize - 1) / ChunkSize ||
-                    chunkY >= (Height + ChunkSize - 1) / ChunkSize ||
-                    chunkZ >= (Depth + ChunkSize - 1) / ChunkSize ||
+                if (pageX < 0 || pageY < 0 || pageZ < 0 ||
+                    pageX >= (Width + serializedCellSize - 1) / serializedCellSize ||
+                    pageY >= (Height + serializedCellSize - 1) / serializedCellSize ||
+                    pageZ >= (Depth + serializedCellSize - 1) / serializedCellSize ||
                     revision < 0)
-                    throw new InvalidDataException("The voxel save contains an invalid chunk coordinate.");
-
-                ChunkCoordinate key = new(chunkX, chunkY, chunkZ);
-                if (loaded.ContainsKey(key))
-                    throw new InvalidDataException("The voxel save contains a duplicate chunk.");
-
-                Chunk chunk;
-                if (formatVersion == 5)
                 {
-                    chunk = new Chunk { Revision = revision };
-                    byte[] content = reader.ReadBytes(SampleCount);
-                    byte[] material = reader.ReadBytes(CellCount);
-                    if (content.Length != SampleCount || material.Length != CellCount)
+                    throw new InvalidDataException("The voxel save contains an invalid data-cell coordinate.");
+                }
+
+                ChunkCoordinate serializedKey = new(pageX, pageY, pageZ);
+                if (!serializedKeys.Add(serializedKey))
+                    throw new InvalidDataException("The voxel save contains a duplicate data cell.");
+
+                if (currentFormat)
+                {
+                    Chunk page = new() { Revision = revision };
+                    page.Read(reader);
+                    if (PageMatchesBase(page, serializedKey))
+                        continue;
+
+                    loaded.Add(serializedKey, page);
+                    editedColumns.Add((pageX, pageZ));
+                    maximumRevision = Math.Max(maximumRevision, revision);
+                    continue;
+                }
+
+                // V2-V4 saves used dense 16^3 pages. Expand them into eight
+                // 8^3 VRage-style data cells without changing voxel coordinates.
+                byte[] legacyContent = new byte[LegacySampleCount];
+                byte[] legacyMaterial = new byte[LegacySampleCount];
+
+                if (formatVersion == 4)
+                {
+                    byte[] content = reader.ReadBytes(LegacySampleCount);
+                    byte[] material = reader.ReadBytes(LegacySampleCount);
+                    if (content.Length != LegacySampleCount ||
+                        material.Length != LegacySampleCount)
+                    {
                         throw new EndOfStreamException();
-                    content.CopyTo(chunk.Content, 0);
-                    material.CopyTo(chunk.Material, 0);
+                    }
+
+                    content.CopyTo(legacyContent, 0);
+                    material.CopyTo(legacyMaterial, 0);
                 }
                 else
                 {
-                    chunk = CreateChunkData(key, revision);
+                    FillLegacyBasePage(
+                        pageX, pageY, pageZ,
+                        legacyContent,
+                        legacyMaterial);
 
                     if (formatVersion == 2)
                     {
-                        short[] oldDensity = new short[SampleCount];
-                        for (int i = 0; i < SampleCount; i++)
+                        short[] oldDensity = new short[LegacySampleCount];
+                        for (int i = 0; i < LegacySampleCount; i++)
                             oldDensity[i] = reader.ReadInt16();
 
-                        byte[] oldDensityMask = reader.ReadBytes(SampleCount);
-                        if (oldDensityMask.Length != SampleCount)
+                        byte[] oldDensityMask = reader.ReadBytes(LegacySampleCount);
+                        if (oldDensityMask.Length != LegacySampleCount)
                             throw new EndOfStreamException();
 
-                        for (int i = 0; i < SampleCount; i++)
+                        for (int i = 0; i < LegacySampleCount; i++)
                         {
                             if (oldDensityMask[i] > 1)
                                 throw new InvalidDataException("The voxel save contains an invalid density mask.");
                             if (oldDensityMask[i] != 0)
-                                chunk.Content[i] = EncodeContent(oldDensity[i] / DensityScale);
+                                legacyContent[i] = EncodeContent(oldDensity[i] / DensityScale);
                         }
 
-                        ushort[] oldMaterials = new ushort[CellCount];
-                        for (int i = 0; i < CellCount; i++)
+                        ushort[] oldMaterials = new ushort[LegacySampleCount];
+                        for (int i = 0; i < LegacySampleCount; i++)
                             oldMaterials[i] = reader.ReadUInt16();
 
-                        byte[] oldMaterialMask = reader.ReadBytes(CellCount);
-                        if (oldMaterialMask.Length != CellCount)
+                        byte[] oldMaterialMask = reader.ReadBytes(LegacySampleCount);
+                        if (oldMaterialMask.Length != LegacySampleCount)
                             throw new EndOfStreamException();
 
-                        for (int i = 0; i < CellCount; i++)
+                        for (int i = 0; i < LegacySampleCount; i++)
                         {
                             if (oldMaterialMask[i] > 1)
                                 throw new InvalidDataException("The voxel save contains an invalid material mask.");
@@ -1005,77 +1336,48 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                             if (oldMaterials[i] > byte.MaxValue)
                                 throw new InvalidDataException("The voxel save contains an unsupported material ID.");
 
-                            chunk.Material[i] =
-                                chunk.Content[i] <= ContentIsoLevel || oldMaterials[i] == 0
-                                    ? byte.MaxValue
-                                    : (byte)oldMaterials[i];
+                            legacyMaterial[i] = oldMaterials[i] == 0
+                                ? byte.MaxValue
+                                : (byte)oldMaterials[i];
                         }
                     }
-                    else if (formatVersion == 3)
+                    else
                     {
-                        byte[] oldContent = reader.ReadBytes(SampleCount);
-                        if (oldContent.Length != SampleCount)
+                        byte[] oldContent = reader.ReadBytes(LegacySampleCount);
+                        if (oldContent.Length != LegacySampleCount)
                             throw new EndOfStreamException();
 
                         long[] oldContentMask = new long[LegacyContentMaskWordCount];
                         for (int i = 0; i < LegacyContentMaskWordCount; i++)
                             oldContentMask[i] = reader.ReadInt64();
 
-                        for (int i = 0; i < SampleCount; i++)
+                        for (int i = 0; i < LegacySampleCount; i++)
                         {
                             if ((oldContentMask[i >> 6] & (1L << (i & 63))) != 0)
-                            {
-                                float legacyDensity = (oldContent[i] - ContentIsoLevel) / DensityScale;
-                                chunk.Content[i] = EncodeContent(legacyDensity);
-                            }
+                                legacyContent[i] = oldContent[i];
                         }
 
                         if (reader.ReadBoolean())
                         {
-                            byte[] oldMaterial = reader.ReadBytes(CellCount);
-                            if (oldMaterial.Length != CellCount)
+                            byte[] oldMaterial = reader.ReadBytes(LegacySampleCount);
+                            if (oldMaterial.Length != LegacySampleCount)
                                 throw new EndOfStreamException();
 
-                            for (int i = 0; i < CellCount; i++)
+                            for (int i = 0; i < LegacySampleCount; i++)
                             {
-                                if (oldMaterial[i] == byte.MaxValue)
-                                    continue;
-
-                                chunk.Material[i] =
-                                    chunk.Content[i] <= ContentIsoLevel || oldMaterial[i] == 0
+                                if (oldMaterial[i] != byte.MaxValue)
+                                    legacyMaterial[i] = oldMaterial[i] == 0
                                         ? byte.MaxValue
                                         : oldMaterial[i];
                             }
                         }
                     }
-                    else // v4 contained full pages encoded with the earlier +/-4 density scale.
-                    {
-                        byte[] oldContent = reader.ReadBytes(SampleCount);
-                        byte[] oldMaterial = reader.ReadBytes(CellCount);
-                        if (oldContent.Length != SampleCount || oldMaterial.Length != CellCount)
-                            throw new EndOfStreamException();
-
-                        for (int i = 0; i < SampleCount; i++)
-                        {
-                            float legacyDensity = (oldContent[i] - ContentIsoLevel) / DensityScale;
-                            chunk.Content[i] = EncodeContent(legacyDensity);
-
-                            byte material = oldMaterial[i];
-                            chunk.Material[i] =
-                                chunk.Content[i] <= ContentIsoLevel ||
-                                material == 0 ||
-                                material == byte.MaxValue
-                                    ? byte.MaxValue
-                                    : material;
-                        }
-                    }
                 }
 
-                if (formatVersion != SaveFormatVersion && PageMatchesBase(chunk, key))
-                    continue;
-
-                loaded.Add(key, chunk);
-                editedColumns.Add((chunkX, chunkZ));
+                ExpandLegacyPage(
+                    pageX, pageY, pageZ, revision,
+                    legacyContent, legacyMaterial,
+                    loaded, editedColumns);
                 maximumRevision = Math.Max(maximumRevision, revision);
             }
         }
@@ -1095,6 +1397,90 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         Version = Math.Max(Version, maximumRevision) + 1;
         Changed?.Invoke(new VoxelBounds(0, 0, 0, Width, Height, Depth));
+    }
+
+    private void FillLegacyBasePage(
+        int pageX,
+        int pageY,
+        int pageZ,
+        byte[] content,
+        byte[] material)
+    {
+        int originX = pageX * LegacyChunkSize;
+        int originY = pageY * LegacyChunkSize;
+        int originZ = pageZ * LegacyChunkSize;
+
+        for (int z = 0; z < LegacyChunkSize; z++)
+        for (int y = 0; y < LegacyChunkSize; y++)
+        for (int x = 0; x < LegacyChunkSize; x++)
+        {
+            int worldX = originX + x;
+            int worldY = originY + y;
+            int worldZ = originZ + z;
+            int index = x + y * LegacyChunkSize + z * LegacyCellPlane;
+
+            float density = worldX < Width && worldY <= Height && worldZ < Depth
+                ? _baseDensity(worldX, worldY, worldZ)
+                : -1f;
+
+            content[index] = EncodeContent(density);
+            material[index] =
+                density > 0f && worldX < Width && worldY < Height && worldZ < Depth
+                    ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
+                    : byte.MaxValue;
+        }
+    }
+
+    private void ExpandLegacyPage(
+        int pageX,
+        int pageY,
+        int pageZ,
+        long revision,
+        byte[] legacyContent,
+        byte[] legacyMaterial,
+        Dictionary<ChunkCoordinate, Chunk> loaded,
+        HashSet<(int X, int Z)> editedColumns)
+    {
+        for (int partZ = 0; partZ < LegacyChunkSize / DataCellSize; partZ++)
+        for (int partY = 0; partY < LegacyChunkSize / DataCellSize; partY++)
+        for (int partX = 0; partX < LegacyChunkSize / DataCellSize; partX++)
+        {
+            int newX = pageX * (LegacyChunkSize / DataCellSize) + partX;
+            int newY = pageY * (LegacyChunkSize / DataCellSize) + partY;
+            int newZ = pageZ * (LegacyChunkSize / DataCellSize) + partZ;
+            if (newX * DataCellSize >= Width ||
+                newY * DataCellSize >= Height ||
+                newZ * DataCellSize >= Depth)
+                continue;
+
+            Chunk page = new() { Revision = revision };
+            byte[] content = new byte[SampleCount];
+            byte[] material = new byte[CellCount];
+
+            for (int z = 0; z < DataCellSize; z++)
+            for (int y = 0; y < DataCellSize; y++)
+            for (int x = 0; x < DataCellSize; x++)
+            {
+                int oldX = partX * DataCellSize + x;
+                int oldY = partY * DataCellSize + y;
+                int oldZ = partZ * DataCellSize + z;
+                int sourceIndex = oldX + oldY * LegacyChunkSize + oldZ * LegacyCellPlane;
+                int targetIndex = x + y * DataCellSize + z * CellPlane;
+                content[targetIndex] = legacyContent[sourceIndex];
+                material[targetIndex] = legacyMaterial[sourceIndex];
+            }
+
+            page.SetContentData(content);
+            page.SetMaterialData(material);
+            page.Compress();
+
+            ChunkCoordinate key = new(newX, newY, newZ);
+            if (PageMatchesBase(page, key))
+                continue;
+
+            loaded.Add(key, page);
+            editedColumns.Add((newX, newZ));
+        }
     }
 
     public VoxelMaterialDefinition GetMaterialDefinition(int x, int y, int z) =>
@@ -1128,9 +1514,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Math.Max(0, minChunkX),
             Math.Max(0, minChunkY),
             Math.Max(0, minChunkZ),
-            Math.Min((Width - 1) / ChunkSize, maxChunkX),
-            Math.Min((Height - 1) / ChunkSize, maxChunkY),
-            Math.Min((Depth - 1) / ChunkSize, maxChunkZ),
+            Math.Min((Width - 1) / DataCellSize, maxChunkX),
+            Math.Min((Height - 1) / DataCellSize, maxChunkY),
+            Math.Min((Depth - 1) / DataCellSize, maxChunkZ),
             destination);
 
     public bool HasEditsInArea(int minX, int maxX, int minZ, int maxZ)
@@ -1138,10 +1524,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (maxX < 0 || maxZ < 0 || minX >= Width || minZ >= Depth)
             return false;
 
-        int firstChunkX = Math.Max(0, minX) / ChunkSize;
-        int lastChunkX = Math.Min(Width - 1, maxX) / ChunkSize;
-        int firstChunkZ = Math.Max(0, minZ) / ChunkSize;
-        int lastChunkZ = Math.Min(Depth - 1, maxZ) / ChunkSize;
+        int firstChunkX = Math.Max(0, minX) / DataCellSize;
+        int lastChunkX = Math.Min(Width - 1, maxX) / DataCellSize;
+        int firstChunkZ = Math.Max(0, minZ) / DataCellSize;
+        int lastChunkZ = Math.Min(Depth - 1, maxZ) / DataCellSize;
         for (int chunkZ = firstChunkZ; chunkZ <= lastChunkZ; chunkZ++)
         for (int chunkX = firstChunkX; chunkX <= lastChunkX; chunkX++)
         {
@@ -1159,8 +1545,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             return false;
 
         return _editedChunkColumns.Contains((
-            sampleX / ChunkSize,
-            sampleZ / ChunkSize));
+            sampleX / DataCellSize,
+            sampleZ / DataCellSize));
     }
 
     /// <summary>
@@ -1275,11 +1661,11 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (!HasEditsInArea(minX, maxX - 1, minZ, maxZ - 1))
             return;
 
-        int firstChunkX = minX / ChunkSize;
-        int lastChunkX = (maxX - 1) / ChunkSize;
-        int firstChunkZ = minZ / ChunkSize;
-        int lastChunkZ = (maxZ - 1) / ChunkSize;
-        int chunkCountY = (Height + ChunkSize - 1) / ChunkSize;
+        int firstChunkX = minX / DataCellSize;
+        int lastChunkX = (maxX - 1) / DataCellSize;
+        int firstChunkZ = minZ / DataCellSize;
+        int lastChunkZ = (maxZ - 1) / DataCellSize;
+        int chunkCountY = (Height + DataCellSize - 1) / DataCellSize;
 
         List<ChunkCoordinate>? removeChunks = null;
         long revision = Version + 1;
@@ -1294,36 +1680,36 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 continue;
 
             CaptureChunkBeforeWrite(key);
-            int localMinX = Math.Max(0, minX - chunkX * ChunkSize);
-            int localMaxX = Math.Min(ChunkSize, maxX - chunkX * ChunkSize);
-            int localMinZ = Math.Max(0, minZ - chunkZ * ChunkSize);
-            int localMaxZ = Math.Min(ChunkSize, maxZ - chunkZ * ChunkSize);
-            int chunkYStart = chunkY * ChunkSize;
-            int localMaxY = Math.Min(ChunkSize, Height - chunkYStart);
+            int localMinX = Math.Max(0, minX - chunkX * DataCellSize);
+            int localMaxX = Math.Min(DataCellSize, maxX - chunkX * DataCellSize);
+            int localMinZ = Math.Max(0, minZ - chunkZ * DataCellSize);
+            int localMaxZ = Math.Min(DataCellSize, maxZ - chunkZ * DataCellSize);
+            int chunkYStart = chunkY * DataCellSize;
+            int localMaxY = Math.Min(DataCellSize, Height - chunkYStart);
             bool changed = false;
 
             for (int localZ = localMinZ; localZ < localMaxZ; localZ++)
             for (int localX = localMinX; localX < localMaxX; localX++)
             {
-                int worldX = chunkX * ChunkSize + localX;
-                int worldZ = chunkZ * ChunkSize + localZ;
+                int worldX = chunkX * DataCellSize + localX;
+                int worldZ = chunkZ * DataCellSize + localZ;
 
                 for (int localY = 0; localY < localMaxY; localY++)
                 {
                     int worldY = chunkYStart + localY;
-                    int index = localX + localY * ChunkSize + localZ * CellPlane;
+                    int index = localX + localY * DataCellSize + localZ * CellPlane;
 
                     byte baseContent = EncodeContent(_baseDensity(worldX, worldY, worldZ));
                     byte baseMaterial = baseContent > ContentIsoLevel
                         ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                         : byte.MaxValue;
 
-                    if (chunk.Content[index] == baseContent &&
-                        chunk.Material[index] == baseMaterial)
+                    if (chunk.GetContent(index) == baseContent &&
+                        chunk.GetMaterial(index) == baseMaterial)
                         continue;
 
-                    Volatile.Write(ref chunk.Content[index], baseContent);
-                    Volatile.Write(ref chunk.Material[index], baseMaterial);
+                    chunk.SetContent(index, baseContent);
+                    chunk.SetMaterial(index, baseMaterial);
                     changed = true;
                 }
             }
@@ -1334,6 +1720,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 chunk.Revision = revision;
             }
 
+            chunk.Compress();
             if (PageMatchesBase(chunk, key))
                 (removeChunks ??= new List<ChunkCoordinate>()).Add(key);
 
@@ -1384,9 +1771,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         List<ChunkCoordinate> keys = new();
         _octreeIndex.CollectLeaves(
             0, 0, 0,
-            (Width - 1) / ChunkSize,
-            (Height - 1) / ChunkSize,
-            (Depth - 1) / ChunkSize,
+            (Width - 1) / DataCellSize,
+            (Height - 1) / DataCellSize,
+            (Depth - 1) / DataCellSize,
             keys);
         foreach (ChunkCoordinate key in keys)
             CaptureChunkBeforeWrite(key);
@@ -2372,6 +2759,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (touched.Count == 0)
             return;
 
+        foreach (ChunkCoordinate key in touched)
+        {
+            if (!_octreeIndex.TryGetLeaf(key, out Chunk? page) || page == null)
+                continue;
+            page.Compress();
+        }
+
         Version = revision;
         VoxelBounds bounds = new(minX, minY, minZ, maxX, maxY, maxZ);
         IncludeHistoryBounds(bounds);
@@ -2548,7 +2942,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        Volatile.Write(ref chunk.Content[index], EncodeContent(density));
+        chunk.SetContent(index, EncodeContent(density));
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
@@ -2568,12 +2962,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         byte material = materialId == 0 ? byte.MaxValue : (byte)materialId;
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_octreeIndex.TryGetLeaf(key, out Chunk? existing) &&
-            existing.Material[index] == material)
+            existing.GetMaterial(index) == material)
             return;
 
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        Volatile.Write(ref chunk.Material[index], material);
+        chunk.SetMaterial(index, material);
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
@@ -2714,9 +3108,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         List<ChunkCoordinate> leaves = new();
         _octreeIndex.CollectLeaves(
             0, 0, 0,
-            (Width - 1) / ChunkSize,
-            (Height - 1) / ChunkSize,
-            (Depth - 1) / ChunkSize,
+            (Width - 1) / DataCellSize,
+            (Height - 1) / DataCellSize,
+            (Depth - 1) / DataCellSize,
             leaves);
         foreach (ChunkCoordinate key in leaves)
             _editedChunkColumns.Add((key.X, key.Z));
@@ -2736,25 +3130,25 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private Chunk CreateChunkData(ChunkCoordinate key, long revision)
     {
         Chunk chunk = new() { Revision = revision };
-        int originX = key.X * ChunkSize;
-        int originY = key.Y * ChunkSize;
-        int originZ = key.Z * ChunkSize;
+        int originX = key.X * DataCellSize;
+        int originY = key.Y * DataCellSize;
+        int originZ = key.Z * DataCellSize;
 
-        for (int z = 0; z < ChunkSize; z++)
-        for (int y = 0; y < ChunkSize; y++)
-        for (int x = 0; x < ChunkSize; x++)
+        for (int z = 0; z < DataCellSize; z++)
+        for (int y = 0; y < DataCellSize; y++)
+        for (int x = 0; x < DataCellSize; x++)
         {
             int worldX = originX + x;
             int worldY = originY + y;
             int worldZ = originZ + z;
-            int index = x + y * ChunkSize + z * CellPlane;
+            int index = x + y * DataCellSize + z * CellPlane;
 
             byte content = worldX < Width && worldY < Height && worldZ < Depth
                 ? EncodeContent(_baseDensity(worldX, worldY, worldZ))
                 : (byte)0;
 
-            chunk.Content[index] = content;
-            chunk.Material[index] =
+            chunk.GetContent(index) = content;
+            chunk.GetMaterial(index) =
                 content > ContentIsoLevel
                     ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                     : byte.MaxValue;
@@ -2765,31 +3159,31 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private bool PageMatchesBase(Chunk chunk, ChunkCoordinate key)
     {
-        int originX = key.X * ChunkSize;
-        int originY = key.Y * ChunkSize;
-        int originZ = key.Z * ChunkSize;
+        int originX = key.X * DataCellSize;
+        int originY = key.Y * DataCellSize;
+        int originZ = key.Z * DataCellSize;
 
-        for (int z = 0; z < ChunkSize; z++)
-        for (int y = 0; y < ChunkSize; y++)
-        for (int x = 0; x < ChunkSize; x++)
+        for (int z = 0; z < DataCellSize; z++)
+        for (int y = 0; y < DataCellSize; y++)
+        for (int x = 0; x < DataCellSize; x++)
         {
             int worldX = originX + x;
             int worldY = originY + y;
             int worldZ = originZ + z;
-            int index = x + y * ChunkSize + z * CellPlane;
+            int index = x + y * DataCellSize + z * CellPlane;
 
             byte content = worldX < Width && worldY < Height && worldZ < Depth
                 ? EncodeContent(_baseDensity(worldX, worldY, worldZ))
                 : (byte)0;
 
-            if (chunk.Content[index] != content)
+            if (chunk.GetContent(index) != content)
                 return false;
 
             byte material =
                 content > ContentIsoLevel
                     ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
                     : byte.MaxValue;
-            if (chunk.Material[index] != material)
+            if (chunk.GetMaterial(index) != material)
                 return false;
         }
 
@@ -2798,12 +3192,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private ChunkCoordinate GetSampleChunk(int x, int y, int z, out int index)
     {
-        int cx = x / ChunkSize;
-        int cy = y / ChunkSize;
-        int cz = z / ChunkSize;
-        int lx = x % ChunkSize;
-        int ly = y % ChunkSize;
-        int lz = z % ChunkSize;
+        int cx = x / DataCellSize;
+        int cy = y / DataCellSize;
+        int cz = z / DataCellSize;
+        int lx = x % DataCellSize;
+        int ly = y % DataCellSize;
+        int lz = z % DataCellSize;
 
         // A lattice sample on a chunk boundary belongs to the chunk on its
         // positive side. Each sample therefore has exactly one owner.
@@ -2814,13 +3208,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private ChunkCoordinate GetCellChunk(int x, int y, int z, out int index)
     {
-        int cx = x / ChunkSize;
-        int cy = y / ChunkSize;
-        int cz = z / ChunkSize;
-        int lx = x % ChunkSize;
-        int ly = y % ChunkSize;
-        int lz = z % ChunkSize;
-        index = lx + ly * ChunkSize + lz * CellPlane;
+        int cx = x / DataCellSize;
+        int cy = y / DataCellSize;
+        int cz = z / DataCellSize;
+        int lx = x % DataCellSize;
+        int ly = y % DataCellSize;
+        int lz = z % DataCellSize;
+        index = lx + ly * DataCellSize + lz * CellPlane;
         return new ChunkCoordinate(cx, cy, cz);
     }
 
