@@ -65,14 +65,14 @@ public static class FlatVoxelPageDirectorySelfTest
         object middle = new();
         object high = new();
 
-        pages.Set(15, 15, 15, low);
-        pages.Set(16, 16, 16, middle);
+        pages.Set(7, 7, 7, low);
+        pages.Set(8, 8, 8, middle);
         pages.Set(32, 17, 32, high);
 
         return pages.AllocatedBlockCount == 3 &&
-            pages.TryGet(15, 15, 15, out object? readLow) &&
+            pages.TryGet(7, 7, 7, out object? readLow) &&
             ReferenceEquals(readLow, low) &&
-            pages.TryGet(16, 16, 16, out object? readMiddle) &&
+            pages.TryGet(8, 8, 8, out object? readMiddle) &&
             ReferenceEquals(readMiddle, middle) &&
             pages.TryGet(32, 17, 32, out object? readHigh) &&
             ReferenceEquals(readHigh, high) &&
@@ -83,7 +83,7 @@ public static class FlatVoxelPageDirectorySelfTest
     {
         // 23040 x 500 x 23040 voxels, with 8^3 data pages.
         FlatVoxelPageDirectory<object> pages = new(2880, 63, 2880);
-        long rootBytes = 180L * 4 * 180 * IntPtr.Size;
+        long rootBytes = 360L * 8 * 360 * IntPtr.Size;
 
         if (pages.Length != 522_547_200 ||
             pages.AllocatedBlockCount != 0 ||
@@ -99,7 +99,7 @@ public static class FlatVoxelPageDirectorySelfTest
         pages.Set(0, 0, 0, pageA);
         pages.Set(2879, 62, 2879, pageB);
 
-        long expectedBytes = rootBytes + 2L * 4096 * IntPtr.Size;
+        long expectedBytes = rootBytes + 2L * 512 * IntPtr.Size;
         if (pages.AllocatedBlockCount != 2 ||
             pages.EstimatedDirectoryBytes != expectedBytes ||
             !pages.TryGet(0, 0, 0, out object? readA) ||
