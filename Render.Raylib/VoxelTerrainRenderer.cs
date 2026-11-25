@@ -211,6 +211,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.Dirty = true;
             entry.Revision++;
             entry.FailedRevision = int.MinValue;
+            entry.BlockedCacheBytes = -1;
         }
     }
 
@@ -281,10 +282,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
 
             entry.LastSeenFrame = _frame;
-            bool stale = !entry.Built || entry.Dirty ||
+            bool inputsChanged =
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion ||
                 entry.CutLayer != targetCutLayer;
+            if (inputsChanged)
+                entry.BlockedCacheBytes = -1;
+
+            bool stale = !entry.Built || entry.Dirty || inputsChanged;
 
             if (!stale)
             {
@@ -769,6 +774,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.Dirty = true;
             entry.Revision++;
             entry.FailedRevision = int.MinValue;
+            entry.BlockedCacheBytes = -1;
         }
     }
 
