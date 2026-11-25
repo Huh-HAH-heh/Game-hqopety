@@ -263,13 +263,56 @@ internal static class VoxelChunkMesher
         private int _vertexCount;
         private int _indexCount;
 
+        private const int InitialVertices = 512;
+        private const int InitialIndices = InitialVertices / 4 * 6;
+
         public MeshBatch(List<VoxelMeshData> output)
         {
             _output = output;
-            _vertices = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
-            _normals = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
-            _colors = ArrayPool<byte>.Shared.Rent(MaximumVerticesPerMesh * 4);
-            _indices = ArrayPool<ushort>.Shared.Rent(MaximumIndicesPerMesh);
+            RentBuffers(InitialVertices, InitialIndices);
+        }
+
+        private void RentBuffers(int vertexCapacity, int indexCapacity)
+        {
+            _vertices = ArrayPool<Vector3>.Shared.Rent(vertexCapacity);
+            _normals = ArrayPool<Vector3>.Shared.Rent(vertexCapacity);
+            _colors = ArrayPool<byte>.Shared.Rent(vertexCapacity * 4);
+            _indices = ArrayPool<ushort>.Shared.Rent(indexCapacity);
+        }
+
+        private void EnsureCapacity(int vertexCount, int indexCount)
+        {
+            if (_vertices.Length < vertexCount)
+            {
+                int capacity = Math.Min(
+                    MaximumVerticesPerMesh,
+                    Math.Max(vertexCount, _vertices.Length * 2));
+                Vector3[] nextVertices = ArrayPool<Vector3>.Shared.Rent(capacity);
+                Vector3[] nextNormals = ArrayPool<Vector3>.Shared.Rent(capacity);
+                byte[] nextColors = ArrayPool<byte>.Shared.Rent(capacity * 4);
+
+                Array.Copy(_vertices, nextVertices, _vertexCount);
+                Array.Copy(_normals, nextNormals, _vertexCount);
+                Array.Copy(_colors, nextColors, _vertexCount * 4);
+
+                ArrayPool<Vector3>.Shared.Return(_vertices);
+                ArrayPool<Vector3>.Shared.Return(_normals);
+                ArrayPool<byte>.Shared.Return(_colors);
+                _vertices = nextVertices;
+                _normals = nextNormals;
+                _colors = nextColors;
+            }
+
+            if (_indices.Length < indexCount)
+            {
+                int capacity = Math.Min(
+                    MaximumIndicesPerMesh,
+                    Math.Max(indexCount, _indices.Length * 2));
+                ushort[] nextIndices = ArrayPool<ushort>.Shared.Rent(capacity);
+                Array.Copy(_indices, nextIndices, _indexCount);
+                ArrayPool<ushort>.Shared.Return(_indices);
+                _indices = nextIndices;
+            }
         }
 
         public void AddQuad(
@@ -287,6 +330,7 @@ internal static class VoxelChunkMesher
                 Flush();
             }
 
+            EnsureCapacity(_vertexCount + 4, _indexCount + 6);
             ushort start = checked((ushort)_vertexCount);
             AddVertex(p0, normal, color);
             AddVertex(p1, normal, color);
@@ -326,10 +370,7 @@ internal static class VoxelChunkMesher
                 _vertexCount,
                 _indexCount));
 
-            _vertices = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
-            _normals = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
-            _colors = ArrayPool<byte>.Shared.Rent(MaximumVerticesPerMesh * 4);
-            _indices = ArrayPool<ushort>.Shared.Rent(MaximumIndicesPerMesh);
+            RentBuffers(InitialVertices, InitialIndices);
             _vertexCount = 0;
             _indexCount = 0;
         }
