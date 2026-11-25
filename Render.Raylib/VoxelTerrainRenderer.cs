@@ -16,6 +16,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 {
     private const int ChunkCells = SparseVoxelField.ChunkSize;
     private const int MaximumCachedChunks = 4096;
+    private const long MaximumGpuCacheBytes = 256L * 1024 * 1024;
     private const int MaximumBuildsPerFrame = 8;
     private const double MeshBuildBudgetMilliseconds = 4.0;
     private const int CutSettleFrames = 8;
@@ -80,6 +81,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public int PaletteVersion = int.MinValue;
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
+        public long GpuBytes;
         public int Revision;
         public int FailedRevision = int.MinValue;
         public bool Dirty = true;
@@ -119,7 +121,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalGpuUnloads;
     private long _totalIdenticalSurfaceSkips;
     private long _totalEmptyChunks;
+    private long _gpuCacheBytes;
 
+    public long GpuCacheBytes => _gpuCacheBytes;
     public int ActiveRenderCellSize => 1;
     public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters;
     public float RenderChunkSizeMeters => ChunkCells * SparseVoxelField.VoxelSizeMeters;
@@ -371,7 +375,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         _totalBuildRequests++;
         _totalBuildStarted++;
-        Stopwatch buildTimer = Stopwatch.StartNew();
         VoxelMeshData[] data = Array.Empty<VoxelMeshData>();
         List<Mesh> nextMeshes = new(2);
         bool uploaded = false;
@@ -400,11 +403,24 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             int vertices = 0;
             int triangles = 0;
-            Stopwatch uploadTimer = Stopwatch.StartNew();
+            long requiredGpuBytes = 0;
             foreach (VoxelMeshData meshData in data)
             {
                 vertices += meshData.VertexCount;
                 triangles += meshData.TriangleCount;
+                requiredGpuBytes += (long)meshData.VertexCount * 28L +
+                    (long)meshData.IndexCount * sizeof(ushort);
+            }
+
+            if (!EnsureGpuCacheSpace(key, entry.GpuBytes, requiredGpuBytes))
+            {
+                entry.FailedRevision = entry.Revision;
+                return;
+            }
+
+            Stopwatch uploadTimer = Stopwatch.StartNew();
+            foreach (VoxelMeshData meshData in data)
+            {
                 nextMeshes.Add(VoxelChunkMesher.UploadOne(meshData));
                 GpuUploadsLastFrame++;
                 _totalGpuUploads++;
@@ -417,6 +433,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             nextMeshes.Clear();
             entry.BaseVersion = field.BaseVersion;
             entry.PaletteVersion = _paletteVersion;
+            _gpuCacheBytes += requiredGpuBytes - entry.GpuBytes;
+            entry.GpuBytes = requiredGpuBytes;
             entry.CutLayer = cutLayer;
             entry.Dirty = false;
             entry.Built = true;
@@ -461,9 +479,23 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
-        buildTimer.Stop();
-        if (buildTimer.Elapsed.TotalMilliseconds > 0d)
-            WorkerBuildMillisecondsLastFrame += 0d;
+    }
+
+    private bool EnsureGpuCacheSpace(
+        ChunkKey protectedKey,
+        long replacedBytes,
+        long requiredBytes)
+    {
+        if (requiredBytes > MaximumGpuCacheBytes)
+            return false;
+
+        while (_gpuCacheBytes - replacedBytes + requiredBytes > MaximumGpuCacheBytes)
+        {
+            if (!EvictLeastRecentlySeen(protectedKey))
+                return false;
+        }
+
+        return true;
     }
 
     private bool TryGetOrCreateEntry(ChunkKey key, out ChunkEntry? entry)
@@ -471,7 +503,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_chunks.TryGetValue(key, out entry))
             return true;
 
-        if (_chunks.Count >= MaximumCachedChunks && !EvictLeastRecentlySeen())
+        if (_chunks.Count >= MaximumCachedChunks && !EvictLeastRecentlySeen(key))
         {
             entry = null;
             return false;
@@ -482,14 +514,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return true;
     }
 
-    private bool EvictLeastRecentlySeen()
+    private bool EvictLeastRecentlySeen(ChunkKey protectedKey)
     {
         ChunkKey oldestKey = default;
         ChunkEntry? oldest = null;
 
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (_visibleKeys.Contains(key) || entry.LastSeenFrame == _frame)
+            if (key.Equals(protectedKey) ||
+                _visibleKeys.Contains(key) ||
+                entry.LastSeenFrame == _frame)
                 continue;
 
             if (oldest == null || entry.LastSeenFrame < oldest.LastSeenFrame)
@@ -508,6 +542,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _totalGpuUnloads++;
         }
 
+        _gpuCacheBytes -= oldest.GpuBytes;
         _chunks.Remove(oldestKey);
         return true;
     }
@@ -813,6 +848,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
+        _gpuCacheBytes = 0;
         _chunks.Clear();
         _dynamicFragments.Dispose();
         UnloadMaterial(_material);
