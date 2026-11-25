@@ -278,7 +278,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach (Candidate candidate in _candidates)
         {
-            if (!TryGetOrCreateEntry(candidate.Key, out ChunkEntry? entry))
+            if (!TryGetOrCreateEntry(candidate.Key, out ChunkEntry? entry) ||
+                entry == null)
                 continue;
 
             entry.LastSeenFrame = _frame;
