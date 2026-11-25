@@ -157,6 +157,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         bool SurfaceWasEmpty,
         int CutLayer,
         double WorkerMilliseconds,
+        double CaptureMilliseconds,
         int VertexCount,
         int TriangleCount,
         ulong SurfaceHash,
@@ -934,7 +935,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     request.Key.Z,
                     request.CutLayer);
 
+                Stopwatch captureTimer = Stopwatch.StartNew();
                 input.CaptureAll(request.Source);
+                captureTimer.Stop();
 
                 bool hasPotentialSurface =
                     request.BuildSurface && input.HasPotentialSurface;
@@ -968,6 +971,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     request.BuildSurface && !hasSurfaceMesh,
                     request.CutLayer,
                     workerTimer.Elapsed.TotalMilliseconds,
+                    captureTimer.Elapsed.TotalMilliseconds,
                     vertices,
                     triangles,
                     surfaceHash,
@@ -1090,6 +1094,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
 
             VoxelMeshBuildResult build = completion.Result.Value;
+            CpuCaptureMillisecondsLastFrame += build.CaptureMilliseconds;
 
             if (entry.ReadyBuild.HasValue)
             {
