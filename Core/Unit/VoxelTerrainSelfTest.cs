@@ -592,4 +592,46 @@ internal static class VoxelTerrainSelfTest
         }
         return lowerFloorSelected;
     }
+    public static bool SparseOctreeTracksEditedVoxelPages()
+    {
+        SparseVoxelField field = new(
+            width: 512,
+            height: 128,
+            depth: 512,
+            baseDensity: static (_, _, _) => -1f,
+            baseMaterial: static (_, _, _) => (ushort)0);
+
+        field.FillBox(
+            new Vector3(1.0f, 1.0f, 1.0f),
+            new Vector3(1.5f, 1.5f, 1.5f),
+            Rock);
+        field.FillBox(
+            new Vector3(2.6f, 1.0f, 1.0f),
+            new Vector3(3.1f, 1.5f, 1.5f),
+            BridgeMaterial);
+
+        if (field.GetBlockId(12, 12, 12) != Rock ||
+            field.GetBlockId(28, 12, 12) != BridgeMaterial)
+            return false;
+
+        List<SparseVoxelField.ChunkCoordinate> edited = new();
+        field.CollectEditedChunks(0, 0, 0, 1, 0, 0, edited);
+        if (edited.Count != 2)
+            return false;
+
+        field.ResetBaseColumn(tileX: 1, tileZ: 1);
+
+        field.CollectEditedChunks(0, 0, 0, 0, 0, 0, edited);
+        if (edited.Count != 0)
+            return false;
+
+        field.CollectEditedChunks(1, 0, 0, 1, 0, 0, edited);
+        if (edited.Count != 1 || edited[0].X != 1 || edited[0].Y != 0 || edited[0].Z != 0)
+            return false;
+
+        field.ClearEdits();
+        field.CollectEditedChunks(0, 0, 0, 31, 7, 31, edited);
+        return edited.Count == 0 && field.OctreeNodeCount == 0;
+    }
+
 }
