@@ -109,7 +109,7 @@ public sealed class WorldMap
 
         _surfaceHeights = new ushort[columnCount];
         _volumeSurfaceHeights = new ushort[columnCount];
-        Blocks = new BlockTerrain(width, height, layerCount);
+        Blocks = new BlockTerrain(width, height);
         _navigationBlocked = new bool[columnCount];
         _simpleFillColumns = new bool[columnCount];
         WriteSimpleFillFlags(0, _simpleFillColumns.Length, true);
@@ -238,7 +238,7 @@ public sealed class WorldMap
                         }
                         else
                         {
-                            int topLayer = Blocks.Volumes.FindHighestSolidLayerInColumn(
+                            int topLayer = FindTopOccupiedLayer(
                                 worldX, worldY, LayerCount - 1);
                             levels = topLayer < 0
                                 ? 0
@@ -424,33 +424,21 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Packs shared lower terrain into large macro volumes. Regions that
-    /// cannot share a common base are split recursively down to the requested
-    /// block size; finer height differences stay in the existing compact
-    /// column backing instead of creating one object per tile.
+    /// Compresses voxel pages and removes pages identical to the procedural
+    /// base field. This only touches authoritative voxel storage.
     /// </summary>
-    public int CompactHierarchicalBlockVolumes(int minimumBlockSize = 32)
+    public int CompactVoxelStorage()
     {
         _voxelBaseSamplerLock.EnterWriteLock();
         try
         {
-            if (!UsesDiscreteBlockTerrain)
-                throw new InvalidOperationException("Discrete block terrain is not enabled.");
-            if (minimumBlockSize < 2 ||
-                (minimumBlockSize & (minimumBlockSize - 1)) != 0)
-                throw new ArgumentOutOfRangeException(nameof(minimumBlockSize));
-
-            return Blocks.Volumes.Compact();
-        
+            return Voxels.CompactStorage();
         }
         finally
         {
             _voxelBaseSamplerLock.ExitWriteLock();
         }
     }
-
-    public int CompactUniformBlockVolumes(int minimumBlockSize = 32) =>
-        CompactHierarchicalBlockVolumes(minimumBlockSize);
 
     /// <summary>
     /// Places one independent 1 x 1 x 1 m block at a discrete block Z level.
@@ -577,9 +565,9 @@ public sealed class WorldMap
 
     // ============================================================
     // VOXEL STORAGE AND COMPATIBILITY VIEWS
-    // SparseVoxelStore is the sole owner of solid/air occupancy.
-    // XY cells are 1 m x 1 m; vertical layers are 0.1 m.
-    // TerrainLayer/TerrainRegion are lazy read/write adapters only.
+    // SparseVoxelField owns all 0.1 m solid/air occupancy and materials.
+    // Surface arrays are only the compact procedural base representation.
+    // TerrainLayer/TerrainRegion are lazy read/write adapters.
     // ============================================================
 
     public TerrainLayer GetLayer(
@@ -626,15 +614,6 @@ public sealed class WorldMap
                 throw new IndexOutOfRangeException();
 
             int index = GetColumnIndex(x, y);
-            if (_simpleFillColumns[index])
-            {
-                Blocks.Volumes.SetSurfaceColumn(
-                    x, y,
-                    _surfaceHeights[index], _columnMaterialIds[index]);
-                Volatile.Write(ref _simpleFillColumns[index], false);
-            }
-
-            Blocks.Volumes.SetVoxel(x, y, z, materialId);
             Vector3 minimum = new(x, z * 0.1f, y);
             Vector3 maximum = new(x + 1f, (z + 1) * 0.1f, y + 1f);
             if (materialId == 0)
@@ -1027,7 +1006,32 @@ public sealed class WorldMap
         }
 
         Span<TileRange> ranges = stackalloc TileRange[LayerCount];
-        int count = Blocks.Volumes.CopyColumnRanges(globalX, globalY, ranges);
+        int sampleX = checked(globalX * 10 + 5);
+        int sampleZ = checked(globalY * 10 + 5);
+        int count = 0;
+        int runStart = 0;
+        ushort runMaterial = Voxels.GetMaterialId(sampleX, 0, sampleZ);
+
+        for (int z = 1; z <= LayerCount; z++)
+        {
+            ushort material = z < LayerCount
+                ? Voxels.GetMaterialId(sampleX, z, sampleZ)
+                : (ushort)0;
+            if (material == runMaterial)
+                continue;
+
+            ranges[count++] = new TileRange
+            {
+                StartZ = checked((ushort)runStart),
+                EndZ = checked((ushort)z),
+                MaterialId = runMaterial,
+                State = runMaterial == 0 ? StateEmpty : StateSolid
+            };
+
+            runStart = z;
+            runMaterial = material;
+        }
+
         cached = new TileRange[count];
         ranges[..count].CopyTo(cached);
         _rangeCache[index] = cached;
@@ -1050,9 +1054,7 @@ public sealed class WorldMap
                 globalY / TerrainRegion.TilesPerSide);
 
             int index = GetColumnIndex(globalX, globalY);
-            Blocks.Volumes.SetColumnRanges(globalX, globalY, ranges);
             _rangeCache[index] = null;
-            RecalculateSurfaceHeight(index);
 
             Vector3 minimum = new(globalX, 0f, globalY);
             Vector3 maximum = new(globalX + 1f, LayerCount * 0.1f, globalY + 1f);
@@ -1069,6 +1071,7 @@ public sealed class WorldMap
                     range.MaterialId);
             }
 
+            RecalculateSurfaceHeight(index);
             MarkTerrainChanged(globalX, globalY);
         
         }
@@ -1123,19 +1126,6 @@ public sealed class WorldMap
                 return true;
 
             int index = GetColumnIndex(globalX, globalY);
-            if (_simpleFillColumns[index])
-            {
-                Blocks.Volumes.SetSurfaceColumn(
-                    globalX, globalY,
-                    _surfaceHeights[index], _columnMaterialIds[index]);
-                Volatile.Write(ref _simpleFillColumns[index], false);
-            }
-
-            Blocks.Volumes.SetVolume(
-                globalX, globalY, startLayer,
-                1, 1, endLayer - startLayer,
-                state == StateSolid ? materialId : (ushort)0);
-
             Vector3 minimum = new(globalX, startLayer * 0.1f, globalY);
             Vector3 maximum = new(globalX + 1f, endLayer * 0.1f, globalY + 1f);
             if (state == StateSolid && materialId != 0)
@@ -1175,17 +1165,6 @@ public sealed class WorldMap
                 return;
 
             int index = GetColumnIndex(globalX, globalY);
-            if (_simpleFillColumns[index])
-            {
-                Blocks.Volumes.SetSurfaceColumn(
-                    globalX, globalY,
-                    _surfaceHeights[index], _columnMaterialIds[index]);
-                Volatile.Write(ref _simpleFillColumns[index], false);
-            }
-
-            Blocks.Volumes.SetVolume(
-                globalX, globalY, firstLayer,
-                1, 1, lastLayer - firstLayer, 0);
             Voxels.CarveBox(
                 new Vector3(globalX, firstLayer * 0.1f, globalY),
                 new Vector3(globalX + 1f, lastLayer * 0.1f, globalY + 1f));
@@ -1244,11 +1223,6 @@ public sealed class WorldMap
                 region.UniformSurfaceHeightUnits == normalizedHeight &&
                 region.UniformSurfaceMaterialId == normalizedMaterial)
                 return;
-
-            Blocks.Volumes.SetSurfaceRegion(
-                region.TileOriginX, region.TileOriginY,
-                region.TileWidth, region.TileHeight,
-                filledLayers, normalizedMaterial);
 
             for (int row = 0; row < region.TileHeight; row++)
             {
@@ -1315,8 +1289,6 @@ public sealed class WorldMap
                     "Patch height grid does not match the world dimensions.",
                     nameof(patchHeights));
 
-            Blocks.Volumes.SetSurfaceHeightPatches(
-                patchHeights, patchSize, materialId);
             Array.Clear(_volumeSurfaceHeights);
 
             for (int patchY = 0; patchY < patchesY; patchY++)
@@ -1399,9 +1371,6 @@ public sealed class WorldMap
                 clampedHeight > 0 && materialId != 0 ? clampedHeight : 0));
             ushort storedMaterial = storedHeight > 0 ? materialId : (ushort)0;
 
-            // Keep ordinary terrain in the compact surface arrays. The detailed
-            // volume tree is created only when a column receives a complex edit.
-            Blocks.Volumes.ClearColumn(globalX, globalY);
             Volatile.Write(ref _surfaceHeights[index], storedHeight);
             _volumeSurfaceHeights[index] = 0;
             _voxelSurfaceCacheState[index] = 0;
@@ -1507,7 +1476,6 @@ public sealed class WorldMap
     private void ClearColumn(int globalX, int globalY)
     {
         int index = GetColumnIndex(globalX, globalY);
-        Blocks.Volumes.ClearColumn(globalX, globalY);
         _volumeSurfaceHeights[index] = 0;
         Volatile.Write(ref _surfaceHeights[index], (ushort)0);
         _rangeCache[index] = null;
@@ -1529,24 +1497,15 @@ public sealed class WorldMap
 
         _volumeSurfaceHeights[columnIndex] = 0;
 
-        if (!Voxels.HasEditsInColumn(globalX * 10 + 5, globalY * 10 + 5) &&
-            Blocks.Volumes.TryGetSimpleColumn(
-                globalX, globalY,
-                out ushort topExclusive,
-                out ushort simpleMaterial))
+        if (!Voxels.HasEditsInColumn(globalX * 10 + 5, globalY * 10 + 5))
         {
-            Volatile.Write(
-                ref _surfaceHeights[columnIndex],
-                checked((ushort)(topExclusive * LayerHeightUnits)));
             Volatile.Write(ref _simpleFillColumns[columnIndex], true);
-            Volatile.Write(ref _columnMaterialIds[columnIndex], simpleMaterial);
             return;
         }
 
         // _surfaceHeights is also the procedural SDF base input. Keep it intact:
         // the effective top surface is derived on demand from Voxels below.
         Volatile.Write(ref _simpleFillColumns[columnIndex], false);
-        Volatile.Write(ref _columnMaterialIds[columnIndex], (ushort)0);
     }
 
 
@@ -1753,48 +1712,20 @@ public sealed class WorldMap
             voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
             return 0;
 
-        int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
-        int tileZ = Math.Clamp(voxelZ / 10, 0, MaxTileY);
+        int tileX = voxelX / 10;
+        int tileZ = voxelZ / 10;
         int column = GetColumnIndex(tileX, tileZ);
+        ushort materialId = Volatile.Read(ref _columnMaterialIds[column]);
+        if (materialId == 0)
+            return 0;
 
-        // Ordinary terrain is an immutable height/material pair between edits.
-        // Read it directly; only complex edited columns need the volume-tree lock.
-        if (Volatile.Read(ref _simpleFillColumns[column]))
-        {
-            ushort materialId = Volatile.Read(ref _columnMaterialIds[column]);
-            if (materialId == 0)
-                return 0;
+        float surfaceHeight = SampleBaseSurfaceHeight(
+            voxelX, voxelZ,
+            out _, out _);
 
-            float surfaceHeight = SampleBaseSurfaceHeight(
-                voxelX, voxelZ,
-                out _, out _);
-
-            return voxelY + 0.5f < surfaceHeight
-                ? materialId
-                : (ushort)0;
-        }
-
-        _voxelBaseSamplerLock.EnterReadLock();
-        try
-        {
-            if (Volatile.Read(ref _simpleFillColumns[column]))
-            {
-                ushort materialId = Volatile.Read(ref _columnMaterialIds[column]);
-                float surfaceHeight = SampleBaseSurfaceHeight(
-                    voxelX, voxelZ,
-                    out _, out _);
-
-                return materialId != 0 && voxelY + 0.5f < surfaceHeight
-                    ? materialId
-                    : (ushort)0;
-            }
-
-            return Blocks.Volumes.GetMaterialId(tileX, tileZ, voxelY);
-        }
-        finally
-        {
-            _voxelBaseSamplerLock.ExitReadLock();
-        }
+        return voxelY + 0.5f < surfaceHeight
+            ? materialId
+            : (ushort)0;
     }
 
     /// <summary>
@@ -1880,19 +1811,7 @@ public sealed class WorldMap
                     _rangeCache[columnIndex] = null;
                     _voxelSurfaceCacheState[columnIndex] = 1;
 
-                    // A local 3D edit promotes an ordinary implicit surface column
-                    // to the compatibility volume tree once, preserving old range
-                    // and navigation readers while the renderer uses SDF voxels.
-                    bool fullColumnReset =
-                        bounds.MinY <= 0 && bounds.MaxY >= Voxels.Height;
-                    if (_simpleFillColumns[columnIndex] && !fullColumnReset)
-                    {
-                        Blocks.Volumes.SetSurfaceColumn(
-                            tileX, tileY,
-                            _surfaceHeights[columnIndex],
-                            _columnMaterialIds[columnIndex]);
-                    }
-
+                    // All local edits live in the same sparse 3D voxel field.
                     Volatile.Write(ref _simpleFillColumns[columnIndex], false);
                     MarkTerrainChanged(tileX, tileY);
                 }
