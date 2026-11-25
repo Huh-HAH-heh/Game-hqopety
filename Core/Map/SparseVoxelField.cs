@@ -1049,11 +1049,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _undoHistoryBytes = 0;
         _historyCapture = null;
         _octreeIndex.Clear();
-        _octreeIndex.Clear();
 
         foreach ((ChunkCoordinate key, Chunk chunk) in loaded)
         {
-            _chunks[key] = chunk;
             _octreeIndex.SetLeaf(key, chunk);
         }
 
@@ -1312,8 +1310,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         {
             foreach (ChunkCoordinate key in removeChunks)
             {
-                if (_octreeIndex.TryRemoveLeaf(key, out _))
-
+                _octreeIndex.TryRemoveLeaf(key, out _);
             }
         }
 
@@ -2669,8 +2666,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             {
                 if (snapshot == null)
                 {
-                    if (_octreeIndex.TryRemoveLeaf(key, out _))
-    
+                    _octreeIndex.TryRemoveLeaf(key, out _);
                     continue;
                 }
 
