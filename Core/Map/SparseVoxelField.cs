@@ -53,6 +53,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private const int SaveMagic = 0x31585652;
     private const int SaveFormatVersion = 5;
     private const int LegacyContentMaskWordCount = (LegacySampleCount + 63) >> 6;
+    private const byte DefaultEmptyContent = 0;
     private const byte ContentIsoLevel = 127;
     private const byte DefaultEmptyContent = 95;
 
