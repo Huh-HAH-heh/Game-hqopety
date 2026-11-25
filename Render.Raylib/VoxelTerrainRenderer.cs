@@ -146,6 +146,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     public int CompletedMeshResultsPending => 0;
     public double WorkerBuildMillisecondsLastFrame { get; private set; }
     public double LastWorkerBuildMilliseconds { get; private set; }
+    public double MeshBuildMillisecondsLastFrame => WorkerBuildMillisecondsLastFrame;
+    public double LastMeshBuildMilliseconds => LastWorkerBuildMilliseconds;
     public double LastWorkerQueueWaitMilliseconds => 0d;
     public double LastWorkerResultDeliveryMilliseconds => 0d;
     public int BuildsCompletedLastFrame { get; private set; }
