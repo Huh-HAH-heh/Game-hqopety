@@ -98,6 +98,7 @@ public static class CombatSelfTest
         RunTest("Voxel terrain: ramp brush creates a sloped material volume", VoxelTerrainSelfTest.RampBrushCreatesSlopedVolume, ref passed, ref failed);
         RunTest("Voxel terrain: ramp carve removes a sloped volume only inside its footprint", VoxelTerrainSelfTest.RampBrushCarvesSlopedVolume, ref passed, ref failed);
         RunTest("Voxel terrain: edited chunks survive save/load", VoxelTerrainSelfTest.EditSaveRoundTrips, ref passed, ref failed);
+        RunTest("Voxel terrain: compact octree tracks edited pages and prunes empty branches", VoxelTerrainSelfTest.SparseOctreeTracksEditedVoxelPages, ref passed, ref failed);
         RunTest("Voxel terrain: legacy WorldMap surface and occupancy queries read the 3D field", VoxelTerrainSelfTest.LegacyWorldMapQueriesUseVoxelField, ref passed, ref failed);
         RunTest("Voxel terrain: edits reject a mismatched base-world signature", VoxelTerrainSelfTest.SaveRejectsDifferentBaseWorld, ref passed, ref failed);
         RunTest("Voxel terrain: edit history restores and reapplies density", VoxelTerrainSelfTest.UndoRedoRestoresSdf, ref passed, ref failed);
