@@ -6,6 +6,8 @@ public static class FlatVoxelPageDirectorySelfTest
 {
     public static bool Run() =>
         FlatDirectoryUsesLinearAddressing() &&
+        FlatDirectoryCrossesStorageBlockBoundaries() &&
+        ProductionDirectoryStaysSparse() &&
         VoxelReadsCrossDataCellBoundaries();
 
     private static bool FlatDirectoryUsesLinearAddressing()
@@ -50,9 +52,67 @@ public static class FlatVoxelPageDirectorySelfTest
         }
 
         pages.Clear();
-        return !pages.TryGet(0, 0, 0, out _) &&
+        return pages.AllocatedBlockCount == 0 &&
+            !pages.TryGet(0, 0, 0, out _) &&
             !pages.TryGet(1, 0, 0, out _) &&
             !pages.TryGet(0, 0, 1, out _);
+    }
+
+    private static bool FlatDirectoryCrossesStorageBlockBoundaries()
+    {
+        FlatVoxelPageDirectory<object> pages = new(33, 18, 33);
+        object low = new();
+        object middle = new();
+        object high = new();
+
+        pages.Set(15, 15, 15, low);
+        pages.Set(16, 16, 16, middle);
+        pages.Set(32, 17, 32, high);
+
+        return pages.AllocatedBlockCount == 3 &&
+            pages.TryGet(15, 15, 15, out object? readLow) &&
+            ReferenceEquals(readLow, low) &&
+            pages.TryGet(16, 16, 16, out object? readMiddle) &&
+            ReferenceEquals(readMiddle, middle) &&
+            pages.TryGet(32, 17, 32, out object? readHigh) &&
+            ReferenceEquals(readHigh, high) &&
+            !pages.TryGet(33, 17, 32, out _);
+    }
+
+    private static bool ProductionDirectoryStaysSparse()
+    {
+        // 23040 x 500 x 23040 voxels, with 8^3 data pages.
+        FlatVoxelPageDirectory<object> pages = new(2880, 63, 2880);
+        long rootBytes = 180L * 4 * 180 * IntPtr.Size;
+
+        if (pages.Length != 522_547_200 ||
+            pages.AllocatedBlockCount != 0 ||
+            pages.EstimatedDirectoryBytes != rootBytes ||
+            pages.TryGet(1400, 30, 1400, out _) ||
+            pages.AllocatedBlockCount != 0)
+        {
+            return false;
+        }
+
+        object pageA = new();
+        object pageB = new();
+        pages.Set(0, 0, 0, pageA);
+        pages.Set(2879, 62, 2879, pageB);
+
+        long expectedBytes = rootBytes + 2L * 4096 * IntPtr.Size;
+        if (pages.AllocatedBlockCount != 2 ||
+            pages.EstimatedDirectoryBytes != expectedBytes ||
+            !pages.TryGet(0, 0, 0, out object? readA) ||
+            !ReferenceEquals(readA, pageA) ||
+            !pages.TryGet(2879, 62, 2879, out object? readB) ||
+            !ReferenceEquals(readB, pageB))
+        {
+            return false;
+        }
+
+        pages.Clear();
+        return pages.AllocatedBlockCount == 0 &&
+            pages.EstimatedDirectoryBytes == rootBytes;
     }
 
     private static bool VoxelReadsCrossDataCellBoundaries()
@@ -87,7 +147,8 @@ public static class FlatVoxelPageDirectorySelfTest
             field.GetBlockId(8, 8, 8) == 7 &&
             field.GetMaterialId(6, 7, 7) == 0 &&
             field.GetDataCellStorageBytes(0, 0, 0) > 0 &&
-            field.GetDataCellStorageBytes(1, 1, 1) > 0;
+            field.GetDataCellStorageBytes(1, 1, 1) > 0 &&
+            field.DataCellDirectoryAllocatedBlocks > 0;
 
         if (!written || !field.Undo() ||
             field.GetMaterialId(7, 7, 7) != 0 ||
