@@ -65,7 +65,7 @@ internal sealed class VoxelMeshData
 }
 
 /// <summary>
-/// Compact worker input: 16^3 block IDs plus a one-cell halo on all sides.
+/// Compact main-thread input: 16^3 block IDs plus a one-cell halo on all sides.
 /// Zero is air; non-zero values are byte-sized material IDs.
 /// Blocks are X-contiguous: x + y * SampleSide + z * SamplePlane.
 /// </summary>
@@ -282,7 +282,9 @@ internal static class VoxelChunkMesher
 
         private void EnsureCapacity(int vertexCount, int indexCount)
         {
-            if (_vertices.Length < vertexCount)
+            if (_vertices.Length < vertexCount ||
+                _normals.Length < vertexCount ||
+                _colors.Length < vertexCount * 4)
             {
                 int capacity = Math.Min(
                     MaximumVerticesPerMesh,
@@ -412,16 +414,24 @@ internal static class VoxelChunkMesher
     public static Mesh UploadOne(VoxelMeshData source)
     {
         Mesh mesh = new(source.VertexCount, source.TriangleCount);
-        mesh.AllocVertices();
-        mesh.AllocNormals();
-        mesh.AllocColors();
-        mesh.AllocIndices();
-        source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
-        source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
-        source.Colors.CopyTo(mesh.ColorsAs<byte>());
-        source.Indices.CopyTo(mesh.IndicesAs<ushort>());
-        UploadMesh(ref mesh, false);
-        return mesh;
+        try
+        {
+            mesh.AllocVertices();
+            mesh.AllocNormals();
+            mesh.AllocColors();
+            mesh.AllocIndices();
+            source.Vertices.CopyTo(mesh.VerticesAs<Vector3>());
+            source.Normals.CopyTo(mesh.NormalsAs<Vector3>());
+            source.Colors.CopyTo(mesh.ColorsAs<byte>());
+            source.Indices.CopyTo(mesh.IndicesAs<ushort>());
+            UploadMesh(ref mesh, false);
+            return mesh;
+        }
+        catch
+        {
+            UnloadMesh(mesh);
+            throw;
+        }
     }
 
     public static Mesh[] Upload(VoxelMeshData[] data)
