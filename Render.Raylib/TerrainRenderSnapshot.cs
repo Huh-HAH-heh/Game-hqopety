@@ -81,8 +81,11 @@ public sealed class TerrainRenderSnapshot
         RegionsX = checked(StorageRegionsX * RenderRegionsPerStorageRegion);
         RegionsY = checked(StorageRegionsY * RenderRegionsPerStorageRegion);
 
-        _heightsMeters = new float[checked(RegionsX * RegionsY)];
-        _materialIds = new ushort[_heightsMeters.Length];
+        int presentationCellCount = voxelMode
+            ? 0
+            : checked(RegionsX * RegionsY);
+        _heightsMeters = new float[presentationCellCount];
+        _materialIds = new ushort[presentationCellCount];
         _sourceRegionVersions =
             new long[checked(StorageRegionsX * StorageRegionsY)];
 
@@ -149,6 +152,18 @@ public sealed class TerrainRenderSnapshot
         }
 
         _worldMap = worldMap;
+
+        if (IsVoxelMode)
+        {
+            bool baseChanged = !_initialized ||
+                _lastVoxelBaseVersion != worldMap.Voxels.BaseVersion;
+            SourceWorldVersion = worldMap.TerrainVersion;
+            _complexSourceWorldVersion = worldMap.TerrainVersion;
+            _lastVoxelBaseVersion = worldMap.Voxels.BaseVersion;
+            _initialized = true;
+            return baseChanged;
+        }
+
         if (_initialized && SourceWorldVersion == worldMap.TerrainVersion)
             return false;
 
