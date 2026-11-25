@@ -52,7 +52,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private const int SaveMagic = 0x31585652;
     private const int SaveFormatVersion = 5;
-    private const int LegacyContentMaskWordCount = (SampleCount + 63) >> 6;
+    private const int LegacyContentMaskWordCount = (LegacySampleCount + 63) >> 6;
     private const byte ContentIsoLevel = 127;
 
     internal sealed class Chunk
@@ -3168,11 +3168,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 ? EncodeContent(_baseDensity(worldX, worldY, worldZ))
                 : (byte)0;
 
-            chunk.GetContent(index) = content;
-            chunk.GetMaterial(index) =
+            chunk.SetContent(index, content);
+            chunk.SetMaterial(
+                index,
                 content > ContentIsoLevel
                     ? EncodeMaterial(_baseMaterial(worldX, worldY, worldZ))
-                    : byte.MaxValue;
+                    : byte.MaxValue);
         }
 
         return chunk;
