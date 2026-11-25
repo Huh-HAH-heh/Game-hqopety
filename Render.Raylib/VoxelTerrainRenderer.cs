@@ -299,7 +299,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 _totalIdenticalSurfaceSkips++;
             }
             else if (entry.FailedRevision != entry.Revision &&
-                     entry.BlockedCacheBytes != _gpuCacheBytes &&
+                     (entry.BlockedCacheBytes < 0 || _gpuCacheBytes < entry.BlockedCacheBytes) &&
                      (buildsThisFrame == 0 ||
                       (buildsThisFrame < MaximumBuildsPerFrame &&
                        buildBudget.Elapsed.TotalMilliseconds < MeshBuildBudgetMilliseconds)))
