@@ -449,7 +449,7 @@ internal static class VoxelTerrainSelfTest
         {
             for (int axis = 0; axis < 3; axis++)
             {
-                int boundarySample = SparseVoxelField.ChunkSize * step;
+                int boundarySample = SparseVoxelField.DataCellSize * step;
                 int previousSample = boundarySample - step;
                 int nextSample = boundarySample + step;
                 int fixedA = 40;
@@ -466,11 +466,11 @@ internal static class VoxelTerrainSelfTest
                         (centerZ + 0.5f) * SparseVoxelField.VoxelSizeMeters),
                     0.82f);
 
-                int boundaryLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 17, step);
+                int boundaryLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 9, step);
                 int boundaryRight = SparseVoxelField.GetChunkSampleCoordinate(1, 1, step);
-                int previousLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 16, step);
+                int previousLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 8, step);
                 int previousRight = SparseVoxelField.GetChunkSampleCoordinate(1, 0, step);
-                int nextLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 18, step);
+                int nextLeft = SparseVoxelField.GetChunkSampleCoordinate(0, 10, step);
                 int nextRight = SparseVoxelField.GetChunkSampleCoordinate(1, 2, step);
 
                 if (boundaryLeft != boundaryRight ||
@@ -615,23 +615,45 @@ internal static class VoxelTerrainSelfTest
             return false;
 
         List<SparseVoxelField.ChunkCoordinate> edited = new();
-        field.CollectEditedChunks(0, 0, 0, 1, 0, 0, edited);
+        field.CollectEditedChunks(0, 0, 0, 3, 1, 1, edited);
         if (edited.Count != 2)
             return false;
 
         field.ResetBaseColumn(tileX: 1, tileZ: 1);
 
-        field.CollectEditedChunks(0, 0, 0, 0, 0, 0, edited);
+        field.CollectEditedChunks(1, 1, 1, 1, 1, 1, edited);
         if (edited.Count != 0)
             return false;
 
-        field.CollectEditedChunks(1, 0, 0, 1, 0, 0, edited);
-        if (edited.Count != 1 || edited[0].X != 1 || edited[0].Y != 0 || edited[0].Z != 0)
+        field.CollectEditedChunks(3, 1, 1, 3, 1, 1, edited);
+        if (edited.Count != 1 ||
+            edited[0].X != 3 ||
+            edited[0].Y != 1 ||
+            edited[0].Z != 1)
             return false;
 
         field.ClearEdits();
-        field.CollectEditedChunks(0, 0, 0, 31, 7, 31, edited);
+        field.CollectEditedChunks(0, 0, 0, 63, 15, 63, edited);
         return edited.Count == 0 && field.OctreeNodeCount == 0;
+    }
+
+    public static bool UniformDataCellsCompressToTwoBytes()
+    {
+        SparseVoxelField field = new(
+            width: 64,
+            height: 64,
+            depth: 64,
+            baseDensity: static (_, _, _) => 1f,
+            baseMaterial: static (_, _, _) => Rock);
+
+        field.CarveBox(
+            Vector3.Zero,
+            new Vector3(
+                SparseVoxelField.DataCellSize * SparseVoxelField.VoxelSizeMeters));
+
+        return field.GetDataCellConstitution(0, 0, 0) ==
+                   SparseVoxelField.VoxelContentConstitution.Empty &&
+               field.GetDataCellStorageBytes(0, 0, 0) == 2;
     }
 
 }
