@@ -1,29 +1,33 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Core.Map;
 
 /// <summary>
-/// Compact sparse octree over 16^3 voxel leaf pages.
-/// Missing branches are untouched provider-backed space.
-/// This index is updated and queried by the world/render thread; voxel page
-/// payloads themselves remain safe for concurrent readers.
+/// One sparse octree owns both the spatial directory and the LOD0 page payloads.
+/// Missing leaves are provider-backed space. LOD0 pages store full Content and
+/// Material byte channels; parent nodes store only an eight-child mask.
 /// </summary>
-internal sealed class SparseVoxelOctreeIndex
+internal sealed class SparseVoxelOctreeIndex<T> where T : class
 {
     private const int CoordinateBits = 18;
     private const uint CoordinateMask = (1u << CoordinateBits) - 1u;
 
-    private struct Node
+    private sealed class Node
     {
-        public byte ChildMask;
+        public int ChildMask;
         public int LeafCount;
+        public T? Page;
     }
 
-    private readonly Dictionary<ulong, Node> _nodes = new();
+    private readonly ConcurrentDictionary<ulong, Node> _nodes = new();
     private readonly int _rootLevel;
+    private int _leafCount;
 
     public int NodeCount => _nodes.Count;
+    public int LeafCount => Volatile.Read(ref _leafCount);
 
     public SparseVoxelOctreeIndex(int chunksX, int chunksY, int chunksZ)
     {
@@ -45,14 +49,82 @@ internal sealed class SparseVoxelOctreeIndex
         _rootLevel = level;
     }
 
-    public void AddLeaf(SparseVoxelField.ChunkCoordinate leaf)
+    public bool TryGetLeaf(
+        SparseVoxelField.ChunkCoordinate leaf,
+        out T? page)
     {
-        ulong leafKey = Pack(0, leaf.X, leaf.Y, leaf.Z);
-        if (_nodes.ContainsKey(leafKey))
+        if (_nodes.TryGetValue(Pack(0, leaf.X, leaf.Y, leaf.Z), out Node? node))
+        {
+            page = Volatile.Read(ref node.Page);
+            return page != null;
+        }
+
+        page = null;
+        return false;
+    }
+
+    public T GetOrAddLeaf(
+        SparseVoxelField.ChunkCoordinate leaf,
+        T page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        Node leafNode = _nodes.GetOrAdd(
+            Pack(0, leaf.X, leaf.Y, leaf.Z),
+            static _ => new Node());
+
+        T? existing = Interlocked.CompareExchange(ref leafNode.Page, page, null);
+        if (existing != null)
+            return existing;
+
+        Interlocked.Increment(ref _leafCount);
+        AddParents(leaf);
+        return page;
+    }
+
+    public void SetLeaf(
+        SparseVoxelField.ChunkCoordinate leaf,
+        T page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        Node leafNode = _nodes.GetOrAdd(
+            Pack(0, leaf.X, leaf.Y, leaf.Z),
+            static _ => new Node());
+
+        T? previous = Interlocked.Exchange(ref leafNode.Page, page);
+        if (previous != null)
             return;
 
-        _nodes.Add(leafKey, new Node { LeafCount = 1 });
+        Interlocked.Increment(ref _leafCount);
+        AddParents(leaf);
+    }
 
+    public bool ContainsLeaf(SparseVoxelField.ChunkCoordinate leaf) =>
+        TryGetLeaf(leaf, out _);
+
+    public bool TryRemoveLeaf(
+        SparseVoxelField.ChunkCoordinate leaf,
+        out T? removed)
+    {
+        ulong leafKey = Pack(0, leaf.X, leaf.Y, leaf.Z);
+        removed = null;
+
+        if (!_nodes.TryGetValue(leafKey, out Node? leafNode))
+            return false;
+
+        removed = Interlocked.Exchange(ref leafNode.Page, null);
+        if (removed == null)
+            return false;
+
+        _nodes.TryRemove(new KeyValuePair<ulong, Node>(leafKey, leafNode));
+        Interlocked.Decrement(ref _leafCount);
+        RemoveEmptyParents(leaf);
+        return true;
+    }
+
+    private void AddParents(SparseVoxelField.ChunkCoordinate leaf)
+    {
         for (int lod = 1; lod <= _rootLevel; lod++)
         {
             int childX = (leaf.X >> (lod - 1)) & 1;
@@ -61,18 +133,14 @@ internal sealed class SparseVoxelOctreeIndex
             int childIndex = childX | (childY << 1) | (childZ << 2);
 
             ulong nodeKey = Pack(lod, leaf.X >> lod, leaf.Y >> lod, leaf.Z >> lod);
-            _nodes.TryGetValue(nodeKey, out Node node);
-            node.ChildMask |= (byte)(1 << childIndex);
-            node.LeafCount++;
-            _nodes[nodeKey] = node;
+            Node node = _nodes.GetOrAdd(nodeKey, static _ => new Node());
+            Interlocked.Or(ref node.ChildMask, 1 << childIndex);
+            Interlocked.Increment(ref node.LeafCount);
         }
     }
 
-    public void RemoveLeaf(SparseVoxelField.ChunkCoordinate leaf)
+    private void RemoveEmptyParents(SparseVoxelField.ChunkCoordinate leaf)
     {
-        if (!_nodes.Remove(Pack(0, leaf.X, leaf.Y, leaf.Z)))
-            return;
-
         bool childBecameEmpty = true;
         for (int lod = 1; lod <= _rootLevel; lod++)
         {
@@ -80,7 +148,8 @@ internal sealed class SparseVoxelOctreeIndex
             int nodeY = leaf.Y >> lod;
             int nodeZ = leaf.Z >> lod;
             ulong nodeKey = Pack(lod, nodeX, nodeY, nodeZ);
-            if (!_nodes.TryGetValue(nodeKey, out Node node))
+
+            if (!_nodes.TryGetValue(nodeKey, out Node? node))
                 return;
 
             if (childBecameEmpty)
@@ -89,15 +158,12 @@ internal sealed class SparseVoxelOctreeIndex
                 int childY = (leaf.Y >> (lod - 1)) & 1;
                 int childZ = (leaf.Z >> (lod - 1)) & 1;
                 int childIndex = childX | (childY << 1) | (childZ << 2);
-                node.ChildMask &= (byte)~(1 << childIndex);
+                Interlocked.And(ref node.ChildMask, ~(1 << childIndex));
             }
 
-            node.LeafCount--;
-            childBecameEmpty = node.LeafCount == 0;
+            childBecameEmpty = Interlocked.Decrement(ref node.LeafCount) == 0;
             if (childBecameEmpty)
-                _nodes.Remove(nodeKey);
-            else
-                _nodes[nodeKey] = node;
+                _nodes.TryRemove(new KeyValuePair<ulong, Node>(nodeKey, node));
         }
     }
 
@@ -136,16 +202,22 @@ internal sealed class SparseVoxelOctreeIndex
                 minNodeZ + span - 1 < minZ || minNodeZ > maxZ)
                 continue;
 
-            if (!_nodes.TryGetValue(Pack(current.Lod, current.X, current.Y, current.Z), out Node node))
+            if (!_nodes.TryGetValue(
+                    Pack(current.Lod, current.X, current.Y, current.Z),
+                    out Node? node))
                 continue;
 
             if (current.Lod == 0)
             {
-                destination.Add(new SparseVoxelField.ChunkCoordinate(current.X, current.Y, current.Z));
+                if (Volatile.Read(ref node.Page) != null)
+                {
+                    destination.Add(new SparseVoxelField.ChunkCoordinate(
+                        current.X, current.Y, current.Z));
+                }
                 continue;
             }
 
-            int childMask = node.ChildMask;
+            int childMask = Volatile.Read(ref node.ChildMask);
             while (childMask != 0)
             {
                 int child = System.Numerics.BitOperations.TrailingZeroCount((uint)childMask);
@@ -160,7 +232,11 @@ internal sealed class SparseVoxelOctreeIndex
         }
     }
 
-    public void Clear() => _nodes.Clear();
+    public void Clear()
+    {
+        _nodes.Clear();
+        Volatile.Write(ref _leafCount, 0);
+    }
 
     private static ulong Pack(int lod, int x, int y, int z)
     {
