@@ -143,24 +143,57 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         if (IsCaptured)
             return;
 
-        bool hasSolid = false;
-
-        for (int index = 0; index < TotalSamples; index++)
+        bool hasSolid;
+        if (source is SparseVoxelField voxelField)
         {
-            int x = index % SampleSide;
-            int y = index / SampleSide % SampleSide;
-            int z = index / SamplePlane;
+            hasSolid = voxelField.CopyBlockIds(
+                OriginX - HaloSize,
+                OriginY - HaloSize,
+                OriginZ - HaloSize,
+                SampleSide,
+                Blocks.AsSpan(0, TotalSamples));
 
-            int worldX = OriginX + x - HaloSize;
-            int worldY = OriginY + y - HaloSize;
-            int worldZ = OriginZ + z - HaloSize;
+            if (CutLayer != int.MinValue)
+            {
+                for (int z = 0; z < SampleSide; z++)
+                {
+                    for (int y = 0; y < SampleSide; y++)
+                    {
+                        int worldY = OriginY + y - HaloSize;
+                        if (worldY < CutLayer)
+                            continue;
 
-            byte blockId = CutLayer != int.MinValue && worldY >= CutLayer
-                ? (byte)0
-                : source.GetBlockId(worldX, worldY, worldZ);
+                        Blocks.AsSpan(
+                            z * SamplePlane + y * SampleSide,
+                            SampleSide).Clear();
+                    }
+                }
 
-            Blocks[index] = blockId;
-            hasSolid |= blockId != 0;
+                hasSolid = false;
+                for (int i = 0; i < TotalSamples; i++)
+                    hasSolid |= Blocks[i] != 0;
+            }
+        }
+        else
+        {
+            hasSolid = false;
+            for (int index = 0; index < TotalSamples; index++)
+            {
+                int x = index % SampleSide;
+                int y = index / SampleSide % SampleSide;
+                int z = index / SamplePlane;
+
+                int worldX = OriginX + x - HaloSize;
+                int worldY = OriginY + y - HaloSize;
+                int worldZ = OriginZ + z - HaloSize;
+
+                byte blockId = CutLayer != int.MinValue && worldY >= CutLayer
+                    ? (byte)0
+                    : source.GetBlockId(worldX, worldY, worldZ);
+
+                Blocks[index] = blockId;
+                hasSolid |= blockId != 0;
+            }
         }
 
         HasPotentialSurface = hasSolid;
