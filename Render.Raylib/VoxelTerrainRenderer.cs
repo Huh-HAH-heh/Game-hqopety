@@ -516,7 +516,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             string summary =
                 $"frame={_frame} resolution=Step1 chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
                 $"macroFrustum={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkFrustum={FrustumCandidatesLastFrame} " +
-                $"emptyChunks={_totalEmptyChunks} mainThreadCopyMs={CpuCaptureMillisecondsLastFrame:0.000} " +
+                $"emptyChunks={_totalEmptyChunks} captureMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"workerMs={WorkerBuildMillisecondsLastFrame:0.000} lastWorkerMs={LastWorkerBuildMilliseconds:0.000} " +
                 $"queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
