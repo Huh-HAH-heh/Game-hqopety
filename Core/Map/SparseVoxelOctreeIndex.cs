@@ -1,33 +1,35 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading;
 
 namespace Core.Map;
 
 /// <summary>
-/// Sparse octree index over 16^3 voxel leaf pages.
-/// Missing nodes represent untouched provider data; only pages containing edits
-/// are indexed. Each node stores an eight-bit child mask and descendant count.
+/// Compact sparse octree over 16^3 voxel leaf pages.
+/// Missing branches are untouched provider-backed space.
+/// This index is updated and queried by the world/render thread; voxel page
+/// payloads themselves remain safe for concurrent readers.
 /// </summary>
 internal sealed class SparseVoxelOctreeIndex
 {
     private const int CoordinateBits = 18;
     private const uint CoordinateMask = (1u << CoordinateBits) - 1u;
 
-    private sealed class Node
+    private struct Node
     {
-        public int ChildMask;
+        public byte ChildMask;
         public int LeafCount;
     }
 
-    private readonly ConcurrentDictionary<ulong, Node> _nodes = new();
+    private readonly Dictionary<ulong, Node> _nodes = new();
     private readonly int _rootLevel;
 
     public int NodeCount => _nodes.Count;
 
     public SparseVoxelOctreeIndex(int chunksX, int chunksY, int chunksZ)
     {
+        if (chunksX <= 0 || chunksY <= 0 || chunksZ <= 0)
+            throw new ArgumentOutOfRangeException(nameof(chunksX));
+
         int largest = Math.Max(chunksX, Math.Max(chunksY, chunksZ));
         int level = 0;
         int span = 1;
@@ -38,15 +40,18 @@ internal sealed class SparseVoxelOctreeIndex
         }
 
         if (level >= 32)
-            throw new ArgumentOutOfRangeException(nameof(chunksX), "Voxel storage exceeds octree address capacity.");
+            throw new ArgumentOutOfRangeException(nameof(chunksX));
 
         _rootLevel = level;
     }
 
     public void AddLeaf(SparseVoxelField.ChunkCoordinate leaf)
     {
-        if (!_nodes.TryAdd(Pack(0, leaf.X, leaf.Y, leaf.Z), new Node { LeafCount = 1 }))
+        ulong leafKey = Pack(0, leaf.X, leaf.Y, leaf.Z);
+        if (_nodes.ContainsKey(leafKey))
             return;
+
+        _nodes.Add(leafKey, new Node { LeafCount = 1 });
 
         for (int lod = 1; lod <= _rootLevel; lod++)
         {
@@ -55,19 +60,17 @@ internal sealed class SparseVoxelOctreeIndex
             int childZ = (leaf.Z >> (lod - 1)) & 1;
             int childIndex = childX | (childY << 1) | (childZ << 2);
 
-            int nodeX = leaf.X >> lod;
-            int nodeY = leaf.Y >> lod;
-            int nodeZ = leaf.Z >> lod;
-            Node node = _nodes.GetOrAdd(Pack(lod, nodeX, nodeY, nodeZ), static _ => new Node());
-
-            Interlocked.Or(ref node.ChildMask, 1 << childIndex);
-            Interlocked.Increment(ref node.LeafCount);
+            ulong nodeKey = Pack(lod, leaf.X >> lod, leaf.Y >> lod, leaf.Z >> lod);
+            _nodes.TryGetValue(nodeKey, out Node node);
+            node.ChildMask |= (byte)(1 << childIndex);
+            node.LeafCount++;
+            _nodes[nodeKey] = node;
         }
     }
 
     public void RemoveLeaf(SparseVoxelField.ChunkCoordinate leaf)
     {
-        if (!_nodes.TryRemove(Pack(0, leaf.X, leaf.Y, leaf.Z), out _))
+        if (!_nodes.Remove(Pack(0, leaf.X, leaf.Y, leaf.Z)))
             return;
 
         bool childBecameEmpty = true;
@@ -76,9 +79,8 @@ internal sealed class SparseVoxelOctreeIndex
             int nodeX = leaf.X >> lod;
             int nodeY = leaf.Y >> lod;
             int nodeZ = leaf.Z >> lod;
-            ulong key = Pack(lod, nodeX, nodeY, nodeZ);
-
-            if (!_nodes.TryGetValue(key, out Node? node))
+            ulong nodeKey = Pack(lod, nodeX, nodeY, nodeZ);
+            if (!_nodes.TryGetValue(nodeKey, out Node node))
                 return;
 
             if (childBecameEmpty)
@@ -87,12 +89,15 @@ internal sealed class SparseVoxelOctreeIndex
                 int childY = (leaf.Y >> (lod - 1)) & 1;
                 int childZ = (leaf.Z >> (lod - 1)) & 1;
                 int childIndex = childX | (childY << 1) | (childZ << 2);
-                Interlocked.And(ref node.ChildMask, ~(1 << childIndex));
+                node.ChildMask &= (byte)~(1 << childIndex);
             }
 
-            childBecameEmpty = Interlocked.Decrement(ref node.LeafCount) == 0;
+            node.LeafCount--;
+            childBecameEmpty = node.LeafCount == 0;
             if (childBecameEmpty)
-                _nodes.TryRemove(key, out _);
+                _nodes.Remove(nodeKey);
+            else
+                _nodes[nodeKey] = node;
         }
     }
 
@@ -111,8 +116,7 @@ internal sealed class SparseVoxelOctreeIndex
         if (minX > maxX || minY > maxY || minZ > maxZ)
             return;
 
-        ulong rootKey = Pack(_rootLevel, 0, 0, 0);
-        if (!_nodes.ContainsKey(rootKey))
+        if (!_nodes.ContainsKey(Pack(_rootLevel, 0, 0, 0)))
             return;
 
         Span<NodeVisit> stack = stackalloc NodeVisit[128];
@@ -122,21 +126,17 @@ internal sealed class SparseVoxelOctreeIndex
         while (stackCount > 0)
         {
             NodeVisit current = stack[--stackCount];
+            int span = 1 << current.Lod;
+            int minNodeX = current.X * span;
+            int minNodeY = current.Y * span;
+            int minNodeZ = current.Z * span;
 
-            int nodeSpan = 1 << current.Lod;
-            int nodeMinX = current.X * nodeSpan;
-            int nodeMinY = current.Y * nodeSpan;
-            int nodeMinZ = current.Z * nodeSpan;
-            int nodeMaxX = nodeMinX + nodeSpan - 1;
-            int nodeMaxY = nodeMinY + nodeSpan - 1;
-            int nodeMaxZ = nodeMinZ + nodeSpan - 1;
-
-            if (nodeMaxX < minX || nodeMinX > maxX ||
-                nodeMaxY < minY || nodeMinY > maxY ||
-                nodeMaxZ < minZ || nodeMinZ > maxZ)
+            if (minNodeX + span - 1 < minX || minNodeX > maxX ||
+                minNodeY + span - 1 < minY || minNodeY > maxY ||
+                minNodeZ + span - 1 < minZ || minNodeZ > maxZ)
                 continue;
 
-            if (!_nodes.TryGetValue(Pack(current.Lod, current.X, current.Y, current.Z), out Node? node))
+            if (!_nodes.TryGetValue(Pack(current.Lod, current.X, current.Y, current.Z), out Node node))
                 continue;
 
             if (current.Lod == 0)
@@ -145,18 +145,17 @@ internal sealed class SparseVoxelOctreeIndex
                 continue;
             }
 
-            int childMask = Volatile.Read(ref node.ChildMask);
+            int childMask = node.ChildMask;
             while (childMask != 0)
             {
                 int child = System.Numerics.BitOperations.TrailingZeroCount((uint)childMask);
                 childMask &= childMask - 1;
 
-                int childX = current.X * 2 + (child & 1);
-                int childY = current.Y * 2 + ((child >> 1) & 1);
-                int childZ = current.Z * 2 + ((child >> 2) & 1);
-
                 stack[stackCount++] = new NodeVisit(
-                    childX, childY, childZ, current.Lod - 1);
+                    current.X * 2 + (child & 1),
+                    current.Y * 2 + ((child >> 1) & 1),
+                    current.Z * 2 + ((child >> 2) & 1),
+                    current.Lod - 1);
             }
         }
     }
