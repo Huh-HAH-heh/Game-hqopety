@@ -136,9 +136,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 (z % ChunkSize) * CellPlane;
 
             if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
-                return chunk.Content[index] > ContentIsoLevel
-                    ? chunk.Material[index]
-                    : (ushort)0;
+                return chunk.Content[index] > ContentIsoLevel &&
+                    chunk.Material[index] != byte.MaxValue
+                        ? chunk.Material[index]
+                        : (ushort)0;
 
             return _baseDensity(x, y, z) > 0f
                 ? _baseMaterial(x, y, z)
@@ -157,9 +158,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 (z % ChunkSize) * CellPlane;
 
             if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
-                return chunk.Content[index] > ContentIsoLevel
-                    ? chunk.Material[index]
-                    : (byte)0;
+                return chunk.Content[index] > ContentIsoLevel &&
+                    chunk.Material[index] != byte.MaxValue
+                        ? chunk.Material[index]
+                        : (byte)0;
 
             if (_baseDensity(x, y, z) <= 0f)
                 return 0;
@@ -484,9 +486,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? chunk))
-            return chunk.Content[index] > ContentIsoLevel
-                ? Volatile.Read(ref chunk.Material[index])
-                : (ushort)0;
+        {
+            byte material = Volatile.Read(ref chunk.Material[index]);
+            return chunk.Content[index] > ContentIsoLevel &&
+                material != byte.MaxValue
+                    ? material
+                    : (ushort)0;
+        }
 
         return _baseDensity(x, y, z) > 0f
             ? _baseMaterial(x, y, z)
@@ -504,9 +510,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? chunk))
-            return chunk.Content[index] > ContentIsoLevel
-                ? Volatile.Read(ref chunk.Material[index])
-                : (byte)0;
+        {
+            byte material = Volatile.Read(ref chunk.Material[index]);
+            return chunk.Content[index] > ContentIsoLevel &&
+                material != byte.MaxValue
+                    ? material
+                    : (byte)0;
+        }
 
         if (_baseDensity(x, y, z) <= 0f)
             return 0;
@@ -1268,7 +1278,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     byte baseContent = EncodeContent(baseDensity);
                     byte baseMaterial = baseDensity > 0f
                         ? checked((byte)_baseMaterial(worldX, worldY, worldZ))
-                        : (byte)0;
+                        : byte.MaxValue;
 
                     if (chunk.Content[index] == baseContent &&
                         chunk.Material[index] == baseMaterial)
@@ -2509,17 +2519,18 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         if (!IsInsideCell(x, y, z))
             return;
-        if (materialId > byte.MaxValue)
-            throw new ArgumentOutOfRangeException(nameof(materialId), "Voxel material IDs must fit in one byte.");
+        if (materialId >= byte.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(materialId), "Material ID 255 is reserved for NULL_MATERIAL.");
 
+        byte material = materialId == 0 ? byte.MaxValue : (byte)materialId;
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? existing) &&
-            existing.Material[index] == (byte)materialId)
+            existing.Material[index] == material)
             return;
 
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        Volatile.Write(ref chunk.Material[index], (byte)materialId);
+        Volatile.Write(ref chunk.Material[index], material);
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
@@ -2708,7 +2719,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             chunk.Material[index] =
                 density > 0f && worldX < Width && worldY < Height && worldZ < Depth
                     ? checked((byte)_baseMaterial(worldX, worldY, worldZ))
-                    : (byte)0;
+                    : byte.MaxValue;
         }
 
         return chunk;
@@ -2739,7 +2750,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             byte material =
                 density > 0f && worldX < Width && worldY < Height && worldZ < Depth
                     ? checked((byte)_baseMaterial(worldX, worldY, worldZ))
-                    : (byte)0;
+                    : byte.MaxValue;
             if (chunk.Material[index] != material)
                 return false;
         }
