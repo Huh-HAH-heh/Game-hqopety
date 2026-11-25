@@ -602,12 +602,12 @@ internal static class VoxelTerrainSelfTest
             baseMaterial: static (_, _, _) => (ushort)0);
 
         field.FillBox(
-            new Vector3(1.0f, 1.0f, 1.0f),
-            new Vector3(1.5f, 1.5f, 1.5f),
+            new Vector3(1.1f, 1.1f, 1.1f),
+            new Vector3(1.4f, 1.4f, 1.4f),
             Rock);
         field.FillBox(
-            new Vector3(2.6f, 1.0f, 1.0f),
-            new Vector3(3.1f, 1.5f, 1.5f),
+            new Vector3(2.7f, 1.1f, 1.1f),
+            new Vector3(3.0f, 1.4f, 1.4f),
             BridgeMaterial);
 
         if (field.GetBlockId(12, 12, 12) != Rock ||
