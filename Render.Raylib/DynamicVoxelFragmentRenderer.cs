@@ -223,23 +223,6 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         if (meshes.Count == 0)
             return false;
 
-        Vector3 position = snapshot.InitialCenterMeters;
-        Vector3 launchDirection = position - impulseOriginMeters;
-        if (launchDirection.LengthSquared() < 0.0001f)
-            launchDirection = Vector3.UnitY;
-        else
-            launchDirection = Vector3.Normalize(launchDirection);
-
-        Vector3 torqueAxis = Vector3.Cross(
-            launchDirection,
-            MathF.Abs(launchDirection.Y) < 0.85f
-                ? Vector3.UnitY
-                : Vector3.UnitX);
-        if (torqueAxis.LengthSquared() < 0.0001f)
-            torqueAxis = Vector3.UnitZ;
-        else
-            torqueAxis = Vector3.Normalize(torqueAxis);
-
         Body body = new()
         {
             Meshes = meshes.ToArray(),
