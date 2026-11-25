@@ -55,7 +55,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private const int LegacyContentMaskWordCount = (LegacySampleCount + 63) >> 6;
     private const byte DefaultEmptyContent = 0;
     private const byte ContentIsoLevel = 127;
-    private const byte DefaultEmptyContent = 95;
 
     internal sealed class Chunk
     {
