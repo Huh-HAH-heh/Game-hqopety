@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -113,6 +112,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             if (x < 0 || y < 0 || z < 0 ||
                 x >= Width || y > Height || z >= Depth)
                 return -1f;
+            if (y == Height)
+                return _baseDensity(x, y, z);
 
             ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
             int index = x % ChunkSize +
@@ -441,6 +442,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (x < 0 || y < 0 || z < 0 ||
             x >= Width || y > Height || z >= Depth)
             return -1f;
+        if (y == Height)
+            return _baseDensity(x, y, z);
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         if (_octreeIndex.TryGetLeaf(key, out Chunk? chunk))
@@ -2722,7 +2725,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int worldZ = originZ + z;
             int index = x + y * ChunkSize + z * CellPlane;
 
-            float density = worldX < Width && worldY <= Height && worldZ < Depth
+            float density = worldX < Width && worldY < Height && worldZ < Depth
                 ? _baseDensity(worldX, worldY, worldZ)
                 : -1f;
 
