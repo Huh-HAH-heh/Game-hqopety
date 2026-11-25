@@ -104,6 +104,12 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     public float VoxelRenderChunkSizeMeters =>
         _densityVoxelRenderer?.RenderChunkSizeMeters ?? 0f;
     public int CachedVoxelChunks => _densityVoxelRenderer?.CachedChunks ?? 0;
+    public double VoxelGpuCacheMegabytes =>
+        (_densityVoxelRenderer?.GpuCacheBytes ?? 0L) / (1024d * 1024d);
+    public double VoxelMeshBuildMilliseconds =>
+        _densityVoxelRenderer?.MeshBuildMillisecondsLastFrame ?? 0d;
+    public double VoxelLastMeshBuildMilliseconds =>
+        _densityVoxelRenderer?.LastMeshBuildMilliseconds ?? 0d;
     public int VoxelLodPrewarmBuilds => _densityVoxelRenderer?.LodPrewarmBuilds ?? 0;
     public double VoxelCpuCaptureMilliseconds => _densityVoxelRenderer?.CpuCaptureMilliseconds ?? 0d;
     public double VoxelGpuUploadMilliseconds => _densityVoxelRenderer?.GpuUploadMilliseconds ?? 0d;
