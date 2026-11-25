@@ -30,6 +30,68 @@ internal static class VoxelTerrainSelfTest
             BridgeMaterial);
     }
 
+    public static bool BulkBlockCaptureMatchesScalarReads()
+    {
+        static float Density(int x, int y, int z) =>
+            9.25f - (y + 0.5f) + (x % 3) * 0.125f - (z % 5) * 0.0625f;
+
+        static ushort Material(int x, int y, int z) =>
+            y < 9 && x > 1 && z > 1 ? (ushort)3 : (ushort)0;
+
+        static byte BlockId(int x, int y, int z) =>
+            SparseVoxelField.EncodeBlockId(Density(x, y, z), Material(x, y, z));
+
+        SparseVoxelField field = new(
+            width: 24,
+            height: 20,
+            depth: 24,
+            baseDensity: Density,
+            baseMaterial: Material,
+            baseBlockId: BlockId);
+
+        field.CarveBox(
+            new Vector3(0.7f, 0.7f, 0.7f),
+            new Vector3(1.1f, 1.2f, 1.1f));
+        field.FillBox(
+            new Vector3(0.8f, 0.8f, 0.8f),
+            new Vector3(1.2f, 1.4f, 1.2f),
+            materialId: 5);
+
+        const int side = 18;
+        byte[] captured = new byte[side * side * side];
+        bool hasSolid = field.CopyBlockIds(
+            startX: 7,
+            startY: 6,
+            startZ: 7,
+            side: side,
+            destination: captured);
+
+        bool scalarHasSolid = false;
+        for (int z = 0; z < side; z++)
+        for (int y = 0; y < side; y++)
+        for (int x = 0; x < side; x++)
+        {
+            byte expected = field.GetBlockId(7 + x, 6 + y, 7 + z);
+            byte actual = captured[x + y * side + z * side * side];
+            if (expected != actual)
+                return false;
+            scalarHasSolid |= expected != 0;
+        }
+
+        byte[] boundary = new byte[side * side * side];
+        field.CopyBlockIds(-1, -1, -1, side, boundary);
+        for (int z = 0; z < side; z++)
+        for (int y = 0; y < side; y++)
+        for (int x = 0; x < side; x++)
+        {
+            byte expected = field.GetBlockId(x - 1, y - 1, z - 1);
+            if (boundary[x + y * side + z * side * side] != expected)
+                return false;
+        }
+
+        return hasSolid == scalarHasSolid;
+    }
+
     public static bool StackedSurfacesAreFound()
     {
         SparseVoxelField field = CreateField();
