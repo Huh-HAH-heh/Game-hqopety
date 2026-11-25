@@ -602,6 +602,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     public int OctreeNodeCount => _octreeIndex.NodeCount;
     public int StorageDataCellSize => DataCellSize;
     public int DataCellDirectoryLength => _pageDirectory.Length;
+    public int DataCellDirectoryAllocatedBlocks => _pageDirectory.AllocatedBlockCount;
+    public long DataCellDirectoryEstimatedBytes => _pageDirectory.EstimatedDirectoryBytes;
     public int DataCellCountX => _pageDirectory.CountX;
     public int DataCellCountY => _pageDirectory.CountY;
     public int DataCellCountZ => _pageDirectory.CountZ;
