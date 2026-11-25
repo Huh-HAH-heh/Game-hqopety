@@ -70,13 +70,9 @@ internal sealed class SparseVoxelOctreeIndex
         if (!_nodes.TryRemove(Pack(0, leaf.X, leaf.Y, leaf.Z), out _))
             return;
 
+        bool childBecameEmpty = true;
         for (int lod = 1; lod <= _rootLevel; lod++)
         {
-            int childX = (leaf.X >> (lod - 1)) & 1;
-            int childY = (leaf.Y >> (lod - 1)) & 1;
-            int childZ = (leaf.Z >> (lod - 1)) & 1;
-            int childIndex = childX | (childY << 1) | (childZ << 2);
-
             int nodeX = leaf.X >> lod;
             int nodeY = leaf.Y >> lod;
             int nodeZ = leaf.Z >> lod;
@@ -85,11 +81,18 @@ internal sealed class SparseVoxelOctreeIndex
             if (!_nodes.TryGetValue(key, out Node? node))
                 return;
 
-            Interlocked.And(ref node.ChildMask, ~(1 << childIndex));
-            if (Interlocked.Decrement(ref node.LeafCount) != 0)
-                return;
+            if (childBecameEmpty)
+            {
+                int childX = (leaf.X >> (lod - 1)) & 1;
+                int childY = (leaf.Y >> (lod - 1)) & 1;
+                int childZ = (leaf.Z >> (lod - 1)) & 1;
+                int childIndex = childX | (childY << 1) | (childZ << 2);
+                Interlocked.And(ref node.ChildMask, ~(1 << childIndex));
+            }
 
-            _nodes.TryRemove(key, out _);
+            childBecameEmpty = Interlocked.Decrement(ref node.LeafCount) == 0;
+            if (childBecameEmpty)
+                _nodes.TryRemove(key, out _);
         }
     }
 
