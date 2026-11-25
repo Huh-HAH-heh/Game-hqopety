@@ -21,7 +21,7 @@ public enum BlockDirection : byte
 /// Region-compressed surface data for the discrete block world.
 /// Uniform regions store one surface level and material. Per-tile arrays
 /// are allocated only when a region receives a local surface or transition edit.
-/// Solid/air occupancy is stored in the unified SparseVoxelStore.
+/// Solid/air occupancy is stored in the unified SparseVoxelField.
 /// </summary>
 public sealed class BlockTerrain
 {
@@ -162,17 +162,14 @@ public sealed class BlockTerrain
 
     public int Width { get; }
     public int Height { get; }
-    // Edits must pass through WorldMap so its navigation and render caches stay coherent.
-    internal SparseVoxelStore Volumes { get; }
-
-    public BlockTerrain(int width, int height, int depth = 500)
+    // Edits pass through WorldMap; occupancy and materials live in SparseVoxelField.
+    public BlockTerrain(int width, int height)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
 
         Width = width;
         Height = height;
-        Volumes = new SparseVoxelStore(width, height, depth);
 
         int regionSize = TerrainRegion.TilesPerSide;
         _regionsX = (width + regionSize - 1) / regionSize;
