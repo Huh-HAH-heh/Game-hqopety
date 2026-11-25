@@ -1794,6 +1794,55 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             maxX, Height, maxZ));
     }
 
+    /// <summary>
+    /// Compresses page arrays and removes pages that exactly match the
+    /// procedural base field. Safe to call as an explicit maintenance pass.
+    /// </summary>
+    public int CompactStorage()
+    {
+        if (_historyCapture != null)
+            throw new InvalidOperationException("Finish the active voxel edit before compacting storage.");
+
+        List<ChunkCoordinate> leaves = new();
+        _octreeIndex.CollectLeaves(
+            0, 0, 0,
+            (Width - 1) / DataCellSize,
+            (Height - 1) / DataCellSize,
+            (Depth - 1) / DataCellSize,
+            leaves);
+
+        int removed = 0;
+        foreach (ChunkCoordinate key in leaves)
+        {
+            if (!TryGetPage(key, out Chunk? page) || page == null)
+                continue;
+
+            page.Compress();
+            if (PageMatchesBase(page, key))
+            {
+                _pageDirectory.Remove(key.X, key.Y, key.Z);
+                _octreeIndex.TryRemoveLeaf(key, out _);
+                removed++;
+            }
+            else
+            {
+                _octreeIndex.UpdateLeafConstitution(key, page);
+            }
+        }
+
+        if (removed > 0)
+        {
+            _editedChunkColumns.Clear();
+            foreach (ChunkCoordinate key in leaves)
+            {
+                if (TryGetPage(key, out _))
+                    _editedChunkColumns.Add((key.X, key.Z));
+            }
+        }
+
+        return removed;
+    }
+
     public void ClearEdits()
     {
         if (_octreeIndex.LeafCount == 0)
