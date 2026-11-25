@@ -215,6 +215,14 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         return Blocks[x + y * SampleSide + z * SamplePlane];
     }
 
+    // Mesher coordinates are bounded to -1..16 by its slice loops.
+    public byte GetBlockUnchecked(int x, int y, int z) =>
+        Blocks[
+            (x + HaloSize) +
+            (y + HaloSize) * SampleSide +
+            (z + HaloSize) * SamplePlane];
+
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -448,35 +456,7 @@ internal static class VoxelChunkMesher
                     Array.Clear(mask, 0, maskLength);
                     Array.Clear(signs, 0, maskLength);
 
-                    for (int v = 0; v < cells; v++)
-                    for (int u = 0; u < cells; u++)
-                    {
-                        GetCellCoordinates(
-                            axis, slice - 1, u, v,
-                            out int ax, out int ay, out int az);
-                        GetCellCoordinates(
-                            axis, slice, u, v,
-                            out int bx, out int by, out int bz);
-
-                        byte blockA = input.GetBlock(ax, ay, az);
-                        byte blockB = input.GetBlock(bx, by, bz);
-
-                        if (blockA == 0 && blockB == 0)
-                            continue;
-
-                        int index = u + v * cells;
-
-                        if (blockA != 0 && blockB == 0)
-                        {
-                            mask[index] = blockA;
-                            signs[index] = 1;
-                        }
-                        else if (blockA == 0 && blockB != 0)
-                        {
-                            mask[index] = blockB;
-                            signs[index] = -1;
-                        }
-                    }
+                    BuildFaceMask(input, mask, signs, axis, slice, cells);
 
                     GreedyEmitSlice(
                         input,
@@ -505,6 +485,74 @@ internal static class VoxelChunkMesher
         {
             ArrayPool<byte>.Shared.Return(mask, clearArray: false);
             ArrayPool<sbyte>.Shared.Return(signs, clearArray: false);
+        }
+    }
+
+    private static void BuildFaceMask(
+        VoxelChunkBuildInput input,
+        byte[] mask,
+        sbyte[] signs,
+        int axis,
+        int slice,
+        int cells)
+    {
+        if (axis == 0)
+        {
+            for (int z = 0; z < cells; z++)
+            {
+                int row = z * cells;
+                for (int y = 0; y < cells; y++)
+                {
+                    byte a = input.GetBlockUnchecked(slice - 1, y, z);
+                    byte b = input.GetBlockUnchecked(slice, y, z);
+                    SetFaceMask(mask, signs, row + y, a, b);
+                }
+            }
+        }
+        else if (axis == 1)
+        {
+            for (int x = 0; x < cells; x++)
+            {
+                int row = x * cells;
+                for (int z = 0; z < cells; z++)
+                {
+                    byte a = input.GetBlockUnchecked(x, slice - 1, z);
+                    byte b = input.GetBlockUnchecked(x, slice, z);
+                    SetFaceMask(mask, signs, row + z, a, b);
+                }
+            }
+        }
+        else
+        {
+            for (int y = 0; y < cells; y++)
+            {
+                int row = y * cells;
+                for (int x = 0; x < cells; x++)
+                {
+                    byte a = input.GetBlockUnchecked(x, y, slice - 1);
+                    byte b = input.GetBlockUnchecked(x, y, slice);
+                    SetFaceMask(mask, signs, row + x, a, b);
+                }
+            }
+        }
+    }
+
+    private static void SetFaceMask(
+        byte[] mask,
+        sbyte[] signs,
+        int index,
+        byte blockA,
+        byte blockB)
+    {
+        if (blockA != 0 && blockB == 0)
+        {
+            mask[index] = blockA;
+            signs[index] = 1;
+        }
+        else if (blockA == 0 && blockB != 0)
+        {
+            mask[index] = blockB;
+            signs[index] = -1;
         }
     }
 
