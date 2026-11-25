@@ -87,7 +87,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
     public int FieldHeight { get; }
     public int FieldDepth { get; }
 
-    public int CellsPerAxis { get; } = DefaultCellsPerAxis;
+    public int CellsPerAxis { get; }
     public int SampleSide { get; }
     public int SamplePlane { get; }
     public int TotalSamples { get; }
@@ -103,16 +103,21 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         int chunkX,
         int chunkY,
         int chunkZ,
-        int cutLayer = int.MinValue)
+        int cutLayer = int.MinValue,
+        int cellsPerAxis = DefaultCellsPerAxis)
     {
         ArgumentNullException.ThrowIfNull(field);
 
         if (chunkX < 0 || chunkY < 0 || chunkZ < 0)
             throw new ArgumentOutOfRangeException(nameof(chunkX));
+        if (cellsPerAxis < 8 || cellsPerAxis > 64 ||
+            (cellsPerAxis & (cellsPerAxis - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(cellsPerAxis));
 
         ChunkX = chunkX;
         ChunkY = chunkY;
         ChunkZ = chunkZ;
+        CellsPerAxis = cellsPerAxis;
 
         OriginX = checked(chunkX * CellsPerAxis);
         OriginY = checked(chunkY * CellsPerAxis);
@@ -483,7 +488,7 @@ internal static class VoxelChunkMesher
         if (!input.HasPotentialSurface)
             return Array.Empty<VoxelMeshData>();
 
-        const int cells = VoxelChunkBuildInput.DefaultCellsPerAxis;
+        int cells = input.CellsPerAxis;
         int maskLength = cells * cells;
 
         byte[] mask = ArrayPool<byte>.Shared.Rent(maskLength);
