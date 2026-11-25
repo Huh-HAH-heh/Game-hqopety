@@ -721,13 +721,17 @@ internal static class VoxelChunkMesher
         Vector3 p3 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v + height);
 
         Vector3 normal = AxisNormals[axis + (normalSign < 0 ? 3 : 0)];
+        Color color = palette.ApplyStaticLighting(
+            GetMaterialColor(palette, blockId),
+            normal);
+
         batch.AddQuad(
             p0,
             p1,
             p2,
             p3,
             normal,
-            GetMaterialColor(palette, blockId),
+            color,
             frontFace: normalSign > 0);
     }
 
