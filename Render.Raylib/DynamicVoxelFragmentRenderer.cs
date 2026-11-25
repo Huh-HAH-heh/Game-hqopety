@@ -19,6 +19,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     private const int MaximumChunksPerBody = 64;
     private const int DynamicChunkCells = SparseVoxelField.ChunkSize;
     private const long MaximumDynamicSnapshotBytes = 32L * 1024 * 1024;
+    private const long MaximumDynamicGpuBytes = 64L * 1024 * 1024;
     private const float Gravity = 9.81f;
     private const float MaximumFallSpeed = 45f;
     private const float SleepLinearSpeed = 0.12f;
@@ -28,6 +29,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     private sealed class Body : IDisposable
     {
         public required Mesh[] Meshes { get; set; }
+        public required long GpuBytes { get; init; }
         public required SparseVoxelField SourceField { get; init; }
         public required VoxelFragmentSnapshot Snapshot { get; init; }
         public required Vector3 Position { get; set; }
@@ -59,6 +61,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     private List<Body>? _pendingEdit;
     private int _activeBodyCount;
     private long _snapshotBytes;
+    private long _gpuMeshBytes;
     private bool _disposed;
 
     public int Count => _activeBodyCount;
@@ -92,6 +95,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 }
                 body.Dispose();
                 _snapshotBytes -= body.Snapshot.EstimatedBytes;
+                _gpuMeshBytes -= body.GpuBytes;
                 _bodies.Remove(body);
             }
             return;
@@ -188,6 +192,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             torqueAxis = Vector3.Normalize(torqueAxis);
 
         List<Mesh> meshes = new(4);
+        long gpuBytes = 0;
         try
         {
             for (int z = 0; z < chunksZ; z++)
@@ -203,7 +208,15 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 try
                 {
                     foreach (VoxelMeshData meshData in data)
+                    {
+                        long meshBytes = (long)meshData.VertexCount * 28L +
+                            (long)meshData.IndexCount * sizeof(ushort);
+                        if (_gpuMeshBytes + gpuBytes + meshBytes > MaximumDynamicGpuBytes)
+                            throw new InvalidOperationException("Dynamic fragment GPU cache is full.");
+
                         meshes.Add(VoxelChunkMesher.UploadOne(meshData));
+                        gpuBytes += meshBytes;
+                    }
                 }
                 finally
                 {
@@ -226,6 +239,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         Body body = new()
         {
             Meshes = meshes.ToArray(),
+            GpuBytes = gpuBytes,
             SourceField = sourceField,
             Snapshot = snapshot,
             Position = position,
@@ -239,6 +253,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         _bodies.Add(body);
         _activeBodyCount++;
         _snapshotBytes += snapshot.EstimatedBytes;
+        _gpuMeshBytes += gpuBytes;
         _pendingEdit?.Add(body);
         return true;
     }
@@ -349,6 +364,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             body.Active = false;
             _activeBodyCount--;
             _snapshotBytes -= body.Snapshot.EstimatedBytes;
+            _gpuMeshBytes -= body.GpuBytes;
             body.Dispose();
             _bodies.RemoveAt(i);
             RemoveFromHistory(body);
@@ -365,6 +381,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         _pendingEdit = null;
         _activeBodyCount = 0;
         _snapshotBytes = 0;
+        _gpuMeshBytes = 0;
     }
 
     private bool MakeRoomForBody()
@@ -379,6 +396,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         Body expired = _bodies[inactiveIndex];
         expired.Dispose();
         _snapshotBytes -= expired.Snapshot.EstimatedBytes;
+        _gpuMeshBytes -= expired.GpuBytes;
         _bodies.RemoveAt(inactiveIndex);
         RemoveFromHistory(expired);
         return true;
@@ -429,6 +447,7 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 continue;
             body.Dispose();
             _snapshotBytes -= body.Snapshot.EstimatedBytes;
+            _gpuMeshBytes -= body.GpuBytes;
             _bodies.Remove(body);
             RemoveFromHistory(body);
         }
