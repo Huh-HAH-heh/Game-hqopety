@@ -82,6 +82,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
         public long GpuBytes;
+        public long BlockedCacheBytes = -1;
         public int Revision;
         public int FailedRevision = int.MinValue;
         public bool Dirty = true;
@@ -290,6 +291,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 _totalIdenticalSurfaceSkips++;
             }
             else if (entry.FailedRevision != entry.Revision &&
+                     entry.BlockedCacheBytes != _gpuCacheBytes &&
                      (buildsThisFrame == 0 ||
                       (buildsThisFrame < MaximumBuildsPerFrame &&
                        buildBudget.Elapsed.TotalMilliseconds < MeshBuildBudgetMilliseconds)))
@@ -402,9 +404,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     (long)meshData.IndexCount * sizeof(ushort);
             }
 
-            if (!EnsureGpuCacheSpace(key, entry.GpuBytes, requiredGpuBytes))
+            if (requiredGpuBytes > MaximumGpuCacheBytes)
             {
                 entry.FailedRevision = entry.Revision;
+                return;
+            }
+
+            if (!EnsureGpuCacheSpace(key, entry.GpuBytes, requiredGpuBytes))
+            {
+                entry.BlockedCacheBytes = _gpuCacheBytes;
                 return;
             }
 
@@ -425,6 +433,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             entry.PaletteVersion = _paletteVersion;
             _gpuCacheBytes += requiredGpuBytes - entry.GpuBytes;
             entry.GpuBytes = requiredGpuBytes;
+            entry.BlockedCacheBytes = -1;
             entry.CutLayer = cutLayer;
             entry.Dirty = false;
             entry.Built = true;
