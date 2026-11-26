@@ -263,6 +263,62 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Volatile.Write(ref _materialCount, next.Length);
         }
 
+        public void LoadLegacy(
+            short[] density,
+            byte[] densityMask,
+            ushort[] materials,
+            byte[] materialMask)
+        {
+            int densityCount = 0;
+            int materialCount = 0;
+            for (int i = 0; i < SampleCount; i++)
+                densityCount += densityMask[i];
+            for (int i = 0; i < CellCount; i++)
+                materialCount += materialMask[i];
+
+            if (densityCount >= DensePromotionThreshold)
+            {
+                long[] mask = new long[MaskWords];
+                for (int i = 0; i < SampleCount; i++)
+                    if (densityMask[i] != 0)
+                        mask[i >> 6] |= 1L << (i & 63);
+                Volatile.Write(ref _denseDensityMask, mask);
+                Volatile.Write(ref _denseDensity, (short[])density.Clone());
+                Volatile.Write(ref _densityCount, densityCount);
+            }
+            else if (densityCount > 0)
+            {
+                DensityEntry[] entries = new DensityEntry[densityCount];
+                int cursor = 0;
+                for (int i = 0; i < SampleCount; i++)
+                    if (densityMask[i] != 0)
+                        entries[cursor++] = new DensityEntry((ushort)i, density[i]);
+                Volatile.Write(ref _sparseDensity, entries);
+                Volatile.Write(ref _densityCount, densityCount);
+            }
+
+            if (materialCount >= DensePromotionThreshold)
+            {
+                long[] mask = new long[MaskWords];
+                for (int i = 0; i < CellCount; i++)
+                    if (materialMask[i] != 0)
+                        mask[i >> 6] |= 1L << (i & 63);
+                Volatile.Write(ref _denseMaterialMask, mask);
+                Volatile.Write(ref _denseMaterials, (ushort[])materials.Clone());
+                Volatile.Write(ref _materialCount, materialCount);
+            }
+            else if (materialCount > 0)
+            {
+                MaterialEntry[] entries = new MaterialEntry[materialCount];
+                int cursor = 0;
+                for (int i = 0; i < CellCount; i++)
+                    if (materialMask[i] != 0)
+                        entries[cursor++] = new MaterialEntry((ushort)i, materials[i]);
+                Volatile.Write(ref _sparseMaterials, entries);
+                Volatile.Write(ref _materialCount, materialCount);
+            }
+        }
+
         public bool RemoveDensity(int index)
         {
             short[]? dense = Volatile.Read(ref _denseDensity);
@@ -682,6 +738,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             return count;
         }
     }
+    public int DenseChunkCount => ChunkCount - SparseChunkCount;
     public int UndoCount => _undoHistory.Count;
     public int RedoCount => _redoHistory.Count;
     public bool CanUndo => _undoHistory.Count > 0;
@@ -1384,20 +1441,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                         throw new EndOfStreamException();
 
                     for (int i = 0; i < SampleCount; i++)
-                    {
                         if (densityMask[i] > 1)
                             throw new InvalidDataException("The voxel save contains an invalid density mask.");
-                        if (densityMask[i] != 0)
-                            chunk.SetDensity(i, density[i]);
-                    }
-
                     for (int i = 0; i < CellCount; i++)
-                    {
                         if (materialMask[i] > 1)
                             throw new InvalidDataException("The voxel save contains an invalid material mask.");
-                        if (materialMask[i] != 0)
-                            chunk.SetMaterial(i, materials[i]);
-                    }
+
+                    chunk.LoadLegacy(density, densityMask, materials, materialMask);
                 }
                 else
                 {
