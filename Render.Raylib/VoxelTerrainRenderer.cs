@@ -407,8 +407,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         VisibleMacroRegionsLastFrame = visibleMacroRegions;
         CandidateOverflowLastFrame = 0;
         Step1ChunksLastFrame = RenderStep == 1 ? candidates.Count : 0;
-        Step2ChunksLastFrame = RenderStep == 2 ? candidates.Count : 0;
-        Step4ChunksLastFrame = RenderStep == 4 ? candidates.Count : 0;
         _visibleCandidateKeys.Clear();
 
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
