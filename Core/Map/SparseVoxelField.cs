@@ -926,21 +926,23 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int chunkX,
         int chunkY,
         int chunkZ,
-        int step)
+        int step,
+        int cellsPerAxis = ChunkSize)
     {
-        if (chunkX < 0 || chunkY < 0 || chunkZ < 0 || step <= 0)
+        if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
+            step <= 0 || cellsPerAxis <= 0)
             throw new ArgumentOutOfRangeException(nameof(step));
 
-        int originX = chunkX * ChunkSize * step;
-        int originY = chunkY * ChunkSize * step;
-        int originZ = chunkZ * ChunkSize * step;
+        int originX = checked(chunkX * cellsPerAxis * step);
+        int originY = checked(chunkY * cellsPerAxis * step);
+        int originZ = checked(chunkZ * cellsPerAxis * step);
 
-        int minX = Math.Max(0, originX - step * 2);
-        int minY = Math.Max(0, originY - step * 2);
-        int minZ = Math.Max(0, originZ - step * 2);
-        int maxX = Math.Min(Width - 1, originX + (ChunkSize + 1) * step);
-        int maxY = Math.Min(Height, originY + (ChunkSize + 1) * step);
-        int maxZ = Math.Min(Depth - 1, originZ + (ChunkSize + 1) * step);
+        int minX = Math.Max(0, originX - step);
+        int minY = Math.Max(0, originY - step);
+        int minZ = Math.Max(0, originZ - step);
+        int maxX = Math.Min(Width - 1, originX + (cellsPerAxis + 1) * step);
+        int maxY = Math.Min(Height, originY + (cellsPerAxis + 1) * step);
+        int maxZ = Math.Min(Depth - 1, originZ + (cellsPerAxis + 1) * step);
 
         int minChunkX = minX / ChunkSize;
         int minChunkY = minY / ChunkSize;
