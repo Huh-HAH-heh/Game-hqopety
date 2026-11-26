@@ -1627,7 +1627,9 @@ private void PrepareCandidateEntries(
         int readyAtFrameStart = _readyUploadQueue.Count;
         int visited = 0;
 
-        while (visited < readyAtFrameStart)
+        while (forceWholeBatch
+            ? _readyUploadQueue.Count > 0
+            : visited < readyAtFrameStart)
         {
             if (!forceWholeBatch &&
                 (GpuUploadsLastFrame >= MaximumGpuMeshUploadsPerFrame ||
