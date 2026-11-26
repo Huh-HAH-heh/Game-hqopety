@@ -61,7 +61,7 @@ public static class RaylibTerrainViewer
             TerrainRenderSnapshot.Create(worldMap, settings.TerrainMode);
         renderLogger.Write(RenderLogMode.Detailed, "WORLD_SNAPSHOT_READY",
             $"mode={settings.TerrainMode} regions={terrain.RegionsX}x{terrain.RegionsY} storage={terrain.StorageRegionsX}x{terrain.StorageRegionsY} world={terrain.WorldWidth:0.0}x{terrain.WorldDepth:0.0}m height={terrain.VerticalWorldExtentMeters:0.0}m elapsedMs={Stopwatch.GetElapsedTime(snapshotStarted).TotalMilliseconds:0.000}");
-        TerrainRenderSnapshot?         ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
+        ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
         if (settings.VSync)
             windowFlags |= ConfigFlags.VSyncHint;
         if (settings.Msaa4x)
