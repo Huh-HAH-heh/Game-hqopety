@@ -1589,8 +1589,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     /// </summary>
     public ulong GetPotentialVerticalChunkMask(int macroX, int macroZ, int macroCells)
     {
-        if (macroX < 0 || macroZ < 0 || macroCells <= 0 ||
-            macroCells % ChunkSize != 0)
+        if (macroX < 0 || macroZ < 0 || macroCells != SpatialMacroSize)
             throw new ArgumentOutOfRangeException(nameof(macroCells));
 
         ulong mask = 0;
@@ -1630,7 +1629,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int removed = 0;
         foreach ((ChunkCoordinate key, Chunk chunk) in _chunks)
         {
-            if (!chunk.IsEmpty && chunk.EstimatedBytes != 0)
+            if (!chunk.IsEmpty)
                 continue;
             if (_chunks.TryRemove(key, out _))
                 removed++;
