@@ -974,7 +974,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 localZ * CellPlane;
 
             if (chunk.TryGetMaterial(materialIndex, out ushort material))
-                return checked((byte)material;
+                return checked((byte)material);
         }
 
         return checked((byte)_baseMaterial(x, y, z));
