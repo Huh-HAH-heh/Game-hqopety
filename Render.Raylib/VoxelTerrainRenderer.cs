@@ -103,6 +103,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         """;
 
     private readonly record struct ChunkKey(int X, int Y, int Z, int Step);
+    private readonly record struct BuildGroupKey(int X, int Y, int Z, int Step);
 
     private sealed class ChunkEntry : IDisposable
     {
@@ -218,6 +219,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         long Generation);
 
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
+    // One immutable source snapshot is shared by every 128³ region in a 2×2×2 build group.
+    private readonly Dictionary<BuildGroupKey, IVoxelFieldSource> _buildBatchSnapshots = new();
     private readonly Dictionary<ChunkKey, ChunkGpuHashes> _gpuMeshHashCache = new();
 
     private readonly Queue<ReadyUpload> _readyUploadQueue = new();
@@ -425,6 +428,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.Update(field, frameTime);
 
         _frame++;
+        _buildBatchSnapshots.Clear();
         RebuiltChunks = 0;
         RebuiltCutCaps = 0;
         CpuCaptureMillisecondsLastFrame = 0d;
@@ -1207,8 +1211,16 @@ private void PrepareCandidateEntries(
         CancellationTokenSource? cancellation = null;
         try
         {
-            IVoxelFieldSource source = field.CreateChunkSnapshot(
-                key.X, key.Y, key.Z, key.Step, ChunkCells);
+            BuildGroupKey group = new(
+                key.X / 2, key.Y / 2, key.Z / 2, key.Step);
+            if (!_buildBatchSnapshots.TryGetValue(group, out IVoxelFieldSource? source))
+            {
+                source = field.CreateChunkSnapshot(
+                    group.X, group.Y, group.Z,
+                    key.Step, ChunkCells * 2);
+                _buildBatchSnapshots.Add(group, source);
+            }
+
             input = new VoxelChunkBuildInput(
                 source, key.X, key.Y, key.Z,
                 cutLayer, key.Step, ChunkCells);
@@ -2150,6 +2162,7 @@ private void PrepareCandidateEntries(
         DrainCompletedBuildQueue();
         _dynamicFragments.Dispose();
         _chunks.Clear();
+        _buildBatchSnapshots.Clear();
         _gpuMeshHashCache.Clear();
         _readyUploadQueue.Clear();
         _evictionQueue.Clear();
