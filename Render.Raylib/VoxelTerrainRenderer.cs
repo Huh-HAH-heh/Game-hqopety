@@ -248,7 +248,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ChunkCells * _activeStep * SparseVoxelField.VoxelSizeMeters;
     public bool IsUsingCoarseLod => _activeStep > 1;
     public int Step1ChunksLastFrame { get; private set; }
-    public int Step4ChunksLastFrame => 0;
+    public int Step4ChunksLastFrame { get; private set; }
     public int Step16ChunksLastFrame => 0;
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleChunksLastFrame { get; private set; }
@@ -406,7 +406,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         MacroFrustumTestsLastFrame = macroFrustumTests;
         VisibleMacroRegionsLastFrame = visibleMacroRegions;
         CandidateOverflowLastFrame = 0;
-        Step1ChunksLastFrame = candidates.Count;
+        Step1ChunksLastFrame = _activeStep == 1 ? candidates.Count : 0;
+        Step4ChunksLastFrame = _activeStep == 4 ? candidates.Count : 0;
         _visibleCandidateKeys.Clear();
 
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
@@ -557,7 +558,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count;
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
-            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} candidates={Step1ChunksLastFrame} visible={VisibleChunksLastFrame} draws={DrawCallsLastFrame} cache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers=0 buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} workerMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
+            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={_activeStep} candidates={VisibleCandidatesLastFrame} visible={VisibleChunksLastFrame} draws={DrawCallsLastFrame} cache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers=0 buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
     }
 
     private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
@@ -1055,7 +1056,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             {
                 _totalBuildFailed++;
                 entry.FailedRevision = request.RequestRevision;
-                _logger.Error("MESH_FAILED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=missing worker result");
+                _logger.Error("MESH_FAILED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=missing build result");
                 continue;
             }
 
@@ -1091,7 +1092,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _totalBuildCompleted++;
             BuildsCompletedLastFrame++;
             if (_logger.IsEnabled(RenderLogMode.Detailed))
-                _logger.Write(RenderLogMode.Detailed, "MESH_RESULT_ACCEPTED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} ms={build.WorkerMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount} surfacePackets={build.Surface.Length} cutPackets={build.CutCap.Length}");
+                _logger.Write(RenderLogMode.Detailed, "MESH_RESULT_ACCEPTED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} buildMs={build.WorkerMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount} surfacePackets={build.Surface.Length} cutPackets={build.CutCap.Length}");
             WorkerBuildMillisecondsLastFrame += build.WorkerMilliseconds;
             LastWorkerBuildMilliseconds = build.WorkerMilliseconds;
             LastWorkerQueueWaitMilliseconds = Math.Max(
