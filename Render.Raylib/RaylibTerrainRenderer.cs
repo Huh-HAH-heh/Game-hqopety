@@ -93,6 +93,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private SparseVoxelField? _observedVoxelField;
     private int _worldTileWidth;
     private int _worldTileDepth;
+    private int _storageRegionsX;
     private bool _disposed;
 
     public int DrawCallsLastFrame { get; private set; }
@@ -261,6 +262,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         _worldTileWidth = terrain.RegionsX;
         _worldTileDepth = terrain.RegionsY;
+        _storageRegionsX = terrain.StorageRegionsX;
     }
 
     private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
@@ -281,8 +283,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         for (int regionZ = firstRegionZ; regionZ <= lastRegionZ; regionZ++)
         for (int regionX = firstRegionX; regionX <= lastRegionX; regionX++)
         {
-            int index = regionX + regionZ * (int)Math.Ceiling(
-                _worldTileWidth / (double)TerrainRegion.TilesPerSide);
+            int index = regionX + regionZ * _storageRegionsX;
             if ((uint)index >= (uint)_regionMeshes.Length)
                 continue;
 
@@ -474,7 +475,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         if (_mode == TerrainRenderMode.Voxel && drawTerrain.CutawayEnabled)
         {
-            // The base volume is clipped in the GPU. Cut caps are separate
+            // The base surface is clipped in the GPU. Cut caps are separate
             // meshes, rendered without clipping and rebuilt independently.
             SetVoxelCutShader(enabled: false, height: drawTerrain.CutawayHeightMeters);
 
