@@ -1274,13 +1274,6 @@ private void PrepareCandidateEntries(
             if (Volatile.Read(ref _workerStopping) != 0)
                 break;
 
-            if (Interlocked.Decrement(ref _pendingBatchWakeTokens) == 0)
-            {
-                Volatile.Write(ref _batchWakePending, 0);
-                if (!_buildQueue.IsEmpty)
-                    SignalBuildWorkers();
-            }
-
             while (_buildQueue.TryDequeue(out BuildRequest? request))
             {
                 Interlocked.Increment(ref _runningMeshJobs);
@@ -1292,6 +1285,13 @@ private void PrepareCandidateEntries(
                 {
                     Interlocked.Decrement(ref _runningMeshJobs);
                 }
+            }
+
+            if (Interlocked.Decrement(ref _pendingBatchWakeTokens) == 0)
+            {
+                Volatile.Write(ref _batchWakePending, 0);
+                if (!_buildQueue.IsEmpty)
+                    SignalBuildWorkers();
             }
         }
 
