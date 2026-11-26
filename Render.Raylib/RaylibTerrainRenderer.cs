@@ -295,6 +295,30 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         float maximumViewDistanceMeters)
     {
         ThrowIfDisposed();
+
+        if (_mode == TerrainRenderMode.Voxel)
+        {
+            long voxelDrawStarted = Stopwatch.GetTimestamp();
+            _densityVoxelRenderer!.Draw(
+                terrain.Voxels,
+                camera,
+                viewportWidth,
+                viewportHeight,
+                maximumViewDistanceMeters,
+                terrain.CutawayEnabled,
+                terrain.CutawayHeightMeters);
+
+            DrawCallsLastFrame = _densityVoxelRenderer.DrawCallsLastFrame;
+            VisibleRegionsLastFrame = _densityVoxelRenderer.VisibleChunksLastFrame;
+            RebuiltRegions = _densityVoxelRenderer.RebuiltChunks;
+            CutSurfaceRebuilds = _densityVoxelRenderer.RebuiltCutCaps;
+
+            if (_logger.IsEnabled(RenderLogMode.FrameSummary))
+                _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
+                    $"backend=density-surface-nets-only elapsedMs={Stopwatch.GetElapsedTime(voxelDrawStarted).TotalMilliseconds:0.000} visibleChunks={VisibleRegionsLastFrame} draws={DrawCallsLastFrame} rebuilt={RebuiltRegions} cutCaps={CutSurfaceRebuilds}");
+            return;
+        }
+
         long drawStarted = Stopwatch.GetTimestamp();
         RebuiltRegions = 0;
         CutSurfaceRebuilds = 0;
@@ -329,9 +353,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         int visibleDrawCalls = 0;
         int baseBuildsThisFrame = 0;
         int cutBuildsThisFrame = 0;
-        int maximumBaseBuilds = _mode == TerrainRenderMode.Voxel
-            ? int.MaxValue
-            : MaximumHeightmapMeshBuildsPerFrame;
+        int maximumBaseBuilds = MaximumHeightmapMeshBuildsPerFrame;
         int cutLayer = drawTerrain.CutawayEnabled ? drawTerrain.CutawayLayer : -1;
 
         int regionCount = drawMeshes.Length;
@@ -357,8 +379,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 region == null ||
                 region.RegionVersion != drawTerrain.SourceRegionVersions[i] ||
                 region.PaletteVersion != _paletteVersion ||
-                (_mode == TerrainRenderMode.HeightmapFallback &&
-                 region.CutawayLayer != cutLayer);
+                region.CutawayLayer != cutLayer;
 
             if (baseIsStale)
             {
@@ -373,11 +394,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 {
                     int regionX = i % terrain.StorageRegionsX;
                     int regionY = i / terrain.StorageRegionsX;
-                    RegionGpuMesh rebuilt = _mode == TerrainRenderMode.Voxel
-                        ? RegionMeshBuilder.BuildVoxel(
-                            drawTerrain, regionX, regionY, _palette, _paletteVersion)
-                        : RegionMeshBuilder.Build(
-                            drawTerrain, regionX, regionY, _palette, _paletteVersion);
+                    RegionGpuMesh rebuilt = RegionMeshBuilder.Build(
+                        drawTerrain, regionX, regionY, _palette, _paletteVersion);
 
                     // Swap only after a successful build/upload. The old mesh
                     // remains drawable if building the replacement throws.
@@ -393,45 +411,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             if (region == null || !region.IsUploaded)
                 continue;
 
-            if (_mode == TerrainRenderMode.Voxel && drawTerrain.CutawayEnabled)
-            {
-                if (region.CutSurfaceLayer != cutLayer &&
-                    cutBuildsThisFrame < MaximumCutSurfaceBuildsPerFrame)
-                {
-                    int regionX = i % terrain.StorageRegionsX;
-                    int regionY = i / terrain.StorageRegionsX;
-                    Mesh[] rebuiltCutMeshes = RegionMeshBuilder.BuildVoxelCutSurface(
-                        drawTerrain,
-                        regionX,
-                        regionY,
-                        cutLayer,
-                        _palette);
-
-                    // Build first and swap second. Never unload a valid cut cap
-                    // before its replacement has finished being generated.
-                    Mesh[] previousCutMeshes = region.CutMeshes;
-                    region.CutMeshes = rebuiltCutMeshes;
-                    region.CutSurfaceLayer = cutLayer;
-                    foreach (Mesh mesh in previousCutMeshes)
-                        UnloadMesh(mesh);
-
-                    cutBuildsThisFrame++;
-                    CutSurfaceRebuilds++;
-                    _logger.Write(RenderLogMode.Detailed, "REGION_CUT_MESH_REBUILT", $"index={i} region=({regionX},{regionY}) layer={cutLayer} meshes={rebuiltCutMeshes.Length}");
-                }
-            }
-            else if (region.CutMeshes.Length > 0)
-            {
+            if (region.CutMeshes.Length > 0)
                 ClearCutMeshes(region);
-            }
 
             _visibleRegionMeshes[visibleRegionCount++] = region;
         }
-
-        SetVoxelCutShader(
-            enabled: _mode == TerrainRenderMode.Voxel && drawTerrain.CutawayEnabled,
-            height: drawTerrain.CutawayHeightMeters);
-        SetVoxelLighting();
 
         BeginMode3D(camera);
 
@@ -445,56 +429,17 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             }
         }
 
-        if (_mode == TerrainRenderMode.Voxel && drawTerrain.CutawayEnabled)
-        {
-            // The base surface is clipped in the GPU. Cut caps are separate
-            // meshes, rendered without clipping and rebuilt independently.
-            SetVoxelCutShader(enabled: false, height: drawTerrain.CutawayHeightMeters);
-
-            for (int i = 0; i < visibleRegionCount; i++)
-            {
-                RegionGpuMesh region = _visibleRegionMeshes[i]!;
-                if (region.CutSurfaceLayer != cutLayer)
-                    continue;
-
-                foreach (Mesh mesh in region.CutMeshes)
-                {
-                    DrawMesh(mesh, _material, Matrix4x4.Identity);
-                    visibleDrawCalls++;
-                }
-            }
-        }
-
         EndMode3D();
 
         Array.Clear(_visibleRegionMeshes, 0, visibleRegionCount);
         if (regionCount > 0)
             _regionBuildCursor = (scanStart + 1) % regionCount;
 
-        int editedVoxelDrawCalls = 0;
-        int editedVoxelVisible = 0;
-        if (_densityVoxelRenderer != null)
-        {
-            _densityVoxelRenderer.Draw(
-                terrain.Voxels,
-                camera,
-                viewportWidth,
-                viewportHeight,
-                maximumViewDistanceMeters,
-                terrain.CutawayEnabled,
-                terrain.CutawayHeightMeters);
-
-            editedVoxelDrawCalls = _densityVoxelRenderer.DrawCallsLastFrame;
-            editedVoxelVisible = _densityVoxelRenderer.VisibleChunksLastFrame;
-            RebuiltRegions += _densityVoxelRenderer.RebuiltChunks;
-            CutSurfaceRebuilds += _densityVoxelRenderer.RebuiltCutCaps;
-        }
-
-        DrawCallsLastFrame = visibleDrawCalls + editedVoxelDrawCalls;
-        VisibleRegionsLastFrame = visibleRegionCount + editedVoxelVisible;
+        DrawCallsLastFrame = visibleDrawCalls;
+        VisibleRegionsLastFrame = visibleRegionCount;
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
             _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
-                $"backend={(_mode == TerrainRenderMode.Voxel ? "density-surface-nets-only" : "heightmap-regions")} elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visibleRegions={visibleRegionCount} voxelChunks={editedVoxelVisible} draws={DrawCallsLastFrame} regionBuilds={baseBuildsThisFrame} cutBuilds={cutBuildsThisFrame}");
+                $"backend=heightmap-regions elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visibleRegions={visibleRegionCount} draws={DrawCallsLastFrame} regionBuilds={baseBuildsThisFrame}");
     }
 
     public int DetachLooseFragments(
