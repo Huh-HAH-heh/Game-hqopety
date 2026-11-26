@@ -222,6 +222,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // One immutable snapshot represents the entire sparse voxel field and is reused
     // until the field version changes. Per-chunk density buffers are created by workers.
     private IVoxelFieldSource? _worldBuildSnapshot;
+    private SparseVoxelField? _snapshotField;
     private long _worldBuildSnapshotVersion = long.MinValue;
     private long _worldBuildSnapshotBaseVersion = long.MinValue;
     private readonly HashSet<ChunkKey> _initialBuildBatchKeys = new();
@@ -1276,10 +1277,12 @@ private void PrepareCandidateEntries(
     private IVoxelFieldSource GetWorldBuildSnapshot(SparseVoxelField field)
     {
         if (_worldBuildSnapshot == null ||
+            !ReferenceEquals(_snapshotField, field) ||
             _worldBuildSnapshotVersion != field.Version ||
             _worldBuildSnapshotBaseVersion != field.BaseVersion)
         {
             _worldBuildSnapshot = field.CreateWorldSnapshot();
+            _snapshotField = field;
             _worldBuildSnapshotVersion = field.Version;
             _worldBuildSnapshotBaseVersion = field.BaseVersion;
         }
@@ -2220,6 +2223,7 @@ private void PrepareCandidateEntries(
         _dynamicFragments.Dispose();
         _chunks.Clear();
         _worldBuildSnapshot = null;
+        _snapshotField = null;
         _initialBuildBatchKeys.Clear();
         _gpuMeshHashCache.Clear();
         _readyUploadQueue.Clear();
