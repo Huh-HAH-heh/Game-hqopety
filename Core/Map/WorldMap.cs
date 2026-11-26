@@ -131,7 +131,8 @@ public sealed class WorldMap
             _baseVoxelHeight,
             _baseVoxelDepth,
             SampleBaseVoxelDensity,
-            SampleBaseVoxelMaterial);
+            SampleBaseVoxelMaterial,
+            GetBaseVoxelSurfaceRange);
         Voxels.Changed += OnVoxelFieldChanged;
     }
 
@@ -1747,6 +1748,42 @@ public sealed class WorldMap
 
     public void SmoothVoxelSphere(Vector3 centerMeters, float radiusMeters, float strength = 0.5f) =>
         Voxels.SmoothSphere(centerMeters, radiusMeters, strength);
+
+    /// <summary>
+    /// Returns the height range of the procedural base inside a voxel X/Z macro.
+    /// Surface heights are already stored in 0.1 m units, so this query avoids
+    /// sampling the 3D volume merely to discover its vertical exterior band.
+    /// </summary>
+    private (int Min, int Max) GetBaseVoxelSurfaceRange(
+        int minX,
+        int maxX,
+        int minZ,
+        int maxZ)
+    {
+        if (minX >= _baseVoxelWidth || minZ >= _baseVoxelDepth ||
+            maxX <= 0 || maxZ <= 0 || maxX <= minX || maxZ <= minZ)
+            return (-1, -1);
+
+        int firstTileX = Math.Clamp(minX / 10, 0, TileWidth - 1);
+        int firstTileZ = Math.Clamp(minZ / 10, 0, TileHeight - 1);
+        int lastTileX = Math.Clamp((Math.Min(maxX, _baseVoxelWidth) - 1) / 10, 0, TileWidth - 1);
+        int lastTileZ = Math.Clamp((Math.Min(maxZ, _baseVoxelDepth) - 1) / 10, 0, TileHeight - 1);
+
+        int minimum = int.MaxValue;
+        int maximum = -1;
+        for (int z = firstTileZ; z <= lastTileZ; z++)
+        for (int x = firstTileX; x <= lastTileX; x++)
+        {
+            int height = Volatile.Read(ref _surfaceHeights[GetColumnIndex(x, z)]);
+            if (height <= 0)
+                continue;
+
+            minimum = Math.Min(minimum, height);
+            maximum = Math.Max(maximum, height);
+        }
+
+        return maximum < 0 ? (-1, -1) : (minimum, maximum);
+    }
 
     /// <summary>
     /// Samples the procedural base as a continuous signed-distance approximation.
