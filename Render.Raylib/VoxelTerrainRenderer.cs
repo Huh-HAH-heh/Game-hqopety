@@ -18,16 +18,19 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
-    private const int ChunkCells = VoxelChunkBuildInput.DefaultCellsPerAxis;
-    private const int MaximumPendingMeshJobs = 24;
+    // One build/draw region batches eight former 64³ chunks into one 128³ volume.
+    private const int ChunkCells = VoxelChunkBuildInput.DefaultCellsPerAxis * 2;
+    // A 131³ density input is about 9 MiB; keep queued snapshots bounded.
+    private const int MaximumPendingMeshJobs = 8;
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
     private const int MaximumGpuMeshUploadsPerFrame = 16;
     private const double GpuUploadBudgetMilliseconds = 3.0;
     private const int CutCapSettleFrames = 8;
     private const int MaximumRenderStep = 64;
     private const int CacheEvictionScanBudget = 4096;
-    private const int MaximumCachedChunks = 16384;
-    private const int VisibilityGroupChunks = 8;
+    private const int MaximumCachedChunks = 4096;
+    // Keep the visibility hierarchy's world-space group width near 51.2 m.
+    private const int VisibilityGroupChunks = 4;
     private const float LodFadeDurationSeconds = 0.25f;
 
     private const string VertexShader = """
