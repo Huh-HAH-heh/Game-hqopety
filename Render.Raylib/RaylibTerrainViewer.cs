@@ -902,8 +902,7 @@ public static class RaylibTerrainViewer
         RaylibViewerSettings settings,
         Font font,
         OrbitCameraController camera,
-        string voxelToolStatus,
-        TerrainPipelineLogger logger)
+        string voxelToolStatus)
     {
         int screenWidth = Math.Max(1, GetScreenWidth());
         int screenHeight = Math.Max(1, GetScreenHeight());
@@ -1071,8 +1070,7 @@ public static class RaylibTerrainViewer
                 textY,
                 fontSize,
                 maxTextWidth,
-                color,
-                logger);
+                color);
             textY += lineGap;
         }
     }
@@ -1084,8 +1082,7 @@ public static class RaylibTerrainViewer
         float y,
         float fontSize,
         float maximumWidth,
-        Color color,
-        TerrainPipelineLogger logger)
+        Color color)
     {
         string fittedText = text;
         const float minimumSize = 16f;
