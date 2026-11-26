@@ -592,8 +592,4 @@ internal static class VoxelTerrainSelfTest
         }
         return lowerFloorSelected;
     }
-
-
-
-
 }
