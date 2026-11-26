@@ -1,38 +1,50 @@
-## ========================================================
-## БРОНИРОВАННЫЙ .GITIGNORE ПОД C# / .NET / SFML.NET
-## ========================================================
+# ========================================================
+# RimClone — .NET / C# / Raylib
+# ========================================================
 
-# Временный мусор и кэш самой IDE Visual Studio / Rider
+# Build output (.NET SDK, Visual Studio, Rider)
+**/[Bb]in/
+**/[Oo]bj/
+**/[Bb]uild/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/[Aa]rtifacts/
+**/[Pp]ublish/
+
+# Test and benchmark output
+**/[Tt]est[Rr]esults/
+**/BenchmarkDotNet.Artifacts/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+
+# IDE state and user-specific settings
 .vs/
 .idea/
 *.suo
 *.user
 *.userosscache
 *.sln.docstates
+*.csproj.user
+*.rsuser
+*.DotSettings.user
 
-# Результаты компиляции (бинарники, которые C# пересобирает сам)
-[Bb]in/
-[Oo]bj/
-[Log]/
-/Logs/
-*.log
-
-# Кэш пакетов NuGet
-nuget.config
-*.nuget.props
-*.nuget.targets
-project.lock.json
-project.fragment.lock.json
-
-# Обученные профили и журналы эволюции
-/Experiments/AiEvolution/output/
-
-# Собранная портативная версия игры
-publish/
-artifacts/
-
-# Временные файлы ОС
-Thumbs.db
-Ehthumbs.db
-Desktop.ini
+# Local editor / OS files
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# --------------------------------------------------------
+# Diagnostic logs
+# --------------------------------------------------------
+# Logs/ intentionally remains TRACKED: render diagnostics
+# are committed here so they can be inspected from GitHub.
+# Do not add a global *.log ignore rule.
