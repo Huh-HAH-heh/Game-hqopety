@@ -97,6 +97,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public int RequestRevision;
         public long BuildGeneration;
         public int FailedRevision = int.MinValue;
+        public int QueueRejectedRevision = int.MinValue;
         public bool BuildQueued;
         public BuildRequest? RunningBuild;
         public VoxelMeshBuildResult? ReadyBuild;
@@ -501,22 +502,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.ReleaseBakedBodies(
             bounds => AreCachedMeshesCurrent(bounds, field));
 
-        if ((_frame % 120) == 0)
+        if ((_frame % 300) == 0)
         {
             string summary =
-                $"frame={_frame} resolution=0.1m editedCandidates={_visibleCandidateKeys.Count} editedVisible={_visible.Count} editedCache={_chunks.Count} " +
-                $"macroFrustum={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkFrustum={FrustumCandidatesLastFrame} " +
-                $"emptyChunks={_totalEmptyChunks} mainThreadCopyMs={CpuCaptureMillisecondsLastFrame:0.000} " +
-                $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} lastBuildMs={LastWorkerBuildMilliseconds:0.000} " +
-                $"queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
-                $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
-                $"workers=disabled buildQueue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} gpuReady={_readyUploadQueue.Count} " +
-                $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
-                $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
-                $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
-                $"gpuUploads={_totalGpuUploads} gpuUnloads={_totalGpuUnloads} " +
-                $"surfaceCacheHits={_totalIdenticalSurfaceSkips} capCacheHits={_totalIdenticalCutSkips} " +
-                $"vertices={LastBuildVertices} triangles={LastBuildTriangles}";
+                $"frame={_frame} candidates={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} empty={_totalEmptyChunks} " +
+                $"buildMs={WorkerBuildMillisecondsLastFrame:0.00} queueMs={LastWorkerQueueWaitMilliseconds:0.0} gpuMs={GpuUploadMillisecondsLastFrame:0.00} " +
+                $"packets={GpuUploadsLastFrame} builds={_totalBuildCompleted}/{_totalBuildRequests} pending={_buildQueue.Count} " +
+                $"failed={_totalBuildFailed} stale={_totalStaleResults} deferred={_totalQueueSaturated} repeat={_totalRepeatedBuilds} " +
+                $"uploads={_totalGpuUploads} unloads={_totalGpuUnloads} cacheHits={_totalIdenticalSurfaceSkips}";
             _logger.Write("FRAME_SUMMARY", summary);
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
@@ -811,7 +804,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
         if (_buildQueue.Count >= MaximumPendingMeshJobs)
         {
-            _totalQueueSaturated++;
+            // Count one deferred revision, not every per-frame retry while the queue stays full.
+            if (entry.QueueRejectedRevision != entry.RequestRevision)
+            {
+                entry.QueueRejectedRevision = entry.RequestRevision;
+                _totalQueueSaturated++;
+            }
             return;
         }
 
@@ -830,6 +828,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             EnqueuedTimestamp = Stopwatch.GetTimestamp()
         };
 
+        entry.QueueRejectedRevision = int.MinValue;
         entry.BuildQueued = true;
         entry.RunningBuild = request;
         _buildQueue.Enqueue(request);
