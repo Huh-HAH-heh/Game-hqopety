@@ -65,7 +65,7 @@ internal sealed class VoxelMeshData
 }
 
 /// <summary>
-/// Compact signed-density input: 64^3 scalar samples plus a one-sample halo.
+/// Compact signed-density input: configurable N^3 scalar samples plus a one-sample halo.
 /// Positive values are solid, zero/negative values are air.
 /// Samples are X-contiguous: x + y * SampleSide + z * SamplePlane.
 /// </summary>
