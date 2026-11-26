@@ -331,8 +331,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=FixedSurfaceNets(0.1m);chunkCells={ChunkCells};step=1;chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers=0;build=main-thread-budget;meshBudgetMs={MeshBuildBudgetMilliseconds:0.0};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=surface-nets-density");
-        _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_READY", $"logPath=\"{_logger.LogPath}\" workers=0 build=main-thread");
+            $"resolution=0.1m;scope=edited-volumes-only;chunkCells={ChunkCells};chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers=disabled;build=main-thread-edit-budget;meshBudgetMs={MeshBuildBudgetMilliseconds:0.0};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=surface-nets-density");
+        _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_READY", $"logPath=\"{_logger.LogPath}\" workers=disabled build=main-thread");
     }
 
     public void SetPalette(TerrainPalette palette)
@@ -473,7 +473,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         CollectCompletedBuilds(field);
         UploadReadyMeshes();
         if (_logger.IsEnabled(RenderLogMode.Detailed))
-            _logger.Write(RenderLogMode.Detailed, "VOXEL_VISIBILITY", $"frame={_frame} candidates={candidates.Count} macroTests={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkTests={FrustumCandidatesLastFrame} cache={_chunks.Count} visibleCandidates={_visibleCandidateKeys.Count} packets={GpuUploadsLastFrame} uploadMs={GpuUploadMillisecondsLastFrame:0.000}");
+            _logger.Write(RenderLogMode.Detailed, "VOXEL_VISIBILITY", $"frame={_frame} editedCandidates={candidates.Count} macroTests={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkTests={FrustumCandidatesLastFrame} cache={_chunks.Count} editedVisibleCandidates={_visibleCandidateKeys.Count} packets={GpuUploadsLastFrame} uploadMs={GpuUploadMillisecondsLastFrame:0.000}");
 
         _visible.Clear();
         foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
@@ -504,13 +504,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if ((_frame % 120) == 0)
         {
             string summary =
-                $"frame={_frame} resolution=0.1m chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
+                $"frame={_frame} resolution=0.1m editedCandidates={_visibleCandidateKeys.Count} editedVisible={_visible.Count} editedCache={_chunks.Count} " +
                 $"macroFrustum={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkFrustum={FrustumCandidatesLastFrame} " +
                 $"emptyChunks={_totalEmptyChunks} mainThreadCopyMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} lastBuildMs={LastWorkerBuildMilliseconds:0.000} " +
                 $"queueMs={LastWorkerQueueWaitMilliseconds:0.000} deliveryMs={LastWorkerResultDeliveryMilliseconds:0.000} " +
                 $"gpuMs={GpuUploadMillisecondsLastFrame:0.000} gpuPackets={GpuUploadsLastFrame} " +
-                $"workers=0 buildQueue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} gpuReady={_readyUploadQueue.Count} " +
+                $"workers=disabled buildQueue={_buildQueue.Count} resultsReady={_completedBuildQueue.Count} gpuReady={_readyUploadQueue.Count} " +
                 $"requests={_totalBuildRequests} started={_totalBuildStarted} completed={_totalBuildCompleted} " +
                 $"cancelled={_totalBuildCancelled} failed={_totalBuildFailed} stale={_totalStaleResults} " +
                 $"repeat={_totalRepeatedBuilds} duplicateReq={_totalDuplicateRequestAttempts} queueFull={_totalQueueSaturated} " +
@@ -558,7 +558,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count;
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
-            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={RenderStep} candidates={VisibleCandidatesLastFrame} visible={VisibleChunksLastFrame} draws={DrawCallsLastFrame} cache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers=0 buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
+            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={RenderStep} editedCandidates={VisibleCandidatesLastFrame} editedVisible={VisibleChunksLastFrame} draws={DrawCallsLastFrame} editedCache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers=disabled buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
     }
 
     private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
