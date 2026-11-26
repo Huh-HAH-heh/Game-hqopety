@@ -92,6 +92,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
     public int SamplePlane { get; }
     public int TotalSamples { get; }
     public int CutLayer { get; }
+    public int Step { get; }
 
     public bool IsCaptured { get; private set; }
     public bool HasPotentialSurface { get; private set; }
@@ -103,20 +104,23 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         int chunkX,
         int chunkY,
         int chunkZ,
-        int cutLayer = int.MinValue)
+        int cutLayer = int.MinValue,
+        int step = 1)
     {
         ArgumentNullException.ThrowIfNull(field);
 
-        if (chunkX < 0 || chunkY < 0 || chunkZ < 0)
+        if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
+            step != 1 && step != 2 && step != 4)
             throw new ArgumentOutOfRangeException(nameof(chunkX));
 
         ChunkX = chunkX;
         ChunkY = chunkY;
         ChunkZ = chunkZ;
+        Step = step;
 
-        OriginX = checked(chunkX * CellsPerAxis);
-        OriginY = checked(chunkY * CellsPerAxis);
-        OriginZ = checked(chunkZ * CellsPerAxis);
+        OriginX = checked(chunkX * CellsPerAxis * step);
+        OriginY = checked(chunkY * CellsPerAxis * step);
+        OriginZ = checked(chunkZ * CellsPerAxis * step);
 
         FieldWidth = field.Width;
         FieldHeight = field.Height;
@@ -151,9 +155,9 @@ internal sealed class VoxelChunkBuildInput : IDisposable
             int y = index / SampleSide % SampleSide;
             int z = index / SamplePlane;
 
-            int worldX = OriginX + x - HaloSize;
-            int worldY = OriginY + y - HaloSize;
-            int worldZ = OriginZ + z - HaloSize;
+            int worldX = OriginX + (x - HaloSize) * Step;
+            int worldY = OriginY + (y - HaloSize) * Step;
+            int worldZ = OriginZ + (z - HaloSize) * Step;
 
             byte blockId = CutLayer != int.MinValue && worldY >= CutLayer
                 ? (byte)0
@@ -573,15 +577,16 @@ internal static class VoxelChunkMesher
         sbyte normalSign,
         byte blockId)
     {
+        float cellSize = SparseVoxelField.VoxelSizeMeters * input.Step;
         Vector3 origin = new(
             input.OriginX * SparseVoxelField.VoxelSizeMeters,
             input.OriginY * SparseVoxelField.VoxelSizeMeters,
             input.OriginZ * SparseVoxelField.VoxelSizeMeters);
 
-        Vector3 p0 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v);
-        Vector3 p1 = MakePoint(origin, axis, uAxis, vAxis, slice, u + width, v);
-        Vector3 p2 = MakePoint(origin, axis, uAxis, vAxis, slice, u + width, v + height);
-        Vector3 p3 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v + height);
+        Vector3 p0 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v, cellSize);
+        Vector3 p1 = MakePoint(origin, axis, uAxis, vAxis, slice, u + width, v, cellSize);
+        Vector3 p2 = MakePoint(origin, axis, uAxis, vAxis, slice, u + width, v + height, cellSize);
+        Vector3 p3 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v + height, cellSize);
 
         Vector3 normal = AxisNormals[axis + (normalSign < 0 ? 3 : 0)];
         batch.AddQuad(
@@ -601,15 +606,13 @@ internal static class VoxelChunkMesher
         int vAxis,
         int slice,
         int u,
-        int v)
+        int v,
+        float cellSize)
     {
         Vector3 point = origin;
-        SetComponent(ref point, axis, GetComponent(origin, axis) +
-            slice * SparseVoxelField.VoxelSizeMeters);
-        SetComponent(ref point, uAxis, GetComponent(origin, uAxis) +
-            u * SparseVoxelField.VoxelSizeMeters);
-        SetComponent(ref point, vAxis, GetComponent(origin, vAxis) +
-            v * SparseVoxelField.VoxelSizeMeters);
+        SetComponent(ref point, axis, GetComponent(origin, axis) + slice * cellSize);
+        SetComponent(ref point, uAxis, GetComponent(origin, uAxis) + u * cellSize);
+        SetComponent(ref point, vAxis, GetComponent(origin, vAxis) + v * cellSize);
         return point;
     }
 
