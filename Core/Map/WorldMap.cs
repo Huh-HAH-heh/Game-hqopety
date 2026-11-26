@@ -432,29 +432,23 @@ public sealed class WorldMap
     }
 
     /// <summary>
-    /// Packs shared lower terrain into large macro volumes. Regions that
-    /// cannot share a common base are split recursively down to the requested
-    /// block size; finer height differences stay in the existing compact
-    /// column backing instead of creating one object per tile.
+    /// Removes empty voxel bricks left by cleared edits. The old method name
+    /// remains as a compatibility entry point for callers managing block terrain.
     /// </summary>
+    public int CompactVoxelStorage()
+    {
+        return Voxels.Compact();
+    }
+
     public int CompactHierarchicalBlockVolumes(int minimumBlockSize = 32)
     {
-        _voxelBaseSamplerLock.EnterWriteLock();
-        try
-        {
-            if (!UsesDiscreteBlockTerrain)
-                throw new InvalidOperationException("Discrete block terrain is not enabled.");
-            if (minimumBlockSize < 2 ||
-                (minimumBlockSize & (minimumBlockSize - 1)) != 0)
-                throw new ArgumentOutOfRangeException(nameof(minimumBlockSize));
+        if (!UsesDiscreteBlockTerrain)
+            throw new InvalidOperationException("Discrete block terrain is not enabled.");
+        if (minimumBlockSize < 2 ||
+            (minimumBlockSize & (minimumBlockSize - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(minimumBlockSize));
 
-            return Voxels.Compact();
-        
-        }
-        finally
-        {
-            _voxelBaseSamplerLock.ExitWriteLock();
-        }
+        return CompactVoxelStorage();
     }
 
     public int CompactUniformBlockVolumes(int minimumBlockSize = 32) =>
