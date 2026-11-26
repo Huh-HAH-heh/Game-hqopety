@@ -132,7 +132,8 @@ public sealed class WorldMap
             _baseVoxelDepth,
             SampleBaseVoxelDensity,
             SampleBaseVoxelMaterial,
-            GetBaseVoxelSurfaceRange);
+            GetBaseVoxelSurfaceRange,
+            SampleBaseVoxelDensityColumn);
         Voxels.Changed += OnVoxelFieldChanged;
     }
 
@@ -1749,15 +1750,13 @@ public sealed class WorldMap
     /// on the shared 0.1 m voxel lattice. Positive values are solid; negative are air.
     /// Density is measured in voxel units, matching SparseVoxelField's edit scale.
     /// </summary>
-    private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
+    private (float SurfaceHeight, float GradientLength) SampleBaseVoxelDensityColumn(
+        int voxelX,
+        int voxelZ)
     {
-        // The original procedural heightfield occupies only the initial map
-        // footprint. Expanded coordinates are genuine empty 3D space until edited.
-        if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-            voxelX >= _baseVoxelWidth ||
-            voxelY >= _baseVoxelHeight ||
-            voxelZ >= _baseVoxelDepth)
-            return -1f;
+        if (voxelX < 0 || voxelZ < 0 ||
+            voxelX >= _baseVoxelWidth || voxelZ >= _baseVoxelDepth)
+            return (float.NaN, 1f);
 
         float surfaceHeight = SampleBaseSurfaceHeight(
             voxelX, voxelZ,
@@ -1766,6 +1765,18 @@ public sealed class WorldMap
 
         float gradientLength = MathF.Sqrt(
             1f + slopeX * slopeX + slopeZ * slopeZ);
+        return (surfaceHeight, gradientLength);
+    }
+
+    private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
+    {
+        if (voxelY < 0 || voxelY >= _baseVoxelHeight)
+            return -1f;
+
+        (float surfaceHeight, float gradientLength) =
+            SampleBaseVoxelDensityColumn(voxelX, voxelZ);
+        if (!float.IsFinite(surfaceHeight))
+            return -1f;
 
         return (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
     }
