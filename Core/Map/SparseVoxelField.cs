@@ -1417,7 +1417,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             throw new ArgumentException("The source stream is not readable.", nameof(source));
 
         Dictionary<ChunkCoordinate, Chunk> loaded = new();
-        HashSet<(int X, int Z)> editedColumns = new();
         long maximumRevision = 0;
         int saveWidth;
         int saveHeight;
@@ -1537,7 +1536,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     continue;
 
                 loaded.Add(key, chunk);
-                editedColumns.Add((chunkX, chunkZ));
                 maximumRevision = Math.Max(maximumRevision, revision);
             }
         }
