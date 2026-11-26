@@ -147,8 +147,13 @@ internal sealed class TerrainPipelineLogger : IDisposable
         {
             int suppressed = Interlocked.Exchange(ref state.Suppressed, 0);
             Interlocked.Exchange(ref state.Written, 0);
-            if (suppressed > 0)
+            // Per-second summaries are intentionally sampled; logging their suppressed
+            // repetitions only duplicates noise. Keep suppression reports for burst diagnostics.
+            if (suppressed > 0 &&
+                (IsBurstCategory(category) || Mode == RenderLogMode.Trace))
+            {
                 Enqueue("SUPPRESSED", $"category={category} count={suppressed}/s", critical: false);
+            }
         }
 
         if (Interlocked.Increment(ref state.Written) <= limit)
