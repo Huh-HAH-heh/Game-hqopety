@@ -65,16 +65,19 @@ internal sealed class VoxelMeshData
 }
 
 /// <summary>
-/// Compact worker input: 16^3 block IDs plus a one-cell halo on all sides.
+/// Compact density input: 64^3 scalar samples plus a one-sample halo on all sides.
 /// Zero is air; non-zero values are byte-sized material IDs.
 /// Blocks are X-contiguous: x + y * SampleSide + z * SamplePlane.
 /// </summary>
 internal sealed class VoxelChunkBuildInput : IDisposable
 {
-    public const int DefaultCellsPerAxis = SparseVoxelField.ChunkSize;
+    public const int DefaultCellsPerAxis = 64;
     public const int HaloSize = 1;
 
-    public readonly byte[] Blocks;
+    public readonly float[] Densities;
+
+    private IVoxelFieldSource _source = null!;
+    private int _disposed;
 
     public int ChunkX { get; }
     public int ChunkY { get; }
@@ -82,22 +85,17 @@ internal sealed class VoxelChunkBuildInput : IDisposable
     public int OriginX { get; }
     public int OriginY { get; }
     public int OriginZ { get; }
-
     public int FieldWidth { get; }
     public int FieldHeight { get; }
     public int FieldDepth { get; }
-
-    public int CellsPerAxis { get; } = DefaultCellsPerAxis;
+    public int CellsPerAxis { get; }
     public int SampleSide { get; }
     public int SamplePlane { get; }
     public int TotalSamples { get; }
     public int CutLayer { get; }
     public int Step { get; }
-
     public bool IsCaptured { get; private set; }
     public bool HasPotentialSurface { get; private set; }
-
-    private int _disposed;
 
     public VoxelChunkBuildInput(
         IVoxelFieldSource field,
@@ -105,93 +103,95 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         int chunkY,
         int chunkZ,
         int cutLayer = int.MinValue,
-        int step = 1)
+        int step = 1,
+        int cellsPerAxis = DefaultCellsPerAxis)
     {
         ArgumentNullException.ThrowIfNull(field);
-
         if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
-            step != 1 && step != 2 && step != 4)
+            step is not (1 or 2 or 4) || cellsPerAxis <= 0)
             throw new ArgumentOutOfRangeException(nameof(chunkX));
 
+        _source = field;
         ChunkX = chunkX;
         ChunkY = chunkY;
         ChunkZ = chunkZ;
+        CellsPerAxis = cellsPerAxis;
         Step = step;
 
-        OriginX = checked(chunkX * CellsPerAxis * step);
-        OriginY = checked(chunkY * CellsPerAxis * step);
-        OriginZ = checked(chunkZ * CellsPerAxis * step);
+        OriginX = checked(chunkX * cellsPerAxis * step);
+        OriginY = checked(chunkY * cellsPerAxis * step);
+        OriginZ = checked(chunkZ * cellsPerAxis * step);
 
         FieldWidth = field.Width;
         FieldHeight = field.Height;
         FieldDepth = field.Depth;
         CutLayer = cutLayer;
 
-        SampleSide = CellsPerAxis + HaloSize * 2;
+        SampleSide = cellsPerAxis + 3;
         SamplePlane = SampleSide * SampleSide;
         TotalSamples = SamplePlane * SampleSide;
-        Blocks = ArrayPool<byte>.Shared.Rent(TotalSamples);
+        Densities = ArrayPool<float>.Shared.Rent(TotalSamples);
     }
 
-    /// <summary>
-    /// Monolithic sequential capture. All rented bytes are overwritten in one
-    /// contiguous pass; no per-sample objects, intermediate arrays or batches.
-    /// </summary>
     public void CaptureAll(IVoxelFieldSource source)
     {
         ObjectDisposedException.ThrowIf(
-            Volatile.Read(ref _disposed) != 0,
-            this);
+            Volatile.Read(ref _disposed) != 0, this);
         ArgumentNullException.ThrowIfNull(source);
-
         if (IsCaptured)
             return;
 
+        _source = source;
         bool hasSolid = false;
+        bool hasAir = false;
 
-        for (int index = 0; index < TotalSamples; index++)
+        int write = 0;
+        for (int z = -HaloSize; z <= CellsPerAxis + HaloSize; z++)
+        for (int y = -HaloSize; y <= CellsPerAxis + HaloSize; y++)
+        for (int x = -HaloSize; x <= CellsPerAxis + HaloSize; x++)
         {
-            int x = index % SampleSide;
-            int y = index / SampleSide % SampleSide;
-            int z = index / SamplePlane;
+            int worldX = OriginX + x * Step;
+            int worldY = OriginY + y * Step;
+            int worldZ = OriginZ + z * Step;
+            float density = CutLayer != int.MinValue && worldY >= CutLayer
+                ? -1f
+                : source.GetDensity(worldX, worldY, worldZ);
 
-            int worldX = OriginX + (x - HaloSize) * Step;
-            int worldY = OriginY + (y - HaloSize) * Step;
-            int worldZ = OriginZ + (z - HaloSize) * Step;
-
-            byte blockId = CutLayer != int.MinValue && worldY >= CutLayer
-                ? (byte)0
-                : source.GetBlockId(worldX, worldY, worldZ);
-
-            Blocks[index] = blockId;
-            hasSolid |= blockId != 0;
+            Densities[write++] = density;
+            hasSolid |= density > 0f;
+            hasAir |= density <= 0f;
         }
 
-        HasPotentialSurface = hasSolid;
+        HasPotentialSurface = hasSolid && hasAir;
         IsCaptured = true;
     }
 
-    /// <summary>Returns a local block ID; coordinates -1..16 address the halo.</summary>
-    public byte GetBlock(int x, int y, int z)
+    // Sample-point coordinates include the one-sample halo: -1..N+1.
+    public float GetDensity(int x, int y, int z)
     {
         x += HaloSize;
         y += HaloSize;
         z += HaloSize;
+        if ((uint)x >= SampleSide || (uint)y >= SampleSide || (uint)z >= SampleSide)
+            return -1f;
 
-        if ((uint)x >= SampleSide ||
-            (uint)y >= SampleSide ||
-            (uint)z >= SampleSide)
-            return 0;
+        return Densities[x + y * SampleSide + z * SamplePlane];
+    }
 
-        return Blocks[x + y * SampleSide + z * SamplePlane];
+    public byte GetMaterialId(int x, int y, int z)
+    {
+        int worldX = OriginX + x * Step;
+        int worldY = OriginY + y * Step;
+        int worldZ = OriginZ + z * Step;
+        ushort material = _source.GetMaterialId(worldX, worldY, worldZ);
+        return checked((byte)material);
     }
 
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
-
-        ArrayPool<byte>.Shared.Return(Blocks, clearArray: false);
+        ArrayPool<float>.Shared.Return(Densities, clearArray: false);
     }
 }
 
@@ -204,15 +204,6 @@ internal static class VoxelChunkMesher
     private const int MaximumVerticesPerMesh = 60_000;
     private const int MaximumIndicesPerMesh = 90_000;
 
-    private static readonly Vector3[] AxisNormals =
-    {
-        Vector3.UnitX,
-        Vector3.UnitY,
-        Vector3.UnitZ,
-        -Vector3.UnitX,
-        -Vector3.UnitY,
-        -Vector3.UnitZ
-    };
 
     private sealed class MeshBatch : IDisposable
     {
@@ -242,19 +233,30 @@ internal static class VoxelChunkMesher
             Vector3 p3,
             Vector3 normal,
             Color color,
+            bool frontFace) =>
+            AddQuad(p0, p1, p2, p3, normal, normal, normal, normal, color, frontFace);
+
+        public void AddQuad(
+            Vector3 p0,
+            Vector3 p1,
+            Vector3 p2,
+            Vector3 p3,
+            Vector3 n0,
+            Vector3 n1,
+            Vector3 n2,
+            Vector3 n3,
+            Color color,
             bool frontFace)
         {
             if (_vertexCount + 4 > MaximumVerticesPerMesh ||
                 _indexCount + 6 > MaximumIndicesPerMesh)
-            {
                 Flush();
-            }
 
             ushort start = checked((ushort)_vertexCount);
-            AddVertex(p0, normal, color);
-            AddVertex(p1, normal, color);
-            AddVertex(p2, normal, color);
-            AddVertex(p3, normal, color);
+            AddVertex(p0, n0, color);
+            AddVertex(p1, n1, color);
+            AddVertex(p2, n2, color);
+            AddVertex(p3, n3, color);
 
             if (frontFace)
             {
@@ -381,6 +383,17 @@ internal static class VoxelChunkMesher
     /// face. The parallel sign mask distinguishes +axis and -axis faces.
     /// Identical block IDs and directions merge into one indexed quad.
     /// </summary>
+        private static readonly Vector3[] CubeCorners =
+    {
+        new(0f, 0f, 0f), new(1f, 0f, 0f),
+        new(1f, 1f, 0f), new(0f, 1f, 0f),
+        new(0f, 0f, 1f), new(1f, 0f, 1f),
+        new(1f, 1f, 1f), new(0f, 1f, 1f)
+    };
+
+    private static readonly byte[] EdgeStart = { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3 };
+    private static readonly byte[] EdgeEnd   = { 1, 2, 3, 0, 5, 6, 7, 4, 4, 5, 6, 7 };
+
     public static VoxelMeshData[] BuildSurfaceData(
         VoxelChunkBuildInput input,
         TerrainPalette palette,
@@ -388,78 +401,180 @@ internal static class VoxelChunkMesher
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(palette);
-
         if (!input.IsCaptured)
-            throw new InvalidOperationException("Voxel block capture must complete before meshing.");
-
+            throw new InvalidOperationException("Voxel density capture must complete before meshing.");
         if (!input.HasPotentialSurface)
             return Array.Empty<VoxelMeshData>();
 
-        const int cells = VoxelChunkBuildInput.DefaultCellsPerAxis;
-        int maskLength = cells * cells;
+        int cells = input.CellsPerAxis;
+        int side = cells + 2;
+        int plane = side * side;
+        int cellCount = side * side * side;
 
-        byte[] mask = ArrayPool<byte>.Shared.Rent(maskLength);
-        sbyte[] signs = ArrayPool<sbyte>.Shared.Rent(maskLength);
-        List<VoxelMeshData> output = new(2);
+        int[] vertexMap = ArrayPool<int>.Shared.Rent(cellCount);
+        Vector3[] positions = ArrayPool<Vector3>.Shared.Rent(cellCount);
+        Vector3[] normals = ArrayPool<Vector3>.Shared.Rent(cellCount);
+        byte[] materials = ArrayPool<byte>.Shared.Rent(cellCount);
+        List<VoxelMeshData> output = new(4);
+        Span<float> d = stackalloc float[8];
 
         try
         {
-            using MeshBatch batch = new(output);
+            Array.Fill(vertexMap, -1, 0, cellCount);
+            int vertexCount = 0;
+            float voxelSize = SparseVoxelField.VoxelSizeMeters * input.Step;
 
-            for (int axis = 0; axis < 3; axis++)
+            // One Surface Nets vertex per mixed-sign density cell.
+            // The sample halo lets boundary quads use neighbouring cell vertices.
+            for (int z = -1; z <= cells; z++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                int uAxis = (axis + 1) % 3;
-                int vAxis = (axis + 2) % 3;
-
-                for (int slice = 0; slice <= cells; slice++)
+                for (int y = -1; y <= cells; y++)
+                for (int x = -1; x <= cells; x++)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    Array.Clear(mask, 0, maskLength);
-                    Array.Clear(signs, 0, maskLength);
+                    d[0] = input.GetDensity(x, y, z);
+                    d[1] = input.GetDensity(x + 1, y, z);
+                    d[2] = input.GetDensity(x + 1, y + 1, z);
+                    d[3] = input.GetDensity(x, y + 1, z);
+                    d[4] = input.GetDensity(x, y, z + 1);
+                    d[5] = input.GetDensity(x + 1, y, z + 1);
+                    d[6] = input.GetDensity(x + 1, y + 1, z + 1);
+                    d[7] = input.GetDensity(x, y + 1, z + 1);
 
-                    for (int v = 0; v < cells; v++)
-                    for (int u = 0; u < cells; u++)
+                    bool inside = false;
+                    bool outside = false;
+                    for (int i = 0; i < 8; i++)
                     {
-                        GetCellCoordinates(
-                            axis, slice - 1, u, v,
-                            out int ax, out int ay, out int az);
-                        GetCellCoordinates(
-                            axis, slice, u, v,
-                            out int bx, out int by, out int bz);
+                        inside |= d[i] > 0f;
+                        outside |= d[i] <= 0f;
+                    }
+                    if (!inside || !outside)
+                        continue;
 
-                        byte blockA = input.GetBlock(ax, ay, az);
-                        byte blockB = input.GetBlock(bx, by, bz);
+                    Vector3 intersectionSum = Vector3.Zero;
+                    int intersectionCount = 0;
+                    int materialCorner = -1;
 
-                        if (blockA == 0 && blockB == 0)
+                    for (int edge = 0; edge < 12; edge++)
+                    {
+                        int a = EdgeStart[edge];
+                        int b = EdgeEnd[edge];
+                        float da = d[a];
+                        float db = d[b];
+                        if ((da > 0f) == (db > 0f))
                             continue;
 
-                        int index = u + v * cells;
+                        float t = Math.Clamp(da / (da - db), 0f, 1f);
+                        intersectionSum += CubeCorners[a] +
+                            (CubeCorners[b] - CubeCorners[a]) * t;
+                        intersectionCount++;
 
-                        if (blockA != 0 && blockB == 0)
-                        {
-                            mask[index] = blockA;
-                            signs[index] = 1;
-                        }
-                        else if (blockA == 0 && blockB != 0)
-                        {
-                            mask[index] = blockB;
-                            signs[index] = -1;
-                        }
+                        if (materialCorner < 0 && da > 0f)
+                            materialCorner = a;
+                        else if (materialCorner < 0 && db > 0f)
+                            materialCorner = b;
                     }
 
-                    GreedyEmitSlice(
-                        input,
-                        palette,
-                        batch,
-                        mask,
-                        signs,
-                        axis,
-                        uAxis,
-                        vAxis,
-                        slice,
-                        cells);
+                    if (intersectionCount == 0 || vertexCount >= cellCount)
+                        continue;
+
+                    Vector3 local = intersectionSum / intersectionCount;
+                    float u = local.X;
+                    float v = local.Y;
+                    float w = local.Z;
+
+                    float dx0 = Lerp(d[1] - d[0], d[5] - d[4], w);
+                    float dx1 = Lerp(d[2] - d[3], d[6] - d[7], w);
+                    float dy0 = Lerp(d[3] - d[0], d[7] - d[4], w);
+                    float dy1 = Lerp(d[2] - d[1], d[6] - d[5], w);
+                    float dz0 = Lerp(d[4] - d[0], d[5] - d[1], u);
+                    float dz1 = Lerp(d[7] - d[3], d[6] - d[2], u);
+
+                    Vector3 normal = new(
+                        -Lerp(dx0, dx1, v),
+                        -Lerp(dy0, dy1, u),
+                        -Lerp(dz0, dz1, v));
+
+                    float normalLengthSquared = normal.LengthSquared();
+                    normal = normalLengthSquared > 1e-12f
+                        ? normal / MathF.Sqrt(normalLengthSquared)
+                        : Vector3.UnitY;
+
+                    positions[vertexCount] = new Vector3(
+                        (input.OriginX + (x + u) * input.Step) * SparseVoxelField.VoxelSizeMeters,
+                        (input.OriginY + (y + v) * input.Step) * SparseVoxelField.VoxelSizeMeters,
+                        (input.OriginZ + (z + w) * input.Step) * SparseVoxelField.VoxelSizeMeters);
+                    normals[vertexCount] = normal;
+
+                    if (materialCorner >= 0)
+                    {
+                        Vector3 corner = CubeCorners[materialCorner];
+                        materials[vertexCount] = input.GetMaterialId(
+                            x + (int)corner.X,
+                            y + (int)corner.Y,
+                            z + (int)corner.Z);
+                    }
+
+                    vertexMap[CellIndex(x, y, z, side, plane)] = vertexCount++;
+                }
+            }
+
+            if (vertexCount == 0)
+                return Array.Empty<VoxelMeshData>();
+
+            using MeshBatch batch = new(output);
+
+            // Each sign-changing sample edge owns exactly one quad. The four
+            // vertices are the Surface Nets vertices of its incident cells.
+            for (int z = 0; z <= cells; z++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                for (int y = 0; y <= cells; y++)
+                for (int x = 0; x < cells; x++)
+                {
+                    float a = input.GetDensity(x, y, z);
+                    float b = input.GetDensity(x + 1, y, z);
+                    if ((a > 0f) == (b > 0f))
+                        continue;
+
+                    int i0 = vertexMap[CellIndex(x, y - 1, z - 1, side, plane)];
+                    int i1 = vertexMap[CellIndex(x, y, z - 1, side, plane)];
+                    int i2 = vertexMap[CellIndex(x, y, z, side, plane)];
+                    int i3 = vertexMap[CellIndex(x, y - 1, z, side, plane)];
+                    AddSurfaceQuad(batch, palette, positions, normals, materials,
+                        i0, i1, i2, i3, a > 0f);
+                }
+
+                for (int x = 0; x <= cells; x++)
+                for (int y = 0; y < cells; y++)
+                {
+                    float a = input.GetDensity(x, y, z);
+                    float b = input.GetDensity(x, y + 1, z);
+                    if ((a > 0f) == (b > 0f))
+                        continue;
+
+                    int i0 = vertexMap[CellIndex(x - 1, y, z - 1, side, plane)];
+                    int i1 = vertexMap[CellIndex(x - 1, y, z, side, plane)];
+                    int i2 = vertexMap[CellIndex(x, y, z, side, plane)];
+                    int i3 = vertexMap[CellIndex(x, y, z - 1, side, plane)];
+                    AddSurfaceQuad(batch, palette, positions, normals, materials,
+                        i0, i1, i2, i3, a > 0f);
+                }
+
+                for (int y = 0; y <= cells; y++)
+                for (int x = 0; x <= cells; x++)
+                {
+                    float a = input.GetDensity(x, y, z);
+                    float b = input.GetDensity(x, y, z + 1);
+                    if ((a > 0f) == (b > 0f))
+                        continue;
+
+                    int i0 = vertexMap[CellIndex(x - 1, y - 1, z, side, plane)];
+                    int i1 = vertexMap[CellIndex(x, y - 1, z, side, plane)];
+                    int i2 = vertexMap[CellIndex(x, y, z, side, plane)];
+                    int i3 = vertexMap[CellIndex(x - 1, y, z, side, plane)];
+                    AddSurfaceQuad(batch, palette, positions, normals, materials,
+                        i0, i1, i2, i3, a > 0f);
                 }
             }
 
@@ -474,197 +589,47 @@ internal static class VoxelChunkMesher
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(mask, clearArray: false);
-            ArrayPool<sbyte>.Shared.Return(signs, clearArray: false);
+            ArrayPool<int>.Shared.Return(vertexMap, clearArray: false);
+            ArrayPool<Vector3>.Shared.Return(positions, clearArray: false);
+            ArrayPool<Vector3>.Shared.Return(normals, clearArray: false);
+            ArrayPool<byte>.Shared.Return(materials, clearArray: false);
         }
     }
 
-    private static void GreedyEmitSlice(
-        VoxelChunkBuildInput input,
-        TerrainPalette palette,
+    private static int CellIndex(int x, int y, int z, int side, int plane) =>
+        (x + 1) + (y + 1) * side + (z + 1) * plane;
+
+    private static float Lerp(float a, float b, float t) =>
+        a + (b - a) * t;
+
+    private static void AddSurfaceQuad(
         MeshBatch batch,
-        byte[] mask,
-        sbyte[] signs,
-        int axis,
-        int uAxis,
-        int vAxis,
-        int slice,
-        int cells)
-    {
-        for (int v = 0; v < cells; v++)
-        {
-            int u = 0;
-            while (u < cells)
-            {
-                int index = u + v * cells;
-                byte blockId = mask[index];
-                sbyte sign = signs[index];
-
-                if (blockId == 0)
-                {
-                    u++;
-                    continue;
-                }
-
-                int width = 1;
-                while (u + width < cells)
-                {
-                    int next = index + width;
-                    if (mask[next] != blockId || signs[next] != sign)
-                        break;
-                    width++;
-                }
-
-                int height = 1;
-                bool canGrow = true;
-
-                while (v + height < cells && canGrow)
-                {
-                    int row = (v + height) * cells + u;
-                    for (int x = 0; x < width; x++)
-                    {
-                        if (mask[row + x] != blockId ||
-                            signs[row + x] != sign)
-                        {
-                            canGrow = false;
-                            break;
-                        }
-                    }
-
-                    if (canGrow)
-                        height++;
-                }
-
-                EmitSurfaceQuad(
-                    input,
-                    palette,
-                    batch,
-                    axis,
-                    uAxis,
-                    vAxis,
-                    slice,
-                    u,
-                    v,
-                    width,
-                    height,
-                    sign,
-                    blockId);
-
-                for (int row = v; row < v + height; row++)
-                {
-                    int start = row * cells + u;
-                    Array.Clear(mask, start, width);
-                    Array.Clear(signs, start, width);
-                }
-
-                u += width;
-            }
-        }
-    }
-
-    private static void EmitSurfaceQuad(
-        VoxelChunkBuildInput input,
         TerrainPalette palette,
-        MeshBatch batch,
-        int axis,
-        int uAxis,
-        int vAxis,
-        int slice,
-        int u,
-        int v,
-        int width,
-        int height,
-        sbyte normalSign,
-        byte blockId)
+        Vector3[] positions,
+        Vector3[] normals,
+        byte[] materials,
+        int i0,
+        int i1,
+        int i2,
+        int i3,
+        bool positiveSide)
     {
-        float cellSize = SparseVoxelField.VoxelSizeMeters * input.Step;
-        Vector3 origin = new(
-            input.OriginX * SparseVoxelField.VoxelSizeMeters,
-            input.OriginY * SparseVoxelField.VoxelSizeMeters,
-            input.OriginZ * SparseVoxelField.VoxelSizeMeters);
+        if ((uint)i0 >= (uint)positions.Length ||
+            (uint)i1 >= (uint)positions.Length ||
+            (uint)i2 >= (uint)positions.Length ||
+            (uint)i3 >= (uint)positions.Length ||
+            i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0)
+            return;
 
-        Vector3 p0 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v, cellSize);
-        Vector3 p1 = MakePoint(origin, axis, uAxis, vAxis, slice, u + width, v, cellSize);
-        Vector3 p2 = MakePoint(origin, axis, uAxis, vAxis, slice, u + width, v + height, cellSize);
-        Vector3 p3 = MakePoint(origin, axis, uAxis, vAxis, slice, u, v + height, cellSize);
+        byte material = materials[i0] != 0 ? materials[i0] :
+            materials[i1] != 0 ? materials[i1] :
+            materials[i2] != 0 ? materials[i2] : materials[i3];
 
-        Vector3 normal = AxisNormals[axis + (normalSign < 0 ? 3 : 0)];
         batch.AddQuad(
-            p0,
-            p1,
-            p2,
-            p3,
-            normal,
-            GetMaterialColor(palette, blockId),
-            frontFace: normalSign > 0);
-    }
-
-    private static Vector3 MakePoint(
-        Vector3 origin,
-        int axis,
-        int uAxis,
-        int vAxis,
-        int slice,
-        int u,
-        int v,
-        float cellSize)
-    {
-        Vector3 point = origin;
-        SetComponent(ref point, axis, GetComponent(origin, axis) + slice * cellSize);
-        SetComponent(ref point, uAxis, GetComponent(origin, uAxis) + u * cellSize);
-        SetComponent(ref point, vAxis, GetComponent(origin, vAxis) + v * cellSize);
-        return point;
-    }
-
-    private static void GetCellCoordinates(
-        int axis,
-        int axisCoordinate,
-        int u,
-        int v,
-        out int x,
-        out int y,
-        out int z)
-    {
-        x = y = z = 0;
-        int uAxis = (axis + 1) % 3;
-        int vAxis = (axis + 2) % 3;
-
-        SetCoordinate(axis, axisCoordinate, ref x, ref y, ref z);
-        SetCoordinate(uAxis, u, ref x, ref y, ref z);
-        SetCoordinate(vAxis, v, ref x, ref y, ref z);
-    }
-
-    private static void SetCoordinate(
-        int axis,
-        int value,
-        ref int x,
-        ref int y,
-        ref int z)
-    {
-        switch (axis)
-        {
-            case 0: x = value; break;
-            case 1: y = value; break;
-            default: z = value; break;
-        }
-    }
-
-    private static float GetComponent(Vector3 value, int axis) =>
-        axis switch
-        {
-            0 => value.X,
-            1 => value.Y,
-            _ => value.Z
-        };
-
-    private static void SetComponent(ref Vector3 value, int axis, float component)
-    {
-        switch (axis)
-        {
-            case 0: value.X = component; break;
-            case 1: value.Y = component; break;
-            default: value.Z = component; break;
-        }
+            positions[i0], positions[i1], positions[i2], positions[i3],
+            normals[i0], normals[i1], normals[i2], normals[i3],
+            GetMaterialColor(palette, material),
+            frontFace: positiveSide);
     }
 
     private static Color GetMaterialColor(TerrainPalette palette, byte blockId)
