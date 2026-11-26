@@ -654,6 +654,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 float.IsFinite(gradientLength) &&
                 gradientLength > 0.000001f;
 
+            int cachedStorageY = int.MinValue;
+            ChunkSnapshot? columnChunk = null;
             for (int i = 0; i < destination.Length; i++)
             {
                 int worldY = startY + i * step;
@@ -665,17 +667,25 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 if (insideColumn && worldY >= 0 && worldY <= Height &&
                     _chunks != null)
                 {
-                    ChunkCoordinate key = new(
-                        x / ChunkSize, worldY / ChunkSize, z / ChunkSize);
-                    if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+                    int storageY = worldY / ChunkSize;
+                    if (storageY != cachedStorageY)
+                    {
+                        cachedStorageY = storageY;
+                        columnChunk = null;
+                        _chunks.TryGetValue(
+                            new ChunkCoordinate(x / ChunkSize, storageY, z / ChunkSize),
+                            out columnChunk);
+                    }
+
+                    if (columnChunk != null)
                     {
                         int index = x % ChunkSize +
                             (worldY % ChunkSize) * DensitySamplesPerAxis +
                             (z % ChunkSize) * SamplePlane;
                         int found = Chunk.FindDensity(
-                            chunk.Density, chunk.Density.Length, index);
+                            columnChunk.Density, columnChunk.Density.Length, index);
                         if (found >= 0)
-                            density = chunk.Density[found].Value / DensityScale;
+                            density = columnChunk.Density[found].Value / DensityScale;
                     }
                 }
 
