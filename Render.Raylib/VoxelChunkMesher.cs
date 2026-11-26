@@ -160,9 +160,15 @@ internal sealed class VoxelChunkBuildInput : IDisposable
                 int worldX = OriginX + x * Step;
                 int worldY = OriginY + y * Step;
                 int worldZ = OriginZ + z * Step;
-                float density = CutLayer != int.MinValue && worldY >= CutLayer
-                    ? -1f
-                    : source.GetDensity(worldX, worldY, worldZ);
+                float density = source.GetDensity(worldX, worldY, worldZ);
+                if (CutLayer != int.MinValue)
+                {
+                    // Intersect the terrain with the half-space below the cut.
+                    // Density samples live at voxel centres (index + 0.5), so
+                    // this signed distance places the cap exactly at CutLayer.
+                    float cutDensity = CutLayer - (worldY + Step * 0.5f);
+                    density = MathF.Min(density, cutDensity);
+                }
 
                 Densities[write++] = density;
                 hasSolid |= density > 0f;
