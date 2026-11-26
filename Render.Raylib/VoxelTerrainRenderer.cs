@@ -226,7 +226,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _runningMeshJobs;
     private int _workerStopping;
     private int _renderStep = 1;
-    private int RenderStep => _renderStep;
+    private int CurrentDisplayStep => _displayStep > 0 ? _displayStep : _renderStep;
 
     private readonly List<Candidate> _candidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
@@ -280,11 +280,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalIdenticalCutSkips;
     private long _totalEmptyChunks;
 
-    public int ActiveRenderCellSize => _displayStep;
-    public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters * _displayStep;
+    public int ActiveRenderCellSize => CurrentDisplayStep;
+    public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters * CurrentDisplayStep;
     public float RenderChunkSizeMeters =>
-        ChunkCells * _displayStep * SparseVoxelField.VoxelSizeMeters;
-    public bool IsUsingCoarseLod => _displayStep > 1;
+        ChunkCells * CurrentDisplayStep * SparseVoxelField.VoxelSizeMeters;
+    public bool IsUsingCoarseLod => CurrentDisplayStep > 1;
     public int Step1ChunksLastFrame { get; private set; }
     public int Step2ChunksLastFrame { get; private set; }
     public int Step4ChunksLastFrame { get; private set; }
@@ -845,7 +845,7 @@ private void PrepareCandidateEntries(
         return false;
     }
 
-        private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
+    private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
     {
         if (!cutEnabled)
         {
