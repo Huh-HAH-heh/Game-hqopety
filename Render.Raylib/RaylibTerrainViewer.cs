@@ -628,9 +628,9 @@ public static class RaylibTerrainViewer
                 if (terrainChanged)
                     renderer.Synchronize(terrain);
 
-                if (renderLogger.IsEnabled(RenderLogMode.Detailed))
+                if (terrainChanged && renderLogger.IsEnabled(RenderLogMode.Detailed))
                     renderLogger.Write(RenderLogMode.Detailed, "WORLD_SYNC",
-                        $"terrainChanged={terrainChanged} voxelVersion={worldMap.Voxels.Version} elapsedMs={Stopwatch.GetElapsedTime(syncStarted).TotalMilliseconds:0.000}");
+                        $"voxelVersion={worldMap.Voxels.Version} elapsedMs={Stopwatch.GetElapsedTime(syncStarted).TotalMilliseconds:0.000}");
 
                 long currentVoxelVersion = worldMap.Voxels.Version;
                 if (currentVoxelVersion != savedVoxelVersion &&
@@ -973,7 +973,7 @@ public static class RaylibTerrainViewer
                     13f,
                     Color.LightGray));
                 lines.Add((
-                    $"DUP REQUESTS {renderer.VoxelTotalDuplicateRequests} | QUEUE FULL {renderer.VoxelTotalQueueSaturated}",
+                    $"DUP REQUESTS {renderer.VoxelTotalDuplicateRequests} | DEFERRED {renderer.VoxelTotalQueueSaturated}",
                     13f,
                     Color.LightGray));
             }
