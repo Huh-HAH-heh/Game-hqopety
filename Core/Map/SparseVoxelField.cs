@@ -719,7 +719,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private const long MaximumUndoBytes = 64L * 1024 * 1024;
     private readonly ConcurrentDictionary<ChunkCoordinate, Chunk> _chunks = new();
     private readonly HashSet<(int X, int Z)> _editedChunkColumns = new();
-    private readonly Dictionary<(int X, int Z), ulong> _editedMacroYMasks = new();
+    private readonly Dictionary<(int X, int Z), ulong> _editedChunkYMasks = new();
     private readonly Func<int, int, int, int, (int Min, int Max)>? _baseSurfaceRange;
     private readonly List<EditHistoryEntry> _undoHistory = new();
     private readonly List<EditHistoryEntry> _redoHistory = new();
@@ -1566,11 +1566,11 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         GetMaterialDefinition(x, y, z).MassPerVoxelKg;
 
     /// <summary>
-    /// Returns vertical macro bands that can contain a boundary surface.
+    /// Returns vertical 16³ chunk bands that can contain a boundary surface.
     /// Procedural bottom-filled terrain contributes its floor and top bands;
-    /// sparse edited bricks contribute only their own macro bands.
+    /// sparse edited bricks contribute only their own vertical chunks.
     /// </summary>
-    public ulong GetPotentialVerticalMacroMask(int macroX, int macroZ, int macroCells)
+    public ulong GetPotentialVerticalChunkMask(int macroX, int macroZ, int macroCells)
     {
         if (macroX < 0 || macroZ < 0 || macroCells <= 0 ||
             macroCells % ChunkSize != 0)
@@ -1591,9 +1591,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             // Terrain is bottom-filled, so only its floor and exterior top
             // can emit faces. All completely buried vertical bands are skipped.
             mask |= 1UL;
-            int firstBand = Math.Max(0, (minSurface - 1) / macroCells);
-            int lastBand = Math.Max(firstBand, (maxSurface + 1) / macroCells);
-            for (int y = firstBand; y <= lastBand; y++)
+            int firstChunkY = Math.Max(0, (minSurface - 1) / ChunkSize);
+            int lastChunkY = Math.Max(firstChunkY, (maxSurface + 1) / ChunkSize);
+            for (int y = firstChunkY; y <= lastChunkY; y++)
             {
                 if (y >= 64)
                     return ulong.MaxValue;
@@ -1601,7 +1601,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             }
         }
 
-        if (_editedMacroYMasks.TryGetValue((macroX, macroZ), out ulong editedMask))
+        if (_editedChunkYMasks.TryGetValue((macroX, macroZ), out ulong editedMask))
             mask |= editedMask;
 
         return mask;
@@ -1845,7 +1845,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         _chunks.Clear();
         _editedChunkColumns.Clear();
-        _editedMacroYMasks.Clear();
+        _editedChunkYMasks.Clear();
         Version++;
         VoxelBounds bounds = new(0, 0, 0, Width, Height, Depth);
         IncludeHistoryBounds(bounds);
@@ -3175,21 +3175,21 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _editedChunkColumns.Add((key.X, key.Z));
         int macroX = key.X / SpatialMacroChunkCount;
         int macroZ = key.Z / SpatialMacroChunkCount;
-        int macroY = key.Y / SpatialMacroChunkCount;
-        if (macroY >= 64)
+        int chunkY = key.Y;
+        if (chunkY >= 64)
         {
-            _editedMacroYMasks[(macroX, macroZ)] = ulong.MaxValue;
+            _editedChunkYMasks[(macroX, macroZ)] = ulong.MaxValue;
             return;
         }
 
-        _editedMacroYMasks.TryGetValue((macroX, macroZ), out ulong mask);
-        _editedMacroYMasks[(macroX, macroZ)] = mask | (1UL << macroY);
+        _editedChunkYMasks.TryGetValue((macroX, macroZ), out ulong mask);
+        _editedChunkYMasks[(macroX, macroZ)] = mask | (1UL << chunkY);
     }
 
     private void RebuildEditedSpatialIndex()
     {
         _editedChunkColumns.Clear();
-        _editedMacroYMasks.Clear();
+        _editedChunkYMasks.Clear();
         foreach (ChunkCoordinate key in _chunks.Keys)
             MarkEditedChunk(key);
     }
