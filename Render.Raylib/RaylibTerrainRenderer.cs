@@ -230,8 +230,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
         long drawStarted = Stopwatch.GetTimestamp();
-        if (_logger.IsEnabled(RenderLogMode.Trace))
-            _logger.Write(RenderLogMode.Trace, "TERRAIN_DRAW_BEGIN", $"mode={_mode} viewport={viewportWidth}x{viewportHeight} distance={maximumViewDistanceMeters:0.0} camera=({camera.Position.X:0.0},{camera.Position.Y:0.0},{camera.Position.Z:0.0})");
 
         if (_densityVoxelRenderer != null)
         {
@@ -327,8 +325,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 viewportHeight,
                 maximumViewDistanceMeters))
             {
-                if (_logger.IsEnabled(RenderLogMode.Trace))
-                    _logger.Write(RenderLogMode.Trace, "REGION_FRUSTUM_CULLED", $"index={i} center=({center.X:0.0},{center.Y:0.0},{center.Z:0.0}) radius={radius:0.0}");
                 continue;
             }
 
@@ -413,19 +409,14 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         SetVoxelLighting();
 
         BeginMode3D(camera);
-        if (_logger.IsEnabled(RenderLogMode.Trace))
-            _logger.Write(RenderLogMode.Trace, "RAYLIB_PASS_BEGIN", $"name=BeginMode3D visibleRegions={visibleRegionCount}");
 
         for (int i = 0; i < visibleRegionCount; i++)
         {
             RegionGpuMesh region = _visibleRegionMeshes[i]!;
-            int meshIndex = 0;
             foreach (Mesh mesh in region.Meshes)
             {
                 DrawMesh(mesh, _material, Matrix4x4.Identity);
                 visibleDrawCalls++;
-                if (_logger.IsEnabled(RenderLogMode.Trace))
-                    _logger.Write(RenderLogMode.Trace, "DRAW_MESH", $"pass=terrain region={i} mesh={meshIndex++} vertices={mesh.VertexCount} triangles={mesh.TriangleCount}");
             }
         }
 
@@ -441,20 +432,15 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 if (region.CutSurfaceLayer != cutLayer)
                     continue;
 
-                int meshIndex = 0;
                 foreach (Mesh mesh in region.CutMeshes)
                 {
                     DrawMesh(mesh, _material, Matrix4x4.Identity);
                     visibleDrawCalls++;
-                    if (_logger.IsEnabled(RenderLogMode.Trace))
-                        _logger.Write(RenderLogMode.Trace, "DRAW_MESH", $"pass=cut-surface region={i} mesh={meshIndex++} vertices={mesh.VertexCount} triangles={mesh.TriangleCount}");
                 }
             }
         }
 
         EndMode3D();
-        if (_logger.IsEnabled(RenderLogMode.Trace))
-            _logger.Write(RenderLogMode.Trace, "RAYLIB_PASS_END", "name=EndMode3D");
 
         Array.Clear(_visibleRegionMeshes, 0, visibleRegionCount);
         if (regionCount > 0)
