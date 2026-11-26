@@ -1566,9 +1566,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             }
         }
 
+        bool boundsExpanded =
+            saveWidth > Width || saveHeight > Height || saveDepth > Depth;
         Width = Math.Max(Width, saveWidth);
         Height = Math.Max(Height, saveHeight);
         Depth = Math.Max(Depth, saveDepth);
+        if (boundsExpanded)
+            BaseVersion++;
 
         _undoHistory.Clear();
         _redoHistory.Clear();
