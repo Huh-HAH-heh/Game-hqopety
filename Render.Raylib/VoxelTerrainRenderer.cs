@@ -33,6 +33,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // Keep the visibility hierarchy's world-space group width near 51.2 m.
     private const int VisibilityGroupChunks = 4;
     private const float LodFadeDurationSeconds = 0.25f;
+    private const double LodTargetSettleMilliseconds = 350d;
 
     private const string VertexShader = """
         #version 330
@@ -241,6 +242,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _runningMeshJobs;
     private int _workerStopping;
     private int _renderStep = 1;
+    private int _pendingRenderStep;
+    private long _pendingRenderStepTimestamp;
     private int CurrentDisplayStep => _displayStep > 0 ? _displayStep : _renderStep;
 
     private readonly List<Candidate> _candidateScratch = new();
@@ -435,6 +438,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.Update(field, frameTime);
 
         _frame++;
+        if (_initialBuildBatchActive)
+            _initialBuildBatchKeys.Clear();
         RebuiltChunks = 0;
         RebuiltCutCaps = 0;
         CpuCaptureMillisecondsLastFrame = 0d;
@@ -513,6 +518,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 field, transitionCandidates, targetCutLayer,
                 transitionEntries, _transitionCandidateKeys);
         }
+
+        // Cancel requests that have fallen out of the live view before waking workers.
+        // Their queue records are discarded by workers without allocating density buffers.
+        CancelUnseenBuilds();
 
         // All visible requests for this frame are queued before waking workers.
         // The worker pool receives one batch wake-up, not one signal per chunk.
@@ -766,7 +775,7 @@ private void PrepareCandidateEntries(
         {
             ChunkKey key = candidate.Key;
             keys?.Add(key);
-            if (_initialBuildBatchActive && _frame == 1)
+            if (_initialBuildBatchActive)
                 _initialBuildBatchKeys.Add(key);
             if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
             {
@@ -1069,6 +1078,8 @@ private void PrepareCandidateEntries(
         {
             _displayStep = desiredStep;
             _renderStep = desiredStep;
+            _pendingRenderStep = 0;
+            _pendingRenderStepTimestamp = 0;
             _logger.Write(
                 "VOXEL_LOD_INITIAL",
                 $"display={_displayStep} voxelMeters={ActiveVoxelSizeMeters:0.0}");
@@ -1084,8 +1095,26 @@ private void PrepareCandidateEntries(
         int nextTargetStep = desiredStep;
 
         if (nextTargetStep == _renderStep)
+        {
+            _pendingRenderStep = 0;
+            _pendingRenderStepTimestamp = 0;
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (_pendingRenderStep != nextTargetStep)
+        {
+            _pendingRenderStep = nextTargetStep;
+            _pendingRenderStepTimestamp = now;
+            return;
+        }
+
+        if (Stopwatch.GetElapsedTime(_pendingRenderStepTimestamp, now).TotalMilliseconds <
+            LodTargetSettleMilliseconds)
             return;
 
+        _pendingRenderStep = 0;
+        _pendingRenderStepTimestamp = 0;
         int previousTargetStep = _renderStep;
         if (previousTargetStep != _displayStep)
             CancelPendingBuildsForStep(previousTargetStep);
@@ -1290,6 +1319,18 @@ private void PrepareCandidateEntries(
         return _worldBuildSnapshot;
     }
 
+    private void CancelUnseenBuilds()
+    {
+        long oldestVisibleFrame = _frame - 2;
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+        {
+            if (entry.LastSeenFrame >= oldestVisibleFrame || !HasPendingWork(entry))
+                continue;
+
+            InvalidatePendingBuild(entry);
+        }
+    }
+
     private void SignalBuildWorkers()
     {
         if (_buildQueue.IsEmpty ||
@@ -1315,6 +1356,16 @@ private void PrepareCandidateEntries(
 
             while (_buildQueue.TryDequeue(out BuildRequest? request))
             {
+                // Invalidation leaves a lightweight record in ConcurrentQueue.
+                // Drop it immediately instead of letting obsolete LOD/view work
+                // consume a worker slot or wait behind current visible terrain.
+                if (Volatile.Read(ref request.Entry.BuildGeneration) != request.Generation)
+                {
+                    request.Cancellation.Dispose();
+                    Interlocked.Increment(ref _totalBuildCancelled);
+                    continue;
+                }
+
                 Interlocked.Increment(ref _runningMeshJobs);
                 try
                 {
