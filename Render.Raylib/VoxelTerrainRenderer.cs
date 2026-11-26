@@ -9,9 +9,8 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Fixed-resolution voxel chunk manager.
-/// Every render chunk samples the authoritative field at Step=1.
-/// Visibility is controlled only by camera radius and frustum; there is no LOD grid.
+/// Large volumetric render regions meshed from the signed density field with Surface Nets.
+/// Render regions contain 64^3 cells and use 1/2/4 sample spacing by camera distance.
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
@@ -197,7 +196,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Queue<ReadyUpload> _readyUploadQueue = new();
     private readonly Queue<BuildRequest> _buildQueue = new();
     private readonly Queue<BuildCompletion> _completedBuildQueue = new();
-    private int _activeStep = 4;
+    private int _activeStep = 2;
 
     private readonly List<Candidate> _candidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
@@ -329,7 +328,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=LOD(1,2,4);chunkCells={ChunkCells};step=4;chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers=0;build=main-thread-budget;meshBudgetMs={MeshBuildBudgetMilliseconds:0.0};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=greedy-byte");
+            $"resolution=SurfaceNets(1,2,4);chunkCells={ChunkCells};step=auto;chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers=0;build=main-thread-budget;meshBudgetMs={MeshBuildBudgetMilliseconds:0.0};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=surface-nets-density");
         _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_READY", $"logPath=\"{_logger.LogPath}\" workers=0 build=main-thread");
     }
 
@@ -611,7 +610,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _activeStep = step;
         _logger.Write(RenderLogMode.Detailed, "VOXEL_LOD_CHANGED",
-            $"step={_activeStep} voxelSize={ActiveVoxelSizeMeters:0.000}m chunk={RenderChunkSizeMeters:0.0}m");
+            $"step={_activeStep} voxelSize={ActiveVoxelSizeMeters:0.000}m chunk={RenderChunkSizeMeters:0.0}m cells={ChunkCells}^3 mesher=surface-nets");
     }
 
     private bool HasPotentialRenderChunkY(
