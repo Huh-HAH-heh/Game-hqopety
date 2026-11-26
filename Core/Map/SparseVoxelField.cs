@@ -263,6 +263,49 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Volatile.Write(ref _materialCount, next.Length);
         }
 
+        public void LoadEntries(
+            DensityEntry[] density,
+            MaterialEntry[] materials)
+        {
+            if (density.Length >= DensePromotionThreshold)
+            {
+                short[] values = new short[SampleCount];
+                long[] mask = new long[MaskWords];
+                foreach (DensityEntry entry in density)
+                {
+                    values[entry.Index] = entry.Value;
+                    mask[entry.Index >> 6] |= 1L << (entry.Index & 63);
+                }
+                Volatile.Write(ref _denseDensityMask, mask);
+                Volatile.Write(ref _denseDensity, values);
+                Volatile.Write(ref _densityCount, density.Length);
+            }
+            else if (density.Length > 0)
+            {
+                Volatile.Write(ref _sparseDensity, (DensityEntry[])density.Clone());
+                Volatile.Write(ref _densityCount, density.Length);
+            }
+
+            if (materials.Length >= DensePromotionThreshold)
+            {
+                ushort[] values = new ushort[CellCount];
+                long[] mask = new long[MaskWords];
+                foreach (MaterialEntry entry in materials)
+                {
+                    values[entry.Index] = entry.Value;
+                    mask[entry.Index >> 6] |= 1L << (entry.Index & 63);
+                }
+                Volatile.Write(ref _denseMaterialMask, mask);
+                Volatile.Write(ref _denseMaterials, values);
+                Volatile.Write(ref _materialCount, materials.Length);
+            }
+            else if (materials.Length > 0)
+            {
+                Volatile.Write(ref _sparseMaterials, (MaterialEntry[])materials.Clone());
+                Volatile.Write(ref _materialCount, materials.Length);
+            }
+        }
+
         public void LoadLegacy(
             short[] density,
             byte[] densityMask,
@@ -477,10 +520,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         public Chunk ToChunk(long revision)
         {
             Chunk chunk = new() { Revision = revision };
-            foreach (DensityEntry entry in Density)
-                chunk.SetDensity(entry.Index, entry.Value);
-            foreach (MaterialEntry entry in Materials)
-                chunk.SetMaterial(entry.Index, entry.Value);
+            chunk.LoadEntries(Density, Materials);
             return chunk;
         }
 
@@ -1455,27 +1495,35 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     if (densityCount > SampleCount)
                         throw new InvalidDataException("The voxel save contains too many density overrides.");
 
+                    DensityEntry[] densityEntries = new DensityEntry[densityCount];
+                    int previousDensityIndex = -1;
                     for (int i = 0; i < densityCount; i++)
                     {
                         int index = reader.ReadUInt16();
                         short value = reader.ReadInt16();
-                        if (index >= SampleCount || chunk.TryGetDensity(index, out _))
-                            throw new InvalidDataException("The voxel save contains an invalid density entry.");
-                        chunk.SetDensity(index, value);
+                        if (index >= SampleCount || index <= previousDensityIndex)
+                            throw new InvalidDataException("The voxel save contains invalid or unsorted density entries.");
+                        previousDensityIndex = index;
+                        densityEntries[i] = new DensityEntry((ushort)index, value);
                     }
 
                     int materialCount = reader.ReadUInt16();
                     if (materialCount > CellCount)
                         throw new InvalidDataException("The voxel save contains too many material overrides.");
 
+                    MaterialEntry[] materialEntries = new MaterialEntry[materialCount];
+                    int previousMaterialIndex = -1;
                     for (int i = 0; i < materialCount; i++)
                     {
                         int index = reader.ReadUInt16();
                         ushort value = reader.ReadUInt16();
-                        if (index >= CellCount || chunk.TryGetMaterial(index, out _))
-                            throw new InvalidDataException("The voxel save contains an invalid material entry.");
-                        chunk.SetMaterial(index, value);
+                        if (index >= CellCount || index <= previousMaterialIndex)
+                            throw new InvalidDataException("The voxel save contains invalid or unsorted material entries.");
+                        previousMaterialIndex = index;
+                        materialEntries[i] = new MaterialEntry((ushort)index, value);
                     }
+
+                    chunk.LoadEntries(densityEntries, materialEntries);
                 }
 
                 if (chunk.IsEmpty)
