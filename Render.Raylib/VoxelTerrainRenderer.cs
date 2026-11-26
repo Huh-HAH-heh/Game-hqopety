@@ -9,8 +9,9 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Large volumetric render regions meshed from the signed density field with Surface Nets.
-/// Render regions contain 64^3 cells and use 1/2/4 sample spacing by camera distance.
+/// Fixed-resolution volumetric renderer. Every density sample is evaluated at
+/// the native 0.1 m lattice; Surface Nets extracts the zero isosurface.
+/// There is no distance-based LOD or resolution switching.
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
@@ -504,7 +505,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if ((_frame % 120) == 0)
         {
             string summary =
-                $"frame={_frame} resolution=Fixed1 chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
+                $"frame={_frame} resolution=0.1m chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
                 $"macroFrustum={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkFrustum={FrustumCandidatesLastFrame} " +
                 $"emptyChunks={_totalEmptyChunks} mainThreadCopyMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} lastBuildMs={LastWorkerBuildMilliseconds:0.000} " +
