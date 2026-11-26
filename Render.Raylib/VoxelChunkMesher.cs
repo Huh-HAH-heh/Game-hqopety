@@ -524,12 +524,14 @@ internal static class VoxelChunkMesher
 
             using MeshBatch batch = new(output);
 
-            // Each sign-changing sample edge owns exactly one quad. The four
-            // vertices are the Surface Nets vertices of its incident cells.
-            for (int z = 0; z <= cells; z++)
+            // Each grid edge belongs to exactly one render chunk. Its four
+            // incident cells may be in the halo, so adjacent chunks stay watertight.
+            for (int z = 0; z < cells; z++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                for (int y = 0; y <= cells; y++)
+
+                // Edges parallel to X; positive winding points toward +X.
+                for (int y = 0; y < cells; y++)
                 for (int x = 0; x < cells; x++)
                 {
                     float a = input.GetDensity(x, y, z);
@@ -545,6 +547,7 @@ internal static class VoxelChunkMesher
                         i0, i1, i2, i3, a > 0f);
                 }
 
+                // Edges parallel to Y; reordered to produce +Y winding.
                 for (int x = 0; x < cells; x++)
                 for (int y = 0; y < cells; y++)
                 {
@@ -561,6 +564,7 @@ internal static class VoxelChunkMesher
                         i0, i1, i2, i3, a > 0f);
                 }
 
+                // Edges parallel to Z; positive winding points toward +Z.
                 for (int y = 0; y < cells; y++)
                 for (int x = 0; x < cells; x++)
                 {
