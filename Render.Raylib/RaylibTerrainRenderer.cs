@@ -153,8 +153,12 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _densityVoxelRenderer = mode == TerrainRenderMode.Voxel
             ? new VoxelTerrainRenderer(palette, _logger)
             : null;
-        _regionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
-        _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
+        _regionMeshes = mode == TerrainRenderMode.Voxel
+            ? Array.Empty<RegionGpuMesh?>()
+            : new RegionGpuMesh?[terrain.StorageRegionCount];
+        _visibleRegionMeshes = mode == TerrainRenderMode.Voxel
+            ? Array.Empty<RegionGpuMesh?>()
+            : new RegionGpuMesh?[terrain.StorageRegionCount];
 
         Material material = LoadMaterialDefault();
         Shader voxelShader = default;
@@ -200,38 +204,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
         Synchronize(terrain);
 
-        if (mode == TerrainRenderMode.Voxel)
-        {
-            Stopwatch buildTimer = Stopwatch.StartNew();
-            _logger.Write(RenderLogMode.Detailed, "VOXEL_BASE_BUILD_START",
-                $"regions={terrain.StorageRegionCount} regionSize={terrain.StorageRegionSize} resolution=1m indexedSurface=true");
-
-            try
-            {
-                for (int i = 0; i < _regionMeshes.Length; i++)
-                {
-                    int regionX = i % terrain.StorageRegionsX;
-                    int regionY = i / terrain.StorageRegionsX;
-                    _regionMeshes[i] = RegionMeshBuilder.BuildVoxel(
-                        terrain, regionX, regionY, _palette, _paletteVersion);
-                }
-            }
-            catch
-            {
-                DisposeMeshes(_regionMeshes);
-                _densityVoxelRenderer?.Dispose();
-                UnloadMaterial(_material);
-                if (_hasVoxelShader)
-                    UnloadShader(_voxelShader);
-                throw;
-            }
-
-            _logger.Write(RenderLogMode.Detailed, "VOXEL_BASE_BUILD_COMPLETE",
-                $"regions={_regionMeshes.Length} built={_regionMeshes.Length} elapsedMs={buildTimer.Elapsed.TotalMilliseconds:0.000} mode=all-at-once");
-        }
-
         _logger.Write(RenderLogMode.Detailed, "TERRAIN_RENDERER_CREATED",
-            $"mode={_mode} regions={terrain.StorageRegionCount} staticVoxelBase={mode == TerrainRenderMode.Voxel} editedVoxelBackend={_densityVoxelRenderer != null}");
+            $"mode={_mode} backend={(mode == TerrainRenderMode.Voxel ? "density-surface-nets-only" : "heightmap-regions")} staticVoxelBase=false");
     }
 
     public void Synchronize(
@@ -520,7 +494,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         VisibleRegionsLastFrame = visibleRegionCount + editedVoxelVisible;
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
             _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
-                $"backend=static-height-surface+edited-surface-nets elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visibleRegions={visibleRegionCount} editedVoxelChunks={editedVoxelVisible} draws={DrawCallsLastFrame} regionBuilds={baseBuildsThisFrame} cutBuilds={cutBuildsThisFrame}");
+                $"backend={(_mode == TerrainRenderMode.Voxel ? "density-surface-nets-only" : "heightmap-regions")} elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visibleRegions={visibleRegionCount} voxelChunks={editedVoxelVisible} draws={DrawCallsLastFrame} regionBuilds={baseBuildsThisFrame} cutBuilds={cutBuildsThisFrame}");
     }
 
     public int DetachLooseFragments(
