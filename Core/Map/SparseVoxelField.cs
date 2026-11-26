@@ -607,10 +607,11 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Materials.AsSpan().SequenceEqual(other.Materials);
     }
 
-    private sealed class ChunkFieldSnapshot : IVoxelFieldSource
+    private sealed class ChunkFieldSnapshot : IVoxelFieldSource, IVoxelColumnDensitySource
     {
         private readonly Func<int, int, int, float> _baseDensity;
         private readonly Func<int, int, int, ushort> _baseMaterial;
+        private readonly Func<int, int, (float SurfaceHeight, float GradientLength)>? _baseDensityColumn;
         private readonly Dictionary<ChunkCoordinate, ChunkSnapshot>? _chunks;
 
         public int Width { get; }
@@ -623,7 +624,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int depth,
             Func<int, int, int, float> baseDensity,
             Func<int, int, int, ushort> baseMaterial,
-            Dictionary<ChunkCoordinate, ChunkSnapshot>? chunks)
+            Dictionary<ChunkCoordinate, ChunkSnapshot>? chunks,
+            Func<int, int, (float SurfaceHeight, float GradientLength)>? baseDensityColumn)
         {
             Width = width;
             Height = height;
@@ -631,6 +633,56 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             _baseDensity = baseDensity;
             _baseMaterial = baseMaterial;
             _chunks = chunks;
+            _baseDensityColumn = baseDensityColumn;
+        }
+
+        public bool TryGetDensityColumn(
+            int x,
+            int z,
+            int startY,
+            int step,
+            Span<float> destination)
+        {
+            if (_baseDensityColumn == null || step <= 0 || destination.IsEmpty)
+                return false;
+
+            bool insideColumn = (uint)x < (uint)Width && (uint)z < (uint)Depth;
+            (float surfaceHeight, float gradientLength) = insideColumn
+                ? _baseDensityColumn(x, z)
+                : (float.NaN, 1f);
+            bool hasBase = float.IsFinite(surfaceHeight) &&
+                float.IsFinite(gradientLength) &&
+                gradientLength > 0.000001f;
+
+            for (int i = 0; i < destination.Length; i++)
+            {
+                int worldY = startY + i * step;
+                float density = insideColumn && hasBase &&
+                    worldY >= 0 && worldY < Height
+                        ? (surfaceHeight - (worldY + 0.5f)) / gradientLength
+                        : -1f;
+
+                if (insideColumn && worldY >= 0 && worldY <= Height &&
+                    _chunks != null)
+                {
+                    ChunkCoordinate key = new(
+                        x / ChunkSize, worldY / ChunkSize, z / ChunkSize);
+                    if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+                    {
+                        int index = x % ChunkSize +
+                            (worldY % ChunkSize) * DensitySamplesPerAxis +
+                            (z % ChunkSize) * SamplePlane;
+                        int found = Chunk.FindDensity(
+                            chunk.Density, chunk.Density.Length, index);
+                        if (found >= 0)
+                            density = chunk.Density[found].Value / DensityScale;
+                    }
+                }
+
+                destination[i] = density;
+            }
+
+            return true;
         }
 
         public float GetDensity(int x, int y, int z)
@@ -805,6 +857,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private readonly List<EditHistoryEntry> _redoHistory = new();
     private readonly Func<int, int, int, float> _baseDensity;
     private readonly Func<int, int, int, ushort> _baseMaterial;
+    private readonly Func<int, int, (float SurfaceHeight, float GradientLength)>? _baseDensityColumn;
     private EditHistoryCapture? _historyCapture;
     private long _undoHistoryBytes;
     private bool _isRestoringHistory;
@@ -879,7 +932,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int depth,
         Func<int, int, int, float> baseDensity,
         Func<int, int, int, ushort> baseMaterial,
-        Func<int, int, int, int, (int Min, int Max)>? baseSurfaceRange = null)
+        Func<int, int, int, int, (int Min, int Max)>? baseSurfaceRange = null,
+        Func<int, int, (float SurfaceHeight, float GradientLength)>? baseDensityColumn = null)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
@@ -891,6 +945,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         _baseDensity = baseDensity ?? throw new ArgumentNullException(nameof(baseDensity));
         _baseMaterial = baseMaterial ?? throw new ArgumentNullException(nameof(baseMaterial));
         _baseSurfaceRange = baseSurfaceRange;
+        _baseDensityColumn = baseDensityColumn;
     }
 
     /// <summary>
@@ -996,7 +1051,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Depth,
             _baseDensity,
             _baseMaterial,
-            snapshots);
+            snapshots,
+            _baseDensityColumn);
     }
     /// <summary>
     /// Captures the complete logical field in one immutable snapshot. Procedural
@@ -1020,7 +1076,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Depth,
             _baseDensity,
             _baseMaterial,
-            snapshots);
+            snapshots,
+            _baseDensityColumn);
     }
 
     public IVoxelFieldSource CreateRegionSnapshot(
@@ -1070,7 +1127,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Depth,
             _baseDensity,
             _baseMaterial,
-            snapshots);
+            snapshots,
+            _baseDensityColumn);
     }
 
     public float GetDensity(int x, int y, int z)
