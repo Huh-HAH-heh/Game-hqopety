@@ -496,7 +496,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             MathF.Max(0f, maximumViewDistanceMeters));
 
         UploadReadyMeshes();
-        _logger.Write(RenderLogMode.Detailed, "VOXEL_VISIBILITY", $"frame={_frame} candidates={candidates.Count} macroTests={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkTests={FrustumCandidatesLastFrame} cache={_chunks.Count} visibleCandidates={_visibleCandidateKeys.Count} packets={GpuUploadsLastFrame} uploadMs={GpuUploadMillisecondsLastFrame:0.000}");
+        if (_logger.IsEnabled(RenderLogMode.Detailed))
+            _logger.Write(RenderLogMode.Detailed, "VOXEL_VISIBILITY", $"frame={_frame} candidates={candidates.Count} macroTests={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkTests={FrustumCandidatesLastFrame} cache={_chunks.Count} visibleCandidates={_visibleCandidateKeys.Count} packets={GpuUploadsLastFrame} uploadMs={GpuUploadMillisecondsLastFrame:0.000}");
 
         _visible.Clear();
         foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
@@ -920,7 +921,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.RunningBuild = request;
         _buildQueue.Enqueue(request);
         _totalBuildRequests++;
-        _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_REQUEST", $"chunk=({key.X},{key.Y},{key.Z}) generation={request.Generation} revision={request.RequestRevision} base={request.BaseVersion} palette={request.PaletteVersion} cut={cutLayer} queue={_buildQueue.Count}");
+        if (_logger.IsEnabled(RenderLogMode.Detailed))
+            _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_REQUEST", $"chunk=({key.X},{key.Y},{key.Z}) generation={request.Generation} revision={request.RequestRevision} base={request.BaseVersion} palette={request.PaletteVersion} cut={cutLayer} queue={_buildQueue.Count}");
         _buildSignal.Release();
     }
 
@@ -950,7 +952,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Interlocked.Increment(ref _totalBuildStarted);
 
             long workerStarted = Stopwatch.GetTimestamp();
-            _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_STARTED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} queueMs={Stopwatch.GetElapsedTime(request.EnqueuedTimestamp, workerStarted).TotalMilliseconds:0.000}");
+            if (_logger.IsEnabled(RenderLogMode.Detailed))
+                _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_STARTED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} queueMs={Stopwatch.GetElapsedTime(request.EnqueuedTimestamp, workerStarted).TotalMilliseconds:0.000}");
             VoxelMeshData[] surface = Array.Empty<VoxelMeshData>();
             VoxelMeshData[] cutCap = Array.Empty<VoxelMeshData>();
             bool completionQueued = false;
@@ -1015,7 +1018,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     false,
                     workerStarted,
                     Stopwatch.GetTimestamp()));
-                _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_COMPLETED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} ms={result.WorkerMilliseconds:0.000} meshes={surface.Length + cutCap.Length} vertices={vertices} triangles={triangles} hash={surfaceHash:X16}");
+                if (_logger.IsEnabled(RenderLogMode.Detailed))
+                    _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_COMPLETED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} ms={result.WorkerMilliseconds:0.000} meshes={surface.Length + cutCap.Length} vertices={vertices} triangles={triangles} hash={surfaceHash:X16}");
 
                 completionQueued = true;
                 surface = Array.Empty<VoxelMeshData>();
@@ -1113,9 +1117,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             {
                 _totalBuildFailed++;
                 entry.FailedRevision = request.RequestRevision;
-                _logger.Write(
-                    "MESH_FAILED",
-                    $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"{completion.Error.Message}\"");
+                _logger.Error("MESH_FAILED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error={completion.Error}");
                 continue;
             }
 
@@ -1123,9 +1125,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             {
                 _totalBuildFailed++;
                 entry.FailedRevision = request.RequestRevision;
-                _logger.Write(
-                    "MESH_FAILED",
-                    $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=\"missing worker result\"");
+                _logger.Error("MESH_FAILED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) error=missing worker result");
                 continue;
             }
 
@@ -1160,7 +1160,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             _totalBuildCompleted++;
             BuildsCompletedLastFrame++;
-            _logger.Write(RenderLogMode.Detailed, "MESH_RESULT_ACCEPTED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} ms={build.WorkerMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount} surfacePackets={build.Surface.Length} cutPackets={build.CutCap.Length}");
+            if (_logger.IsEnabled(RenderLogMode.Detailed))
+                _logger.Write(RenderLogMode.Detailed, "MESH_RESULT_ACCEPTED", $"chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) generation={request.Generation} ms={build.WorkerMilliseconds:0.000} vertices={build.VertexCount} triangles={build.TriangleCount} surfacePackets={build.Surface.Length} cutPackets={build.CutCap.Length}");
             WorkerBuildMillisecondsLastFrame += build.WorkerMilliseconds;
             LastWorkerBuildMilliseconds = build.WorkerMilliseconds;
             LastWorkerQueueWaitMilliseconds = Math.Max(
@@ -1319,15 +1320,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 {
                     long uploadStarted = Stopwatch.GetTimestamp();
                     mesh = VoxelChunkMesher.UploadOne(source);
-                    _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UPLOAD", $"chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) meshIndex={entry.SurfaceUploadIndex + entry.CutUploadIndex} vertices={source.VertexCount} triangles={source.IndexCount / 3} elapsedMs={Stopwatch.GetElapsedTime(uploadStarted).TotalMilliseconds:0.000}");
+                    if (_logger.IsEnabled(RenderLogMode.Detailed))
+                        _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UPLOAD", $"chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) meshIndex={entry.SurfaceUploadIndex + entry.CutUploadIndex} vertices={source.VertexCount} triangles={source.IndexCount / 3} elapsedMs={Stopwatch.GetElapsedTime(uploadStarted).TotalMilliseconds:0.000}");
                 }
                 catch (Exception exception)
                 {
                     _totalBuildFailed++;
                     entry.FailedRevision = request.RequestRevision;
-                    _logger.Write(
-                        "MESH_GPU_UPLOAD_FAILED",
-                        $"kind=surface chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) error=\"{exception.Message}\"");
+                    _logger.Error("MESH_GPU_UPLOAD_FAILED", $"kind=surface chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) error={exception}");
                     InvalidatePendingBuild(entry);
                     continue;
                 }
@@ -1348,15 +1348,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 {
                     long uploadStarted = Stopwatch.GetTimestamp();
                     mesh = VoxelChunkMesher.UploadOne(source);
-                    _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UPLOAD", $"chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) meshIndex={entry.SurfaceUploadIndex + entry.CutUploadIndex} vertices={source.VertexCount} triangles={source.IndexCount / 3} elapsedMs={Stopwatch.GetElapsedTime(uploadStarted).TotalMilliseconds:0.000}");
+                    if (_logger.IsEnabled(RenderLogMode.Detailed))
+                        _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UPLOAD", $"chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) meshIndex={entry.SurfaceUploadIndex + entry.CutUploadIndex} vertices={source.VertexCount} triangles={source.IndexCount / 3} elapsedMs={Stopwatch.GetElapsedTime(uploadStarted).TotalMilliseconds:0.000}");
                 }
                 catch (Exception exception)
                 {
                     _totalBuildFailed++;
                     entry.FailedRevision = request.RequestRevision;
-                    _logger.Write(
-                        "MESH_GPU_UPLOAD_FAILED",
-                        $"kind=cut-cap chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) error=\"{exception.Message}\"");
+                    _logger.Error("MESH_GPU_UPLOAD_FAILED", $"kind=cut-cap chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) error={exception}");
                     InvalidatePendingBuild(entry);
                     continue;
                 }

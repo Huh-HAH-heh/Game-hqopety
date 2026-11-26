@@ -673,6 +673,12 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
     {
         if (_disposed)
             return;
+
+        int meshCount = 0;
+        foreach (Body body in _bodies)
+            meshCount += body.Meshes.Length + body.UploadingMeshes.Count;
+        _logger.Write(RenderLogMode.Detailed, "FRAGMENTS_DISPOSE", $"activeBodies={_activeBodyCount} meshes={meshCount} snapshotBytes={_snapshotBytes}");
+
         Clear();
         _disposed = true;
     }

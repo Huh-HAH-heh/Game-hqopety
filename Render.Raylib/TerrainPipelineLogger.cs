@@ -125,7 +125,11 @@ internal sealed class TerrainPipelineLogger : IDisposable
                 }
 
                 await writer.WriteLineAsync(line);
-                if ((Interlocked.Read(ref _sequence) & 31) == 0)
+                bool stateChanged =
+                    line.EndsWith("LOGGING_DISABLED", StringComparison.Ordinal) ||
+                    line.Contains(" LOG_MODE_CHANGED ", StringComparison.Ordinal) ||
+                    line.EndsWith("SESSION_END", StringComparison.Ordinal);
+                if (stateChanged || (Interlocked.Read(ref _sequence) & 31) == 0)
                     await writer.FlushAsync();
             }
         }
