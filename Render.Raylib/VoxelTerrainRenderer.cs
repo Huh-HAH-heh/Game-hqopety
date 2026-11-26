@@ -26,6 +26,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int CutCapSettleFrames = 8;
     private const int MaximumRenderStep = 64;
     private const int CacheEvictionScanBudget = 4096;
+    private const int MaximumCachedChunks = 16384;
+    private const int VisibilityGroupChunks = 8;
+    private const float LodFadeDurationSeconds = 0.25f;
 
     private const string VertexShader = """
         #version 330
@@ -57,11 +60,23 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         uniform vec3 uSunDirection;
         uniform float uAmbientLight;
         uniform float uSunIntensity;
+        uniform float uLodFade;
+        uniform int uLodRole;
         out vec4 finalColor;
         void main()
         {
             if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
                 discard;
+
+            if (uLodRole >= 0)
+            {
+                float lodNoise = fract(sin(dot(
+                    floor(gl_FragCoord.xy),
+                    vec2(12.9898, 78.233))) * 43758.5453);
+                if ((uLodRole == 0 && lodNoise < uLodFade) ||
+                    (uLodRole == 1 && lodNoise >= uLodFade))
+                    discard;
+            }
 
             vec3 n = normalize(fragWorldNormal);
             float faceAO = 0.85;
@@ -215,9 +230,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private readonly List<Candidate> _candidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
+    private readonly List<Candidate> _transitionCandidateScratch = new();
+    private readonly List<(Candidate Candidate, ChunkEntry Entry)> _transitionEntriesScratch = new();
+    private readonly HashSet<ChunkKey> _transitionCandidateKeys = new();
     private readonly Queue<(ChunkKey Key, ChunkEntry Entry)> _evictionQueue = new();
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
+    private readonly List<(ChunkKey Key, ChunkEntry Entry)> _transitionVisible = new();
     private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
+    private int _displayStep;
+    private bool _lodTransitionActive;
+    private float _lodFade;
 
     private readonly DynamicVoxelFragmentRenderer _dynamicFragments;
     private readonly TerrainPipelineLogger _logger;
@@ -230,6 +252,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _sunDirectionLocation;
     private readonly int _ambientLightLocation;
     private readonly int _sunIntensityLocation;
+    private readonly int _lodFadeLocation;
+    private readonly int _lodRoleLocation;
 
     private TerrainPalette _palette;
     private SparseVoxelField? _observedField;
@@ -256,11 +280,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalIdenticalCutSkips;
     private long _totalEmptyChunks;
 
-    public int ActiveRenderCellSize => RenderStep;
-    public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters * RenderStep;
+    public int ActiveRenderCellSize => _displayStep;
+    public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters * _displayStep;
     public float RenderChunkSizeMeters =>
-        ChunkCells * RenderStep * SparseVoxelField.VoxelSizeMeters;
-    public bool IsUsingCoarseLod => RenderStep > 1;
+        ChunkCells * _displayStep * SparseVoxelField.VoxelSizeMeters;
+    public bool IsUsingCoarseLod => _displayStep > 1;
     public int Step1ChunksLastFrame { get; private set; }
     public int Step2ChunksLastFrame { get; private set; }
     public int Step4ChunksLastFrame { get; private set; }
@@ -331,12 +355,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
         _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
         _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
+        _lodFadeLocation = GetShaderLocation(_shader, "uLodFade");
+        _lodRoleLocation = GetShaderLocation(_shader, "uLodRole");
 
         if (_cutEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
             _sunDirectionLocation < 0 ||
             _ambientLightLocation < 0 ||
-            _sunIntensityLocation < 0)
+            _sunIntensityLocation < 0 ||
+            _lodFadeLocation < 0 ||
+            _lodRoleLocation < 0)
         {
             UnloadShader(_shader);
             throw new InvalidOperationException("The 3D voxel shader is missing a required uniform.");
@@ -388,7 +416,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         UpdateRenderStep(camera, viewportHeight);
 
         long voxelFrameStarted = Stopwatch.GetTimestamp();
-        _dynamicFragments.Update(field, GetFrameTime());
+        float frameTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
+        _dynamicFragments.Update(field, frameTime);
 
         _frame++;
         RebuiltChunks = 0;
@@ -403,56 +432,221 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int cutLayer = cutEnabled
             ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
             : -1;
-
         UpdateStableCutLayer(cutEnabled, cutLayer);
         int stableCutLayer = cutEnabled &&
             _cutLayerStableFrames >= CutCapSettleFrames
                 ? _stableCutLayer
                 : -1;
+        int targetCutLayer = cutEnabled && stableCutLayer >= 0
+            ? stableCutLayer
+            : int.MinValue;
 
-        List<Candidate> candidates = _candidateScratch;
-        candidates.Clear();
-
+        List<Candidate> displayCandidates = _candidateScratch;
+        displayCandidates.Clear();
         int frustumTests = 0;
         int macroFrustumTests = 0;
         int visibleMacroRegions = 0;
-        CollectVisibleCandidates(
-            field,
-            camera,
-            viewportWidth,
-            viewportHeight,
-            maximumViewDistanceMeters,
-            stableCutLayer,
-            candidates,
-            ref frustumTests,
-            ref macroFrustumTests,
-            ref visibleMacroRegions);
 
-        candidates.Sort(static (a, b) =>
+        CollectVisibleCandidates(
+            field, camera, viewportWidth, viewportHeight,
+            maximumViewDistanceMeters, _displayStep, stableCutLayer,
+            displayCandidates,
+            ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
+        displayCandidates.Sort(static (a, b) =>
             a.DistanceSquared.CompareTo(b.DistanceSquared));
 
         FrustumCandidatesLastFrame = frustumTests;
         MacroFrustumTestsLastFrame = macroFrustumTests;
         VisibleMacroRegionsLastFrame = visibleMacroRegions;
         CandidateOverflowLastFrame = 0;
-        Step1ChunksLastFrame = RenderStep == 1 ? candidates.Count : 0;
-        Step2ChunksLastFrame = RenderStep == 2 ? candidates.Count : 0;
-        Step4ChunksLastFrame = RenderStep == 4 ? candidates.Count : 0;
-        Step8ChunksLastFrame = RenderStep == 8 ? candidates.Count : 0;
-        Step16ChunksLastFrame = RenderStep == 16 ? candidates.Count : 0;
-        Step32ChunksLastFrame = RenderStep == 32 ? candidates.Count : 0;
-        Step64ChunksLastFrame = RenderStep == 64 ? candidates.Count : 0;
-        _visibleCandidateKeys.Clear();
+        Step1ChunksLastFrame = _displayStep == 1 ? displayCandidates.Count : 0;
+        Step2ChunksLastFrame = _displayStep == 2 ? displayCandidates.Count : 0;
+        Step4ChunksLastFrame = _displayStep == 4 ? displayCandidates.Count : 0;
+        Step8ChunksLastFrame = _displayStep == 8 ? displayCandidates.Count : 0;
+        Step16ChunksLastFrame = _displayStep == 16 ? displayCandidates.Count : 0;
+        Step32ChunksLastFrame = _displayStep == 32 ? displayCandidates.Count : 0;
+        Step64ChunksLastFrame = _displayStep == 64 ? displayCandidates.Count : 0;
 
-        List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
-            _candidateEntriesScratch;
-        candidateEntries.Clear();
+        PrepareCandidateEntries(
+            field, displayCandidates, targetCutLayer,
+            _candidateEntriesScratch, _visibleCandidateKeys);
 
+        List<Candidate> transitionCandidates = _transitionCandidateScratch;
+        List<(Candidate Candidate, ChunkEntry Entry)> transitionEntries =
+            _transitionEntriesScratch;
+        transitionCandidates.Clear();
+        transitionEntries.Clear();
+        _transitionCandidateKeys.Clear();
+
+        if (_renderStep != _displayStep)
+        {
+            BuildTransitionCandidates(
+                field, camera, viewportWidth, viewportHeight,
+                maximumViewDistanceMeters, stableCutLayer,
+                _displayStep, _renderStep, displayCandidates, transitionCandidates);
+            transitionCandidates.Sort(static (a, b) =>
+                a.DistanceSquared.CompareTo(b.DistanceSquared));
+
+            PrepareCandidateEntries(
+                field, transitionCandidates, targetCutLayer,
+                transitionEntries, keys: null);
+        }
+
+        EvictChunksOutsideRadius(
+            field, camera.Position, MathF.Max(0f, maximumViewDistanceMeters));
+        CollectCompletedBuilds(field);
+        UploadReadyMeshes();
+
+        if (_renderStep != _displayStep &&
+            !_lodTransitionActive &&
+            AreCandidateEntriesReady(transitionEntries, field, targetCutLayer))
+        {
+            _lodTransitionActive = true;
+            _lodFade = 0f;
+            _logger.Write(
+                "VOXEL_LOD_FADE_START",
+                $"display={_displayStep} target={_renderStep} chunks={transitionEntries.Count}");
+        }
+
+        if (_lodTransitionActive)
+            _lodFade = Math.Clamp(
+                _lodFade + frameTime / LodFadeDurationSeconds, 0f, 1f);
+
+        _visible.Clear();
+        foreach ((Candidate candidate, ChunkEntry entry) in _candidateEntriesScratch)
+        {
+            bool hasVisibleSurface = entry.Surface.Length > 0;
+            bool hasVisibleCutCap = cutEnabled && stableCutLayer >= 0 &&
+                entry.CutLayer == stableCutLayer && entry.CutCap.Length > 0;
+            if (entry.Built && (hasVisibleSurface || hasVisibleCutCap))
+                AddVisible(candidate.Key, entry);
+        }
+
+        _transitionVisible.Clear();
+        if (_lodTransitionActive)
+        {
+            foreach ((Candidate candidate, ChunkEntry entry) in transitionEntries)
+            {
+                bool hasVisibleSurface = entry.Surface.Length > 0;
+                bool hasVisibleCutCap = cutEnabled && stableCutLayer >= 0 &&
+                    entry.CutLayer == stableCutLayer && entry.CutCap.Length > 0;
+                if (entry.Built && (hasVisibleSurface || hasVisibleCutCap))
+                    _transitionVisible.Add((candidate.Key, entry));
+            }
+        }
+
+        double remainingUploadBudget = Math.Max(
+            0d, GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
+        if (remainingUploadBudget > 0d)
+            GpuUploadMillisecondsLastFrame +=
+                _dynamicFragments.UploadPendingMeshes(remainingUploadBudget);
+
+        _dynamicFragments.ReleaseBakedBodies(
+            bounds => AreCachedMeshesCurrent(bounds, field));
+
+        if ((_frame % 300) == 0)
+        {
+            string summary =
+                $"frame={_frame} displayStep={_displayStep} buildStep={_renderStep} fade={_lodFade:0.00} " +
+                $"candidates={_visibleCandidateKeys.Count} transitionCandidates={transitionCandidates.Count} " +
+                $"visible={_visible.Count} transitionVisible={_transitionVisible.Count} cache={_chunks.Count} empty={_totalEmptyChunks} " +
+                $"buildMs={WorkerBuildMillisecondsLastFrame:0.00} queueMs={LastWorkerQueueWaitMilliseconds:0.0} gpuMs={GpuUploadMillisecondsLastFrame:0.00} " +
+                $"packets={GpuUploadsLastFrame} builds={_totalBuildCompleted}/{_totalBuildRequests} pending={_buildQueue.Count} " +
+                $"failed={_totalBuildFailed} stale={_totalStaleResults} deferred={_totalQueueSaturated} repeat={_totalRepeatedBuilds} " +
+                $"uploads={_totalGpuUploads} unloads={_totalGpuUnloads} cacheHits={_totalIdenticalSurfaceSkips}";
+            _logger.Write("FRAME_SUMMARY", summary);
+            Console.WriteLine($"[TERRAIN][PERF] {summary}");
+        }
+
+        float renderCutHeightMeters = cutEnabled && stableCutLayer >= 0
+            ? stableCutLayer * SparseVoxelField.VoxelSizeMeters
+            : cutHeightMeters;
+        SetLighting();
+        SetCutShader(cutEnabled, renderCutHeightMeters);
+
+        float worldRadius = 0.5f * MathF.Sqrt(
+            field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
+            field.Depth * field.Depth * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
+            field.Height * field.Height * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters);
+        float distanceToOrigin = camera.Position.Length();
+        float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
+        Rlgl.SetClipPlanes(
+            Math.Clamp(cameraDistance * 0.002f, 0.02f, 2f),
+            MathF.Max(1000f, distanceToOrigin + worldRadius + 100f));
+
+        BeginMode3D(camera);
+        int draws = 0;
+        if (_lodTransitionActive)
+        {
+            SetLodShader(0, _lodFade);
+            foreach ((ChunkKey key, ChunkEntry entry) in _visible)
+            foreach (Mesh mesh in entry.Surface)
+            {
+                DrawMesh(mesh, _material, Matrix4x4.Identity);
+                draws++;
+            }
+
+            SetLodShader(1, _lodFade);
+            foreach ((ChunkKey key, ChunkEntry entry) in _transitionVisible)
+            foreach (Mesh mesh in entry.Surface)
+            {
+                DrawMesh(mesh, _material, Matrix4x4.Identity);
+                draws++;
+            }
+        }
+        else
+        {
+            SetLodShader(-1, 0f);
+            foreach ((ChunkKey key, ChunkEntry entry) in _visible)
+            foreach (Mesh mesh in entry.Surface)
+            {
+                DrawMesh(mesh, _material, Matrix4x4.Identity);
+                draws++;
+            }
+        }
+
+        SetLodShader(-1, 0f);
+        SetCutShader(cutEnabled, renderCutHeightMeters);
+        _dynamicFragments.Draw(_material);
+        EndMode3D();
+
+        DrawCallsLastFrame = draws;
+        VisibleChunksLastFrame = _visible.Count +
+            (_lodTransitionActive ? _transitionVisible.Count : 0);
+        if (_lodTransitionActive && _lodFade >= 1f)
+        {
+            int previousDisplayStep = _displayStep;
+            _displayStep = _renderStep;
+            _lodTransitionActive = false;
+            _lodFade = 0f;
+            _logger.Write(
+                "VOXEL_LOD_SWITCHED",
+                $"from={previousDisplayStep} to={_displayStep} transition=0.25s chunks={_transitionVisible.Count}");
+        }
+
+        if (_logger.IsEnabled(RenderLogMode.FrameSummary))
+            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME",
+                $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} displayStep={_displayStep} buildStep={_renderStep} " +
+                $"surfaceCandidates={VisibleCandidatesLastFrame} visibleChunks={VisibleChunksLastFrame} draws={DrawCallsLastFrame} " +
+                $"chunkCache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} " +
+                $"uploads={GpuUploadsLastFrame} workers={_workerTasks.Length} buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} " +
+                $"uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} " +
+                $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
+    }
+
+private void PrepareCandidateEntries(
+        SparseVoxelField field,
+        List<Candidate> candidates,
+        int targetCutLayer,
+        List<(Candidate Candidate, ChunkEntry Entry)> destination,
+        HashSet<ChunkKey>? keys)
+    {
+        destination.Clear();
+        keys?.Clear();
         foreach (Candidate candidate in candidates)
         {
             ChunkKey key = candidate.Key;
-            _visibleCandidateKeys.Add(key);
-
+            keys?.Add(key);
             if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
             {
                 entry = new ChunkEntry();
@@ -465,134 +659,193 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
-
-            int targetCutLayer = cutEnabled && stableCutLayer >= 0
-                ? stableCutLayer
-                : int.MinValue;
-
             bool cutStateStale = entry.CutLayer != targetCutLayer;
 
-            // A completed old-cut mesh must never block the current cut revision.
             if ((entry.RunningBuild is { } pendingBuild &&
                     pendingBuild.CutLayer != targetCutLayer) ||
                 (entry.ReadyRequest is { } readyRequest &&
                     readyRequest.CutLayer != targetCutLayer))
-            {
                 InvalidatePendingBuild(entry);
-            }
 
-            bool needsSurfaceBuild =
-                surfaceStale ||
-                cutStateStale ||
-                entry.CutDirty;
-
-
-            if (needsSurfaceBuild && !HasPendingWork(entry))
+            if ((surfaceStale || cutStateStale || entry.CutDirty) &&
+                !HasPendingWork(entry))
             {
                 RequestBuild(
-                    field,
-                    key,
-                    entry,
-                    buildSurface: true,
-                    buildCutCap: false,
+                    field, key, entry,
+                    buildSurface: true, buildCutCap: false,
                     cutLayer: targetCutLayer);
             }
 
-            if (!cutEnabled && entry.CutCap.Length > 0)
+            if (targetCutLayer == int.MinValue && entry.CutCap.Length > 0)
                 ClearCutCap(key, entry);
-
-            candidateEntries.Add((candidate, entry));
+            destination.Add((candidate, entry));
         }
-
-        EvictChunksOutsideRadius(
-            field,
-            camera.Position,
-            MathF.Max(0f, maximumViewDistanceMeters));
-
-        CollectCompletedBuilds(field);
-        UploadReadyMeshes();
-        if (_logger.IsEnabled(RenderLogMode.Detailed))
-            _logger.Write(RenderLogMode.Detailed, "VOXEL_VISIBILITY", $"frame={_frame} surfaceCandidates={candidates.Count} macroTests={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkTests={FrustumCandidatesLastFrame} cache={_chunks.Count} visibleSurfaceCandidates={_visibleCandidateKeys.Count} packets={GpuUploadsLastFrame} uploadMs={GpuUploadMillisecondsLastFrame:0.000}");
-
-        _visible.Clear();
-        foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
-        {
-            bool hasVisibleSurface = entry.Surface.Length > 0;
-            bool hasVisibleCutCap = cutEnabled &&
-                stableCutLayer >= 0 &&
-                entry.CutLayer == stableCutLayer &&
-                entry.CutCap.Length > 0;
-
-            if (entry.Built && (hasVisibleSurface || hasVisibleCutCap))
-                AddVisible(candidate.Key, entry);
-        }
-
-        double remainingUploadBudget = Math.Max(
-            0d,
-            GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
-
-        if (remainingUploadBudget > 0d)
-        {
-            GpuUploadMillisecondsLastFrame +=
-                _dynamicFragments.UploadPendingMeshes(remainingUploadBudget);
-        }
-
-        _dynamicFragments.ReleaseBakedBodies(
-            bounds => AreCachedMeshesCurrent(bounds, field));
-
-        if ((_frame % 300) == 0)
-        {
-            string summary =
-                $"frame={_frame} candidates={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} empty={_totalEmptyChunks} " +
-                $"buildMs={WorkerBuildMillisecondsLastFrame:0.00} queueMs={LastWorkerQueueWaitMilliseconds:0.0} gpuMs={GpuUploadMillisecondsLastFrame:0.00} " +
-                $"packets={GpuUploadsLastFrame} builds={_totalBuildCompleted}/{_totalBuildRequests} pending={_buildQueue.Count} " +
-                $"failed={_totalBuildFailed} stale={_totalStaleResults} deferred={_totalQueueSaturated} repeat={_totalRepeatedBuilds} " +
-                $"uploads={_totalGpuUploads} unloads={_totalGpuUnloads} cacheHits={_totalIdenticalSurfaceSkips}";
-            _logger.Write("FRAME_SUMMARY", summary);
-            Console.WriteLine($"[TERRAIN][PERF] {summary}");
-        }
-
-        float renderCutHeightMeters = cutEnabled && stableCutLayer >= 0
-            ? stableCutLayer * SparseVoxelField.VoxelSizeMeters
-            : cutHeightMeters;
-
-        SetLighting();
-        SetCutShader(cutEnabled, renderCutHeightMeters);
-
-        float worldRadius = 0.5f * MathF.Sqrt(
-            field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
-            field.Depth * field.Depth * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
-            field.Height * field.Height * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters);
-        float distanceToOrigin = camera.Position.Length();
-        float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
-
-        Rlgl.SetClipPlanes(
-            Math.Clamp(cameraDistance * 0.002f, 0.02f, 2f),
-            MathF.Max(1000f, distanceToOrigin + worldRadius + 100f));
-
-        BeginMode3D(camera);
-
-        int draws = 0;
-        foreach ((ChunkKey key, ChunkEntry entry) in _visible)
-        {
-            foreach (Mesh mesh in entry.Surface)
-            {
-                DrawMesh(mesh, _material, Matrix4x4.Identity);
-                draws++;
-            }
-        }
-
-        SetCutShader(cutEnabled, renderCutHeightMeters);
-        _dynamicFragments.Draw(_material);
-        EndMode3D();
-
-        DrawCallsLastFrame = draws;
-        VisibleChunksLastFrame = _visible.Count;
-        if (_logger.IsEnabled(RenderLogMode.FrameSummary))
-            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={RenderStep} surfaceCandidates={VisibleCandidatesLastFrame} visibleChunks={VisibleChunksLastFrame} draws={DrawCallsLastFrame} chunkCache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers={_workerTasks.Length} buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
     }
 
-    private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
+    private bool AreCandidateEntriesReady(
+        List<(Candidate Candidate, ChunkEntry Entry)> entries,
+        SparseVoxelField field,
+        int targetCutLayer)
+    {
+        foreach ((Candidate candidate, ChunkEntry entry) in entries)
+        {
+            if (!entry.Built ||
+                entry.SurfaceDirty ||
+                entry.CutDirty ||
+                entry.BaseVersion != field.BaseVersion ||
+                entry.PaletteVersion != _paletteVersion ||
+                entry.CutLayer != targetCutLayer)
+                return false;
+        }
+        return true;
+    }
+
+    private void BuildTransitionCandidates(
+        SparseVoxelField field,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        int cutLayer,
+        int displayStep,
+        int targetStep,
+        List<Candidate> displayedCandidates,
+        List<Candidate> destination)
+    {
+        destination.Clear();
+        _transitionCandidateKeys.Clear();
+        if (displayStep <= 0 || targetStep <= 0 || displayStep == targetStep)
+            return;
+
+        int ratio = Math.Max(displayStep, targetStep) /
+            Math.Min(displayStep, targetStep);
+        if (targetStep > displayStep)
+        {
+            foreach (Candidate displayed in displayedCandidates)
+            {
+                ChunkKey key = new(
+                    displayed.Key.X / ratio,
+                    displayed.Key.Y / ratio,
+                    displayed.Key.Z / ratio,
+                    targetStep);
+                AddTransitionCandidate(
+                    field, camera, viewportWidth, viewportHeight,
+                    maximumViewDistanceMeters, cutLayer, key, destination);
+            }
+        }
+        else
+        {
+            foreach (Candidate displayed in displayedCandidates)
+            {
+                int firstX = displayed.Key.X * ratio;
+                int firstY = displayed.Key.Y * ratio;
+                int firstZ = displayed.Key.Z * ratio;
+                for (int z = 0; z < ratio; z++)
+                for (int y = 0; y < ratio; y++)
+                for (int x = 0; x < ratio; x++)
+                {
+                    ChunkKey key = new(
+                        firstX + x, firstY + y, firstZ + z, targetStep);
+                    AddTransitionCandidate(
+                        field, camera, viewportWidth, viewportHeight,
+                        maximumViewDistanceMeters, cutLayer, key, destination);
+                }
+            }
+        }
+    }
+
+    private void AddTransitionCandidate(
+        SparseVoxelField field,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        int cutLayer,
+        ChunkKey key,
+        List<Candidate> destination)
+    {
+        if (!_transitionCandidateKeys.Add(key))
+            return;
+
+        int chunkSpan = ChunkCells * key.Step;
+        int originX = key.X * chunkSpan;
+        int originY = key.Y * chunkSpan;
+        int originZ = key.Z * chunkSpan;
+        if (originX >= field.Width || originY >= field.Height || originZ >= field.Depth)
+            return;
+
+        int sizeX = Math.Min(chunkSpan, field.Width - originX);
+        int sizeY = Math.Min(chunkSpan, field.Height - originY);
+        int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
+        int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
+
+        ulong mask = field.GetPotentialVerticalChunkMask(key.X, key.Z, chunkSpan);
+        if (cutLayer >= 0)
+        {
+            int cutStorageY = cutLayer / SparseVoxelField.ChunkSize;
+            if (cutStorageY < 63)
+                mask &= (1UL << (cutStorageY + 1)) - 1UL;
+            if (field.HasPotentialCutSurface(key.X, key.Z, cutLayer, chunkSpan) &&
+                cutStorageY < 64)
+                mask |= 1UL << cutStorageY;
+        }
+
+        if (mask == 0 || !HasPotentialVerticalBand(
+                field, key.X, key.Z, key.Y,
+                storageChunksPerChunk, mask, chunkSpan))
+            return;
+
+        float nearestDistanceSquared = BoundsNearestDistanceSquared(
+            camera.Position, originX, originY, originZ, sizeX, sizeY, sizeZ);
+        float distance = float.IsFinite(maximumViewDistanceMeters)
+            ? MathF.Max(0f, maximumViewDistanceMeters)
+            : 0f;
+        if (nearestDistanceSquared > distance * distance)
+            return;
+
+        Vector3 center = new(
+            (originX + sizeX * 0.5f) * SparseVoxelField.VoxelSizeMeters,
+            (originY + sizeY * 0.5f) * SparseVoxelField.VoxelSizeMeters,
+            (originZ + sizeZ * 0.5f) * SparseVoxelField.VoxelSizeMeters);
+        float halfX = sizeX * SparseVoxelField.VoxelSizeMeters * 0.5f;
+        float halfY = sizeY * SparseVoxelField.VoxelSizeMeters * 0.5f;
+        float halfZ = sizeZ * SparseVoxelField.VoxelSizeMeters * 0.5f;
+        float radius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+
+        if (!TerrainFrustum.IsSphereVisible(
+                camera, center, radius,
+                viewportWidth, viewportHeight, distance))
+            return;
+
+        destination.Add(new Candidate(
+            key, center, radius,
+            Vector3.DistanceSquared(center, camera.Position)));
+    }
+
+    private static bool HasPotentialVerticalBand(
+        SparseVoxelField field,
+        int macroX,
+        int macroZ,
+        int chunkY,
+        int storageChunksPerChunk,
+        ulong mask,
+        int macroCells)
+    {
+        int firstStorageY = chunkY * storageChunksPerChunk;
+        int endStorageY = firstStorageY + storageChunksPerChunk;
+        for (int storageY = firstStorageY; storageY < endStorageY; storageY++)
+        {
+            bool present = storageY < 64
+                ? (mask & (1UL << storageY)) != 0
+                : field.HasPotentialVerticalChunk(
+                    macroX, macroZ, storageY, macroCells);
+            if (present)
+                return true;
+        }
+        return false;
+    }
+
+        private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
     {
         if (!cutEnabled)
         {
@@ -625,6 +878,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int viewportWidth,
         int viewportHeight,
         float maximumViewDistanceMeters,
+        int renderStep,
         int cutLayer,
         List<Candidate> candidates,
         ref int frustumTests,
@@ -632,17 +886,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ref int visibleMacroRegions)
     {
         const float sphereScale = 0.8660254038f;
-        int chunkSpan = ChunkCells * RenderStep;
-        int macroCells = chunkSpan;
+        const int groupChunks = VisibilityGroupChunks;
+        int chunkSpan = ChunkCells * renderStep;
+        int groupSpan = chunkSpan * groupChunks;
         int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
-        float chunkSizeMeters = chunkSpan * voxelSize;
-        float chunkRadiusMeters = chunkSizeMeters * sphereScale;
         float viewDistance = float.IsFinite(maximumViewDistanceMeters)
             ? MathF.Max(0f, maximumViewDistanceMeters)
             : 0f;
         float viewDistanceSquared = viewDistance * viewDistance;
-        float scanRadius = viewDistance + chunkRadiusMeters;
+        float scanRadius = viewDistance + chunkSpan * sphereScale;
         Vector3 cameraPosition = camera.Position;
 
         int chunksX = DivideRoundUp(field.Width, chunkSpan);
@@ -651,97 +904,155 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (chunksX == 0 || chunksY == 0 || chunksZ == 0)
             return;
 
-        int firstX = Math.Clamp((int)MathF.Floor((cameraPosition.X - scanRadius) / chunkSizeMeters), 0, chunksX - 1);
-        int lastX = Math.Clamp((int)MathF.Floor((cameraPosition.X + scanRadius) / chunkSizeMeters), 0, chunksX - 1);
-        int firstY = Math.Clamp((int)MathF.Floor((cameraPosition.Y - scanRadius) / chunkSizeMeters), 0, chunksY - 1);
-        int lastY = Math.Clamp((int)MathF.Floor((cameraPosition.Y + scanRadius) / chunkSizeMeters), 0, chunksY - 1);
-        int firstZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z - scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
-        int lastZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z + scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
+        int firstX = Math.Clamp((int)MathF.Floor(
+            (cameraPosition.X - scanRadius) / (chunkSpan * voxelSize)), 0, chunksX - 1);
+        int lastX = Math.Clamp((int)MathF.Floor(
+            (cameraPosition.X + scanRadius) / (chunkSpan * voxelSize)), 0, chunksX - 1);
+        int firstY = Math.Clamp((int)MathF.Floor(
+            (cameraPosition.Y - scanRadius) / (chunkSpan * voxelSize)), 0, chunksY - 1);
+        int lastY = Math.Clamp((int)MathF.Floor(
+            (cameraPosition.Y + scanRadius) / (chunkSpan * voxelSize)), 0, chunksY - 1);
+        int firstZ = Math.Clamp((int)MathF.Floor(
+            (cameraPosition.Z - scanRadius) / (chunkSpan * voxelSize)), 0, chunksZ - 1);
+        int lastZ = Math.Clamp((int)MathF.Floor(
+            (cameraPosition.Z + scanRadius) / (chunkSpan * voxelSize)), 0, chunksZ - 1);
 
-        for (int macroX = firstX; macroX <= lastX; macroX++)
-        for (int macroZ = firstZ; macroZ <= lastZ; macroZ++)
+        int firstGroupX = firstX / groupChunks;
+        int lastGroupX = lastX / groupChunks;
+        int firstGroupZ = firstZ / groupChunks;
+        int lastGroupZ = lastZ / groupChunks;
+
+        for (int groupX = firstGroupX; groupX <= lastGroupX; groupX++)
+        for (int groupZ = firstGroupZ; groupZ <= lastGroupZ; groupZ++)
         {
-            ulong mask = field.GetPotentialVerticalChunkMask(
-                macroX, macroZ, macroCells);
-
+            ulong groupMask = field.GetPotentialVerticalChunkMask(
+                groupX, groupZ, groupSpan);
             if (cutLayer >= 0)
             {
                 int cutStorageY = cutLayer / SparseVoxelField.ChunkSize;
                 if (cutStorageY < 63)
-                    mask &= (1UL << (cutStorageY + 1)) - 1UL;
-
-                if (field.HasPotentialCutSurface(macroX, macroZ, cutLayer, macroCells) &&
+                    groupMask &= (1UL << (cutStorageY + 1)) - 1UL;
+                if (field.HasPotentialCutSurface(
+                        groupX, groupZ, cutLayer, groupSpan) &&
                     cutStorageY < 64)
-                {
-                    mask |= 1UL << cutStorageY;
-                }
+                    groupMask |= 1UL << cutStorageY;
             }
 
-            if (mask == 0)
+            if (groupMask == 0)
                 continue;
+
+            int groupOriginX = groupX * groupSpan;
+            int groupOriginZ = groupZ * groupSpan;
+            int groupSizeX = Math.Min(groupSpan, field.Width - groupOriginX);
+            int groupSizeZ = Math.Min(groupSpan, field.Depth - groupOriginZ);
+            if (groupSizeX <= 0 || groupSizeZ <= 0)
+                continue;
+
+            int childFirstX = Math.Max(firstX, groupX * groupChunks);
+            int childLastX = Math.Min(lastX, groupX * groupChunks + groupChunks - 1);
+            int childFirstZ = Math.Max(firstZ, groupZ * groupChunks);
+            int childLastZ = Math.Min(lastZ, groupZ * groupChunks + groupChunks - 1);
 
             for (int y = firstY; y <= lastY; y++)
             {
-                int firstStorageY = y * storageChunksPerChunk;
-                int endStorageY = firstStorageY + storageChunksPerChunk;
-                bool hasPotential = false;
-
-                for (int storageY = firstStorageY; storageY < endStorageY; storageY++)
-                {
-                    bool present = storageY < 64
-                        ? (mask & (1UL << storageY)) != 0
-                        : field.HasPotentialVerticalChunk(
-                            macroX, macroZ, storageY, macroCells);
-                    if (!present)
-                        continue;
-
-                    hasPotential = true;
-                    break;
-                }
-
-                if (!hasPotential)
+                if (!HasPotentialVerticalBand(
+                        field, groupX, groupZ, y,
+                        storageChunksPerChunk * groupChunks,
+                        groupMask, groupSpan))
                     continue;
 
-                int originX = macroX * chunkSpan;
                 int originY = y * chunkSpan;
-                int originZ = macroZ * chunkSpan;
-                int sizeX = Math.Min(chunkSpan, field.Width - originX);
                 int sizeY = Math.Min(chunkSpan, field.Height - originY);
-                int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
-
-                float nearestDistanceSquared = BoundsNearestDistanceSquared(
-                    cameraPosition, originX, originY, originZ, sizeX, sizeY, sizeZ);
-                if (nearestDistanceSquared > viewDistanceSquared)
+                float nearestGroupDistanceSquared = BoundsNearestDistanceSquared(
+                    cameraPosition,
+                    groupOriginX, originY, groupOriginZ,
+                    groupSizeX, sizeY, groupSizeZ);
+                if (nearestGroupDistanceSquared > viewDistanceSquared)
                     continue;
 
-                Vector3 center = new(
-                    (originX + sizeX * 0.5f) * voxelSize,
+                Vector3 groupCenter = new(
+                    (groupOriginX + groupSizeX * 0.5f) * voxelSize,
                     (originY + sizeY * 0.5f) * voxelSize,
-                    (originZ + sizeZ * 0.5f) * voxelSize);
-                float halfX = sizeX * voxelSize * 0.5f;
-                float halfY = sizeY * voxelSize * 0.5f;
-                float halfZ = sizeZ * voxelSize * 0.5f;
-                float radius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+                    (groupOriginZ + groupSizeZ * 0.5f) * voxelSize);
+                float halfGroupX = groupSizeX * voxelSize * 0.5f;
+                float halfGroupY = sizeY * voxelSize * 0.5f;
+                float halfGroupZ = groupSizeZ * voxelSize * 0.5f;
+                float groupRadius = MathF.Sqrt(
+                    halfGroupX * halfGroupX +
+                    halfGroupY * halfGroupY +
+                    halfGroupZ * halfGroupZ);
 
                 macroFrustumTests++;
-                frustumTests++;
                 if (!TerrainFrustum.IsSphereVisible(
-                    camera, center, radius,
-                    viewportWidth, viewportHeight, viewDistance))
+                        camera, groupCenter, groupRadius,
+                        viewportWidth, viewportHeight, viewDistance))
                     continue;
 
-                visibleMacroRegions++;
-                candidates.Add(new Candidate(
-                    new ChunkKey(macroX, y, macroZ, RenderStep),
-                    center,
-                    radius,
-                    Vector3.DistanceSquared(center, cameraPosition)));
+                for (int macroX = childFirstX; macroX <= childLastX; macroX++)
+                for (int macroZ = childFirstZ; macroZ <= childLastZ; macroZ++)
+                {
+                    ulong mask = field.GetPotentialVerticalChunkMask(
+                        macroX, macroZ, chunkSpan);
+                    if (cutLayer >= 0)
+                    {
+                        int cutStorageY = cutLayer / SparseVoxelField.ChunkSize;
+                        if (cutStorageY < 63)
+                            mask &= (1UL << (cutStorageY + 1)) - 1UL;
+                        if (field.HasPotentialCutSurface(
+                                macroX, macroZ, cutLayer, chunkSpan) &&
+                            cutStorageY < 64)
+                            mask |= 1UL << cutStorageY;
+                    }
+
+                    if (mask == 0 || !HasPotentialVerticalBand(
+                            field, macroX, macroZ, y,
+                            storageChunksPerChunk, mask, chunkSpan))
+                        continue;
+
+                    int originX = macroX * chunkSpan;
+                    int chunkOriginY = y * chunkSpan;
+                    int originZ = macroZ * chunkSpan;
+                    int sizeX = Math.Min(chunkSpan, field.Width - originX);
+                    int chunkSizeY = Math.Min(chunkSpan, field.Height - chunkOriginY);
+                    int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
+                    float nearestDistanceSquared = BoundsNearestDistanceSquared(
+                        cameraPosition,
+                        originX, chunkOriginY, originZ,
+                        sizeX, chunkSizeY, sizeZ);
+                    if (nearestDistanceSquared > viewDistanceSquared)
+                        continue;
+
+                    Vector3 center = new(
+                        (originX + sizeX * 0.5f) * voxelSize,
+                        (chunkOriginY + chunkSizeY * 0.5f) * voxelSize,
+                        (originZ + sizeZ * 0.5f) * voxelSize);
+                    float halfX = sizeX * voxelSize * 0.5f;
+                    float halfY = chunkSizeY * voxelSize * 0.5f;
+                    float halfZ = sizeZ * voxelSize * 0.5f;
+                    float radius = MathF.Sqrt(
+                        halfX * halfX + halfY * halfY + halfZ * halfZ);
+
+                    frustumTests++;
+                    if (!TerrainFrustum.IsSphereVisible(
+                            camera, center, radius,
+                            viewportWidth, viewportHeight, viewDistance))
+                        continue;
+
+                    visibleMacroRegions++;
+                    candidates.Add(new Candidate(
+                        new ChunkKey(macroX, y, macroZ, renderStep),
+                        center, radius,
+                        Vector3.DistanceSquared(center, cameraPosition)));
+                }
             }
         }
     }
 
     private void UpdateRenderStep(Camera3D camera, int viewportHeight)
     {
+        if (_lodTransitionActive)
+            return;
+
         float distance = Vector3.Distance(camera.Position, camera.Target);
         float fovy = float.IsFinite(camera.FovY)
             ? Math.Clamp(camera.FovY, 1f, 175f)
@@ -753,40 +1064,60 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int desiredStep = 1;
         while (desiredStep < MaximumRenderStep &&
             pixelsPerVoxel * desiredStep < 0.85f)
-        {
             desiredStep <<= 1;
+
+        if (_displayStep == 0)
+        {
+            _displayStep = desiredStep;
+            _renderStep = desiredStep;
+            _logger.Write(
+                "VOXEL_LOD_INITIAL",
+                $"display={_displayStep} voxelMeters={ActiveVoxelSizeMeters:0.0}");
+            return;
         }
 
-        float currentVoxelPixels = pixelsPerVoxel * RenderStep;
-        if (desiredStep > RenderStep && currentVoxelPixels > 0.65f)
-            desiredStep = RenderStep;
-        else if (desiredStep < RenderStep && currentVoxelPixels < 1.25f)
-            desiredStep = RenderStep;
+        float currentVoxelPixels = pixelsPerVoxel * _displayStep;
+        if (desiredStep > _displayStep && currentVoxelPixels > 0.65f)
+            desiredStep = _displayStep;
+        else if (desiredStep < _displayStep && currentVoxelPixels < 1.25f)
+            desiredStep = _displayStep;
 
-        if (desiredStep == RenderStep)
+        int nextTargetStep = desiredStep > _displayStep
+            ? Math.Min(desiredStep, _displayStep * 2)
+            : desiredStep < _displayStep
+                ? Math.Max(desiredStep, _displayStep / 2)
+                : _displayStep;
+
+        if (nextTargetStep == _renderStep)
             return;
 
-        int previousStep = RenderStep;
-        _renderStep = desiredStep;
+        int previousTargetStep = _renderStep;
+        if (previousTargetStep != _displayStep)
+            CancelPendingBuildsForStep(previousTargetStep);
 
-        // Retain uploaded meshes for quick zoom-back, but cancel unfinished
-        // requests from inactive levels to free the bounded worker queue.
-        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
-        {
-            if (key.Step == desiredStep ||
-                (entry.RunningBuild == null &&
-                 !entry.ReadyBuild.HasValue &&
-                 entry.UploadingSurface.Count == 0 &&
-                 entry.UploadingCutCap.Count == 0))
-                continue;
+        _renderStep = nextTargetStep;
+        _transitionCandidateScratch.Clear();
+        _transitionEntriesScratch.Clear();
+        _transitionCandidateKeys.Clear();
 
-            InvalidatePendingBuild(entry);
-        }
-
-        _logger.Write(
-            "VOXEL_LOD_CHANGED",
-            $"from={previousStep} to={desiredStep} voxelMeters={ActiveVoxelSizeMeters:0.0} chunkMeters={RenderChunkSizeMeters:0.0}");
+        if (_renderStep != _displayStep)
+            _logger.Write(
+                "VOXEL_LOD_PREPARE",
+                $"display={_displayStep} target={_renderStep} voxelMeters={SparseVoxelField.VoxelSizeMeters * _renderStep:0.0} chunkMeters={ChunkCells * SparseVoxelField.VoxelSizeMeters * _renderStep:0.0}");
+        else if (previousTargetStep != _displayStep)
+            _logger.Write(
+                "VOXEL_LOD_CANCEL",
+                $"display={_displayStep} abandonedTarget={previousTargetStep}");
     }
+
+    private void CancelPendingBuildsForStep(int step)
+    {
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+            if (key.Step == step && HasPendingWork(entry))
+                InvalidatePendingBuild(entry);
+    }
+
+    
 
     private static float BoundsNearestDistanceSquared(
         Vector3 point,
@@ -842,10 +1173,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Math.Min(chunkSpan, field.Height - originY),
                 Math.Min(chunkSpan, field.Depth - originZ));
 
-            if (distanceSquared > radiusSquared ||
-                entry.LastSeenFrame + 120 < _frame)
+            bool outsideRadius = distanceSquared > radiusSquared;
+            bool expired = entry.LastSeenFrame + 120 < _frame;
+            bool cacheOverBudget = _chunks.Count > MaximumCachedChunks &&
+                !_visibleCandidateKeys.Contains(key) &&
+                !_transitionCandidateKeys.Contains(key);
+            if (outsideRadius || expired || cacheOverBudget)
             {
-                RemoveCachedChunk(key, "outside-view-radius");
+                RemoveCachedChunk(key, cacheOverBudget
+                    ? "cache-budget"
+                    : "outside-view-radius");
                 continue;
             }
 
@@ -1537,6 +1874,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             ShaderUniformDataType.Float);
     }
 
+    private void SetLodShader(int role, float fade)
+    {
+        SetShaderValue(
+            _shader, _lodRoleLocation,
+            role, ShaderUniformDataType.Int);
+        SetShaderValue(
+            _shader, _lodFadeLocation,
+            fade, ShaderUniformDataType.Float);
+    }
+
     private void DiscardLegacyCutCap(ChunkKey key, ChunkEntry entry)
     {
         foreach (Mesh mesh in entry.CutCap)
@@ -1817,6 +2164,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _gpuMeshHashCache.Clear();
         _readyUploadQueue.Clear();
         _evictionQueue.Clear();
+        _transitionCandidateScratch.Clear();
+        _transitionEntriesScratch.Clear();
+        _transitionCandidateKeys.Clear();
+        _transitionVisible.Clear();
 
         UnloadMaterial(_material);
 
