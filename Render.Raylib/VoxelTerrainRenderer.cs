@@ -18,10 +18,11 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
-    // One build/draw region batches eight former 64³ chunks into one 128³ volume.
+    // Keep mesh ownership local, but dispatch the full visible set as one build batch.
     private const int ChunkCells = VoxelChunkBuildInput.DefaultCellsPerAxis * 2;
-    // A 131³ density input is about 9 MiB; keep queued snapshots bounded.
-    private const int MaximumPendingMeshJobs = 8;
+    // Requests now hold metadata + one shared immutable field snapshot; density arrays
+    // are rented only by active workers, so the queue can cover the whole visible set.
+    private const int MaximumPendingMeshJobs = 4096;
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
     private const int MaximumGpuMeshUploadsPerFrame = 16;
     private const double GpuUploadBudgetMilliseconds = 3.0;
@@ -103,7 +104,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         """;
 
     private readonly record struct ChunkKey(int X, int Y, int Z, int Step);
-    private readonly record struct BuildGroupKey(int X, int Y, int Z, int Step);
 
     private sealed class ChunkEntry : IDisposable
     {
@@ -164,7 +164,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public required bool BuildCutCap { get; init; }
         public required int CutLayer { get; init; }
         public required TerrainPalette Palette { get; init; }
-        public required VoxelChunkBuildInput Input { get; init; }
+        public required IVoxelFieldSource Source { get; init; }
         public required CancellationTokenSource Cancellation { get; init; }
         public long EnqueuedTimestamp { get; init; }
     }
@@ -219,8 +219,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         long Generation);
 
     private readonly Dictionary<ChunkKey, ChunkEntry> _chunks = new();
-    // One immutable source snapshot is shared by every 128³ region in a 2×2×2 build group.
-    private readonly Dictionary<BuildGroupKey, IVoxelFieldSource> _buildBatchSnapshots = new();
+    // One immutable snapshot represents the entire sparse voxel field and is reused
+    // until the field version changes. Per-chunk density buffers are created by workers.
+    private IVoxelFieldSource? _worldBuildSnapshot;
+    private long _worldBuildSnapshotVersion = long.MinValue;
+    private long _worldBuildSnapshotBaseVersion = long.MinValue;
+    private readonly HashSet<ChunkKey> _initialBuildBatchKeys = new();
+    private bool _initialBuildBatchActive;
+    private int _initialBuildCutLayer = int.MinValue;
     private readonly Dictionary<ChunkKey, ChunkGpuHashes> _gpuMeshHashCache = new();
 
     private readonly Queue<ReadyUpload> _readyUploadQueue = new();
@@ -428,7 +434,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.Update(field, frameTime);
 
         _frame++;
-        _buildBatchSnapshots.Clear();
         RebuiltChunks = 0;
         RebuiltCutCaps = 0;
         CpuCaptureMillisecondsLastFrame = 0d;
@@ -449,6 +454,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int targetCutLayer = cutEnabled && stableCutLayer >= 0
             ? stableCutLayer
             : int.MinValue;
+
+        if (_frame == 1)
+        {
+            _initialBuildBatchActive = true;
+            _initialBuildCutLayer = targetCutLayer;
+        }
 
         List<Candidate> displayCandidates = _candidateScratch;
         displayCandidates.Clear();
@@ -521,7 +532,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         EvictChunksOutsideRadius(
             field, camera.Position, MathF.Max(0f, maximumViewDistanceMeters));
         CollectCompletedBuilds(field);
-        UploadReadyMeshes();
+        bool initialBuildBatchReady = _initialBuildBatchActive &&
+            IsInitialBuildBatchReady(field);
+        UploadReadyMeshes(initialBuildBatchReady);
+        if (initialBuildBatchReady)
+        {
+            int committedChunks = _initialBuildBatchKeys.Count;
+            _initialBuildBatchActive = false;
+            _initialBuildBatchKeys.Clear();
+            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_INITIAL_BATCH_COMMITTED",
+                $"chunks={committedChunks} uploads={GpuUploadsLastFrame} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
+        }
 
         if (_renderStep != _displayStep &&
             !_lodTransitionActive &&
@@ -740,6 +761,8 @@ private void PrepareCandidateEntries(
         {
             ChunkKey key = candidate.Key;
             keys?.Add(key);
+            if (_initialBuildBatchActive && _frame == 1)
+                _initialBuildBatchKeys.Add(key);
             if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
             {
                 entry = new ChunkEntry();
@@ -1191,12 +1214,9 @@ private void PrepareCandidateEntries(
             _totalDuplicateRequestAttempts++;
             return;
         }
-        // Keep half of the bounded queue available for meshes currently shown.
-        // Background LOD prebuilds must never starve the displayed terrain.
-        int queueLimit = key.Step == _displayStep
-            ? MaximumPendingMeshJobs
-            : MaximumPendingMeshJobs / 2;
-        if (_buildQueue.Count >= queueLimit)
+        // Queue every visible region before the single batch wake-up. The requests
+        // contain no density buffers; workers allocate only their active inputs.
+        if (_buildQueue.Count >= MaximumPendingMeshJobs)
         {
             // Count one deferred revision, not every per-frame retry while the queue stays full.
             if (entry.QueueRejectedRevision != entry.RequestRevision)
@@ -1207,23 +1227,10 @@ private void PrepareCandidateEntries(
             return;
         }
 
-        VoxelChunkBuildInput? input = null;
         CancellationTokenSource? cancellation = null;
         try
         {
-            BuildGroupKey group = new(
-                key.X / 2, key.Y / 2, key.Z / 2, key.Step);
-            if (!_buildBatchSnapshots.TryGetValue(group, out IVoxelFieldSource? source))
-            {
-                source = field.CreateChunkSnapshot(
-                    group.X, group.Y, group.Z,
-                    key.Step, ChunkCells * 2);
-                _buildBatchSnapshots.Add(group, source);
-            }
-
-            input = new VoxelChunkBuildInput(
-                source, key.X, key.Y, key.Z,
-                cutLayer, key.Step, ChunkCells);
+            IVoxelFieldSource source = GetWorldBuildSnapshot(field);
             cancellation = new CancellationTokenSource();
 
             BuildRequest request = new()
@@ -1238,7 +1245,7 @@ private void PrepareCandidateEntries(
                 BuildCutCap = buildCutCap,
                 CutLayer = cutLayer,
                 Palette = _palette,
-                Input = input,
+                Source = source,
                 Cancellation = cancellation,
                 EnqueuedTimestamp = Stopwatch.GetTimestamp()
             };
@@ -1254,13 +1261,26 @@ private void PrepareCandidateEntries(
         }
         catch (Exception exception)
         {
-            input?.Dispose();
             cancellation?.Dispose();
             entry.FailedRevision = entry.RequestRevision;
             _totalBuildFailed++;
             _logger.Error("MESH_REQUEST_FAILED",
                 $"chunk=({key.X},{key.Y},{key.Z}) error={exception}");
         }
+    }
+
+    private IVoxelFieldSource GetWorldBuildSnapshot(SparseVoxelField field)
+    {
+        if (_worldBuildSnapshot == null ||
+            _worldBuildSnapshotVersion != field.Version ||
+            _worldBuildSnapshotBaseVersion != field.BaseVersion)
+        {
+            _worldBuildSnapshot = field.CreateWorldSnapshot();
+            _worldBuildSnapshotVersion = field.Version;
+            _worldBuildSnapshotBaseVersion = field.BaseVersion;
+        }
+
+        return _worldBuildSnapshot;
     }
 
     private void SignalBuildWorkers()
@@ -1320,19 +1340,25 @@ private void PrepareCandidateEntries(
                 $"mode=worker chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={request.Key.Step} queuedMs={Stopwatch.GetElapsedTime(request.EnqueuedTimestamp, buildStarted).TotalMilliseconds:0.000}");
 
         VoxelMeshData[] surface = Array.Empty<VoxelMeshData>();
+        VoxelChunkBuildInput? input = null;
         try
         {
             CancellationToken token = request.Cancellation.Token;
             token.ThrowIfCancellationRequested();
 
+            input = new VoxelChunkBuildInput(
+                request.Source,
+                request.Key.X, request.Key.Y, request.Key.Z,
+                request.CutLayer, request.Key.Step, ChunkCells);
+
             long captureStarted = Stopwatch.GetTimestamp();
-            request.Input.CaptureAll(token);
+            input.CaptureAll(token);
             double captureMs = Stopwatch.GetElapsedTime(captureStarted).TotalMilliseconds;
 
             token.ThrowIfCancellationRequested();
-            if (request.BuildSurface && request.Input.HasPotentialSurface)
+            if (request.BuildSurface && input.HasPotentialSurface)
                 surface = VoxelChunkMesher.BuildSurfaceData(
-                    request.Input, request.Palette, token);
+                    input, request.Palette, token);
 
             token.ThrowIfCancellationRequested();
             int vertices = SumVertices(surface);
@@ -1368,7 +1394,7 @@ private void PrepareCandidateEntries(
         }
         finally
         {
-            request.Input.Dispose();
+            input?.Dispose();
         }
     }
 
@@ -1585,8 +1611,16 @@ private void PrepareCandidateEntries(
         }
     }
 
-    private void UploadReadyMeshes()
+    private void UploadReadyMeshes(bool forceWholeBatch = false)
     {
+        // Initial terrain is published atomically: keep all completed CPU meshes
+        // until every first-view region is ready, then upload the full set in one frame.
+        if (_initialBuildBatchActive && !forceWholeBatch)
+        {
+            GpuUploadMillisecondsLastFrame = 0d;
+            return;
+        }
+
         Stopwatch timer = Stopwatch.StartNew();
         GpuUploadMillisecondsLastFrame = 0d;
 
@@ -1595,8 +1629,9 @@ private void PrepareCandidateEntries(
 
         while (visited < readyAtFrameStart)
         {
-            if (GpuUploadsLastFrame >= MaximumGpuMeshUploadsPerFrame ||
-                timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
+            if (!forceWholeBatch &&
+                (GpuUploadsLastFrame >= MaximumGpuMeshUploadsPerFrame ||
+                 timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds))
                 break;
 
             if (!_readyUploadQueue.TryDequeue(out ReadyUpload queued))
@@ -1751,6 +1786,34 @@ private void PrepareCandidateEntries(
         }
 
         GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
+    }
+
+    private bool IsInitialBuildBatchReady(SparseVoxelField field)
+    {
+        foreach (ChunkKey key in _initialBuildBatchKeys)
+        {
+            // A camera LOD change may retire the original level while its bulk
+            // build is running. It must not block publication of the new level.
+            if (key.Step != _displayStep && key.Step != _renderStep)
+                continue;
+            if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
+                continue;
+            if (entry.FailedRevision == entry.RequestRevision)
+                continue;
+            if (entry.ReadyBuild.HasValue)
+                continue;
+            if (entry.Built &&
+                !entry.SurfaceDirty &&
+                !entry.CutDirty &&
+                entry.BaseVersion == field.BaseVersion &&
+                entry.PaletteVersion == _paletteVersion &&
+                entry.CutLayer == _initialBuildCutLayer)
+                continue;
+
+            return false;
+        }
+
+        return true;
     }
 
     private void EnqueueReadyUpload(ChunkKey key, ChunkEntry entry)
@@ -2155,14 +2218,14 @@ private void PrepareCandidateEntries(
         while (_buildQueue.TryDequeue(out BuildRequest? pending))
         {
             pending.Cancellation.Cancel();
-            pending.Input.Dispose();
             pending.Cancellation.Dispose();
         }
 
         DrainCompletedBuildQueue();
         _dynamicFragments.Dispose();
         _chunks.Clear();
-        _buildBatchSnapshots.Clear();
+        _worldBuildSnapshot = null;
+        _initialBuildBatchKeys.Clear();
         _gpuMeshHashCache.Clear();
         _readyUploadQueue.Clear();
         _evictionQueue.Clear();
