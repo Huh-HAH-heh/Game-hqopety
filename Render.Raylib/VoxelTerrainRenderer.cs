@@ -387,8 +387,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         EnsureFieldSubscription(field);
 
         long voxelFrameStarted = Stopwatch.GetTimestamp();
-        if (_logger.IsEnabled(RenderLogMode.Trace))
-            _logger.Write(RenderLogMode.Trace, "VOXEL_FRAME_BEGIN", $"size={field.Width}x{field.Height}x{field.Depth} camera=({camera.Position.X:0.0},{camera.Position.Y:0.0},{camera.Position.Z:0.0}) viewport={viewportWidth}x{viewportHeight} distance={maximumViewDistanceMeters:0.0} cut={cutEnabled}:{cutHeightMeters:0.00}");
         _dynamicFragments.Update(field, GetFrameTime());
 
         _frame++;
@@ -470,8 +468,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 cutStateStale ||
                 entry.CutDirty;
 
-            if (_logger.IsEnabled(RenderLogMode.Trace))
-                _logger.Write(RenderLogMode.Trace, "CHUNK_CANDIDATE", $"chunk=({key.X},{key.Y},{key.Z}) distance={MathF.Sqrt(candidate.DistanceSquared):0.0} built={entry.Built} surfaceDirty={entry.SurfaceDirty} cutDirty={entry.CutDirty} surfaceStale={surfaceStale} cutStale={cutStateStale} pending={HasPendingWork(entry)} meshes={entry.Surface.Length}");
 
             if (needsSurfaceBuild && !HasPendingWork(entry))
             {
@@ -564,27 +560,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             MathF.Max(1000f, distanceToOrigin + worldRadius + 100f));
 
         BeginMode3D(camera);
-        if (_logger.IsEnabled(RenderLogMode.Trace))
-            _logger.Write(RenderLogMode.Trace, "RAYLIB_PASS_BEGIN", $"name=BeginMode3D visibleChunks={_visible.Count}");
 
         int draws = 0;
         foreach ((ChunkKey key, ChunkEntry entry) in _visible)
         {
-            int meshIndex = 0;
             foreach (Mesh mesh in entry.Surface)
             {
                 DrawMesh(mesh, _material, Matrix4x4.Identity);
                 draws++;
-                if (_logger.IsEnabled(RenderLogMode.Trace))
-                    _logger.Write(RenderLogMode.Trace, "DRAW_MESH", $"pass=voxel-surface chunk=({key.X},{key.Y},{key.Z}) mesh={meshIndex++} vertices={mesh.VertexCount} triangles={mesh.TriangleCount}");
             }
         }
 
         SetCutShader(cutEnabled, renderCutHeightMeters);
         _dynamicFragments.Draw(_material);
         EndMode3D();
-        if (_logger.IsEnabled(RenderLogMode.Trace))
-            _logger.Write(RenderLogMode.Trace, "RAYLIB_PASS_END", "name=EndMode3D");
 
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count;
@@ -701,8 +690,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             if (nearestDistanceSquared > viewDistanceSquared)
             {
-                if (_logger.IsEnabled(RenderLogMode.Trace))
-                    _logger.Write(RenderLogMode.Trace, "MACRO_DISTANCE_CULLED", $"macro=({macroX},{macroY},{macroZ}) distance={MathF.Sqrt(nearestDistanceSquared):0.0} limit={viewDistance:0.0}");
                 continue;
             }
 
@@ -727,8 +714,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 viewportHeight,
                 viewDistance))
             {
-                if (_logger.IsEnabled(RenderLogMode.Trace))
-                    _logger.Write(RenderLogMode.Trace, "MACRO_FRUSTUM_CULLED", $"macro=({macroX},{macroY},{macroZ}) center=({macroCenter.X:0.0},{macroCenter.Y:0.0},{macroCenter.Z:0.0}) radius={macroRadius:0.0}");
                 continue;
             }
 
@@ -761,8 +746,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
                 if (chunkNearestDistanceSquared > viewDistanceSquared)
                 {
-                    if (_logger.IsEnabled(RenderLogMode.Trace))
-                        _logger.Write(RenderLogMode.Trace, "CHUNK_DISTANCE_CULLED", $"chunk=({x},{y},{z}) distance={MathF.Sqrt(chunkNearestDistanceSquared):0.0} limit={viewDistance:0.0}");
                     continue;
                 }
 
@@ -780,8 +763,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     viewportHeight,
                     viewDistance))
                 {
-                    if (_logger.IsEnabled(RenderLogMode.Trace))
-                        _logger.Write(RenderLogMode.Trace, "CHUNK_FRUSTUM_CULLED", $"chunk=({x},{y},{z}) center=({center.X:0.0},{center.Y:0.0},{center.Z:0.0}) radius={chunkRadiusMeters:0.0}");
                     continue;
                 }
 
