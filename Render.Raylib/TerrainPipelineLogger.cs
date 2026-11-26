@@ -127,11 +127,11 @@ internal sealed class TerrainPipelineLogger : IDisposable
         }
         else if (IsBurstCategory(category))
         {
-            limit = Mode == RenderLogMode.Trace ? 12 : 3;
+            limit = Mode == RenderLogMode.Trace ? 4 : 2;
         }
         else if (minimumMode == RenderLogMode.Trace)
         {
-            limit = 8;
+            limit = 4;
         }
         else
         {
