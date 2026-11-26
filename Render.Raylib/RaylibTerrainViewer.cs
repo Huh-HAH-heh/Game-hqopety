@@ -61,11 +61,7 @@ public static class RaylibTerrainViewer
             TerrainRenderSnapshot.Create(worldMap, settings.TerrainMode);
         renderLogger.Write(RenderLogMode.Detailed, "WORLD_SNAPSHOT_READY",
             $"mode={settings.TerrainMode} regions={terrain.RegionsX}x{terrain.RegionsY} storage={terrain.StorageRegionsX}x{terrain.StorageRegionsY} world={terrain.WorldWidth:0.0}x{terrain.WorldDepth:0.0}m height={terrain.VerticalWorldExtentMeters:0.0}m elapsedMs={Stopwatch.GetElapsedTime(snapshotStarted).TotalMilliseconds:0.000}");
-        // The 3D density renderer owns its own chunk LOD; do not allocate a
-        // second legacy column snapshot for the same voxel world.
-        TerrainRenderSnapshot? coarseVoxelTerrain = null;
-
-        ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
+        TerrainRenderSnapshot?         ConfigFlags windowFlags = ConfigFlags.ResizableWindow;
         if (settings.VSync)
             windowFlags |= ConfigFlags.VSyncHint;
         if (settings.Msaa4x)
@@ -139,7 +135,6 @@ public static class RaylibTerrainViewer
                 terrain,
                 settings.Palette,
                 settings.TerrainMode,
-                coarseVoxelTerrain,
                 renderLogger);
             int appliedPaletteRevision = menu.PaletteRevision;
 
@@ -210,8 +205,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                            coarseVoxelTerrain?.DisableCutaway();
-                            renderer?.Synchronize(terrain, coarseVoxelTerrain);
+                                                        renderer?.Synchronize(terrain, null);
                         }
                     }
 
@@ -237,8 +231,7 @@ public static class RaylibTerrainViewer
                         menu.SaveSettings();
                         focusName = "SURFACE";
                         terrain.DisableCutaway();
-                            coarseVoxelTerrain?.DisableCutaway();
-                        renderer.Synchronize(terrain, coarseVoxelTerrain);
+                                                    renderer.Synchronize(terrain, null);
                         camera.ResetTopDownView();
                         break;
 
@@ -265,8 +258,7 @@ public static class RaylibTerrainViewer
                         terrain = TerrainRenderSnapshot.Create(
                             worldMap,
                             menu.Settings.TerrainMode);
-                        coarseVoxelTerrain = null;
-                        if (cutawayMode)
+                                                if (cutawayMode)
                         {
                             int currentCutLayer = Math.Clamp(
                                 (int)MathF.Round(
@@ -275,14 +267,12 @@ public static class RaylibTerrainViewer
                                 0,
                                 worldMap.LayerCount - 1);
                             terrain.SetCutawayLayer(currentCutLayer);
-                            coarseVoxelTerrain?.SetCutawayLayer(currentCutLayer);
-                        }
+                                                    }
 
                         renderer = new RaylibTerrainRenderer(
                             terrain,
                             menu.Settings.Palette,
                             menu.Settings.TerrainMode,
-                            coarseVoxelTerrain,
                             renderLogger);
                         appliedPaletteRevision = menu.PaletteRevision;
                         break;
@@ -314,8 +304,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                            coarseVoxelTerrain?.DisableCutaway();
-                            renderer.Synchronize(terrain, coarseVoxelTerrain);
+                                                        renderer.Synchronize(terrain, null);
                             camera.ResetTopDownView();
                         }
                         break;
@@ -378,8 +367,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                            coarseVoxelTerrain?.DisableCutaway();
-                            renderer.Synchronize(terrain, coarseVoxelTerrain);
+                                                        renderer.Synchronize(terrain, null);
                             camera.ResetTopDownView();
                         }
                     }
@@ -621,10 +609,7 @@ public static class RaylibTerrainViewer
 
                 long syncStarted = Stopwatch.GetTimestamp();
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
-                bool coarseTerrainChanged =
-                    coarseVoxelTerrain?.RefreshFromWorld(worldMap) ?? false;
-
-                if (cutawayMode)
+                                    if (cutawayMode)
                 {
                     const float layerHeightMeters =
                         WorldMap.LayerHeightUnits * 0.1f;
@@ -636,20 +621,18 @@ public static class RaylibTerrainViewer
                         worldMap.LayerCount - 1);
 
                     terrain.SetCutawayLayer(cutLayer);
-                    coarseVoxelTerrain?.SetCutawayLayer(cutLayer);
-                }
+                                    }
                 else
                 {
                     terrain.DisableCutaway();
-                    coarseVoxelTerrain?.DisableCutaway();
-                }
+                                    }
 
-                if (terrainChanged || coarseTerrainChanged)
-                    renderer.Synchronize(terrain, coarseVoxelTerrain);
+                if (terrainChanged)
+                    renderer.Synchronize(terrain, null);
 
                 if (renderLogger.IsEnabled(RenderLogMode.Detailed))
                     renderLogger.Write(RenderLogMode.Detailed, "WORLD_SYNC",
-                        $"terrainChanged={terrainChanged} coarseChanged={coarseTerrainChanged} voxelVersion={worldMap.Voxels.Version} elapsedMs={Stopwatch.GetElapsedTime(syncStarted).TotalMilliseconds:0.000}");
+                        $"terrainChanged={terrainChanged} voxelVersion={worldMap.Voxels.Version} elapsedMs={Stopwatch.GetElapsedTime(syncStarted).TotalMilliseconds:0.000}");
 
                 long currentVoxelVersion = worldMap.Voxels.Version;
                 if (currentVoxelVersion != savedVoxelVersion &&
