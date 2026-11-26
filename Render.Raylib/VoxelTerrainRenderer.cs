@@ -459,8 +459,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             bool cutStateStale = entry.CutLayer != targetCutLayer;
 
             // A completed old-cut mesh must never block the current cut revision.
-            if (entry.RunningBuild is { } pendingBuild &&
-                pendingBuild.CutLayer != targetCutLayer)
+            if ((entry.RunningBuild is { } pendingBuild &&
+                    pendingBuild.CutLayer != targetCutLayer) ||
+                (entry.ReadyRequest is { } readyRequest &&
+                    readyRequest.CutLayer != targetCutLayer))
             {
                 InvalidatePendingBuild(entry);
             }
