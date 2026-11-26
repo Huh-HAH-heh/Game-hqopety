@@ -1310,10 +1310,15 @@ private void PrepareCandidateEntries(
             _worldBuildSnapshotVersion != field.Version ||
             _worldBuildSnapshotBaseVersion != field.BaseVersion)
         {
+            long captureStarted = Stopwatch.GetTimestamp();
             _worldBuildSnapshot = field.CreateWorldSnapshot();
+            double captureMilliseconds =
+                Stopwatch.GetElapsedTime(captureStarted).TotalMilliseconds;
             _snapshotField = field;
             _worldBuildSnapshotVersion = field.Version;
             _worldBuildSnapshotBaseVersion = field.BaseVersion;
+            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_WORLD_SNAPSHOT",
+                $"version={field.Version} base={field.BaseVersion} storageChunks={field.ChunkCount} captureMs={captureMilliseconds:0.000}");
         }
 
         return _worldBuildSnapshot;
