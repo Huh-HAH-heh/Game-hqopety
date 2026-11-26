@@ -379,9 +379,9 @@ internal static class VoxelChunkMesher
     }
 
     /// <summary>
-    /// Greedy cube meshing. A mask cell stores a byte block ID; zero means no
-    /// face. The parallel sign mask distinguishes +axis and -axis faces.
-    /// Identical block IDs and directions merge into one indexed quad.
+    /// Surface Nets over the signed density field. A vertex is interpolated
+    /// in each mixed-sign cell; sign-changing lattice edges connect four
+    /// neighbouring cell vertices into a smooth, indexed surface.
     /// </summary>
         private static readonly Vector3[] CubeCorners =
     {
