@@ -328,7 +328,9 @@ internal static class VoxelChunkMesher
         int chunkZ,
         TerrainPalette palette)
     {
-        using VoxelChunkBuildInput input = new(field, chunkX, chunkY, chunkZ);
+        using VoxelChunkBuildInput input = new(
+            field, chunkX, chunkY, chunkZ,
+            cellsPerAxis: SparseVoxelField.ChunkSize);
         input.CaptureAll(field);
         return Upload(BuildSurfaceData(input, palette));
     }
