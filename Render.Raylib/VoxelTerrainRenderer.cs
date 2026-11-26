@@ -242,10 +242,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalEmptyChunks;
 
     public int ActiveRenderCellSize => RenderStep;
-    public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters * _activeStep;
+    public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters * RenderStep;
     public float RenderChunkSizeMeters =>
-        ChunkCells * _activeStep * SparseVoxelField.VoxelSizeMeters;
-    public bool IsUsingCoarseLod => _activeStep > 1;
+        ChunkCells * RenderStep * SparseVoxelField.VoxelSizeMeters;
+    public bool IsUsingCoarseLod => RenderStep > 1;
     public int Step1ChunksLastFrame { get; private set; }
     public int Step2ChunksLastFrame => 0;
     public int Step4ChunksLastFrame => 0;
@@ -405,9 +405,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         MacroFrustumTestsLastFrame = macroFrustumTests;
         VisibleMacroRegionsLastFrame = visibleMacroRegions;
         CandidateOverflowLastFrame = 0;
-        Step1ChunksLastFrame = _activeStep == 1 ? candidates.Count : 0;
-        Step2ChunksLastFrame = _activeStep == 2 ? candidates.Count : 0;
-        Step4ChunksLastFrame = _activeStep == 4 ? candidates.Count : 0;
+        Step1ChunksLastFrame = RenderStep == 1 ? candidates.Count : 0;
+        Step2ChunksLastFrame = RenderStep == 2 ? candidates.Count : 0;
+        Step4ChunksLastFrame = RenderStep == 4 ? candidates.Count : 0;
         _visibleCandidateKeys.Clear();
 
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
@@ -504,7 +504,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if ((_frame % 120) == 0)
         {
             string summary =
-                $"frame={_frame} resolution=Step{_activeStep} chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
+                $"frame={_frame} resolution=Fixed1 chunks={_visibleCandidateKeys.Count} visible={_visible.Count} cache={_chunks.Count} " +
                 $"macroFrustum={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkFrustum={FrustumCandidatesLastFrame} " +
                 $"emptyChunks={_totalEmptyChunks} mainThreadCopyMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} lastBuildMs={LastWorkerBuildMilliseconds:0.000} " +
@@ -558,7 +558,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count;
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
-            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={_activeStep} candidates={VisibleCandidatesLastFrame} visible={VisibleChunksLastFrame} draws={DrawCallsLastFrame} cache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers=0 buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
+            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={RenderStep} candidates={VisibleCandidatesLastFrame} visible={VisibleChunksLastFrame} draws={DrawCallsLastFrame} cache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers=0 buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
     }
 
     private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
@@ -593,8 +593,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int macroCells,
         ulong potentialYMask)
     {
-        int firstStorageChunkY = renderChunkY * _activeStep;
-        int lastStorageChunkY = firstStorageChunkY + _activeStep;
+        int firstStorageChunkY = renderChunkY * RenderStep;
+        int lastStorageChunkY = firstStorageChunkY + RenderStep;
         for (int storageChunkY = firstStorageChunkY; storageChunkY < lastStorageChunkY; storageChunkY++)
         {
             bool potential = storageChunkY < 64
@@ -620,7 +620,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         const float sphereScale = 0.8660254038f;
         const int macroCells = SparseVoxelField.SpatialMacroSize;
-        int chunkSpan = ChunkCells * _activeStep;
+        int chunkSpan = ChunkCells * RenderStep;
         int macroPerChunk = chunkSpan / macroCells;
         int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
 
@@ -768,7 +768,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float maximumViewDistanceMeters)
     {
         float radiusSquared = maximumViewDistanceMeters * maximumViewDistanceMeters;
-        int chunkSpan = ChunkCells * _activeStep;
+        int chunkSpan = ChunkCells * RenderStep;
         _outsideRadiusScratch.Clear();
 
         foreach (ChunkKey key in _chunks.Keys)
@@ -851,7 +851,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _totalBuildRequests++;
         if (_logger.IsEnabled(RenderLogMode.Detailed))
             _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_REQUEST",
-                $"chunk=({key.X},{key.Y},{key.Z}) step={_activeStep} generation={request.Generation} revision={request.RequestRevision} base={request.BaseVersion} palette={request.PaletteVersion} cut={cutLayer} queued={_buildQueue.Count}");
+                $"chunk=({key.X},{key.Y},{key.Z}) step={RenderStep} generation={request.Generation} revision={request.RequestRevision} base={request.BaseVersion} palette={request.PaletteVersion} cut={cutLayer} queued={_buildQueue.Count}");
     }
 
     private void ProcessBuildQueueOnMainThread(SparseVoxelField field)
@@ -892,21 +892,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _totalBuildStarted++;
             if (_logger.IsEnabled(RenderLogMode.Detailed))
                 _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_STARTED",
-                    $"mode=main-thread chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={_activeStep} queuedMs={Stopwatch.GetElapsedTime(request.EnqueuedTimestamp, buildStarted).TotalMilliseconds:0.000}");
+                    $"mode=main-thread chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={RenderStep} queuedMs={Stopwatch.GetElapsedTime(request.EnqueuedTimestamp, buildStarted).TotalMilliseconds:0.000}");
 
             VoxelMeshData[] surface = Array.Empty<VoxelMeshData>();
             VoxelMeshData[] cutCap = Array.Empty<VoxelMeshData>();
             try
             {
                 IVoxelFieldSource source = field.CreateChunkSnapshot(
-                    request.Key.X, request.Key.Y, request.Key.Z, _activeStep, ChunkCells);
+                    request.Key.X, request.Key.Y, request.Key.Z, RenderStep, ChunkCells);
                 using VoxelChunkBuildInput input = new(
                     source,
                     request.Key.X,
                     request.Key.Y,
                     request.Key.Z,
                     request.CutLayer,
-                    _activeStep,
+                    RenderStep,
                     ChunkCells);
 
                 long captureStarted = Stopwatch.GetTimestamp();
@@ -933,7 +933,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     request, result, null, false, buildStarted, Stopwatch.GetTimestamp()));
                 if (_logger.IsEnabled(RenderLogMode.Detailed))
                     _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_COMPLETED",
-                        $"mode=main-thread chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={_activeStep} ms={buildMs:0.000} meshes={surface.Length} vertices={vertices} triangles={triangles} hash={surfaceHash:X16}");
+                        $"mode=main-thread chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={RenderStep} ms={buildMs:0.000} meshes={surface.Length} vertices={vertices} triangles={triangles} hash={surfaceHash:X16}");
 
                 surface = Array.Empty<VoxelMeshData>();
                 built++;
@@ -1059,7 +1059,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     completion.WorkerCompletedTimestamp,
                     Stopwatch.GetTimestamp()).TotalMilliseconds);
 
-            LastBuildStep = _activeStep;
+            LastBuildStep = RenderStep;
             LastBuildVertices = build.VertexCount;
             LastBuildTriangles = build.TriangleCount;
 
@@ -1391,7 +1391,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         SparseVoxelField.VoxelBounds bounds,
         SparseVoxelField field)
     {
-        int chunkSpan = ChunkCells * _activeStep;
+        int chunkSpan = ChunkCells * RenderStep;
         foreach (ChunkKey key in _visibleCandidateKeys)
         {
             int minX = key.X * chunkSpan;
@@ -1495,8 +1495,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
     {
-        int chunkSpan = ChunkCells * _activeStep;
-        int halo = _activeStep;
+        int chunkSpan = ChunkCells * RenderStep;
+        int halo = RenderStep;
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
             int firstX = key.X * chunkSpan - halo;
