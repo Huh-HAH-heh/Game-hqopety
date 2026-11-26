@@ -1794,6 +1794,11 @@ private void PrepareCandidateEntries(
             // build is running. It must not block publication of the new level.
             if (key.Step != _displayStep && key.Step != _renderStep)
                 continue;
+            // The camera may move while the initial batch is building. Regions
+            // that are no longer visible are not part of the publication barrier.
+            if (!_visibleCandidateKeys.Contains(key) &&
+                !_transitionCandidateKeys.Contains(key))
+                continue;
             if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
                 continue;
             if (entry.FailedRevision == entry.RequestRevision)
