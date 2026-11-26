@@ -162,7 +162,7 @@ internal sealed class TerrainPipelineLogger : IDisposable
     {
         "FRAME" or "VOXEL_FRAME" or "TERRAIN_DRAW_END" or
         "FRAME_PHASES" or "RENDER_PASS" or "VOXEL_VISIBILITY" or
-        "FRAME_SUMMARY" => true,
+        "FRAME_SUMMARY" or "WORLD_SYNC" => true,
         _ => false
     };
 
