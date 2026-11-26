@@ -21,3 +21,18 @@ public interface IVoxelFieldSource
     byte GetBlockId(int x, int y, int z) =>
         checked((byte)GetMaterialId(x, y, z));
 }
+
+
+/// <summary>
+/// Optional fast path for heightfield-backed sources. Implementations fill a
+/// complete vertical density column, including sparse voxel overrides.
+/// </summary>
+public interface IVoxelColumnDensitySource
+{
+    bool TryGetDensityColumn(
+        int x,
+        int z,
+        int startY,
+        int step,
+        Span<float> destination);
+}
