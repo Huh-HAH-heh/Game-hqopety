@@ -1832,10 +1832,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ArgumentNullException.ThrowIfNull(destination);
         destination.Clear();
 
-        foreach ((int X, int Z) key in _editedChunkYMasks.Keys)
+        foreach (var key in _editedChunkYMasks.Keys)
             destination.Add(key);
 
-        foreach ((int X, int Z) key in _editedHighChunkYs.Keys)
+        foreach (var key in _editedHighChunkYs.Keys)
             if (!_editedChunkYMasks.ContainsKey(key))
                 destination.Add(key);
     }
