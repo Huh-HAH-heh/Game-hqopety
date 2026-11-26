@@ -626,6 +626,7 @@ public static class RaylibTerrainViewer
                     }
                 }
 
+                long syncStarted = Stopwatch.GetTimestamp();
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
                 bool coarseTerrainChanged =
                     coarseVoxelTerrain?.RefreshFromWorld(worldMap) ?? false;
@@ -653,6 +654,10 @@ public static class RaylibTerrainViewer
                 if (terrainChanged || coarseTerrainChanged)
                     renderer.Synchronize(terrain, coarseVoxelTerrain);
 
+                if (renderLogger.IsEnabled(RenderLogMode.Detailed))
+                    renderLogger.Write(RenderLogMode.Detailed, "WORLD_SYNC",
+                        $"terrainChanged={terrainChanged} coarseChanged={coarseTerrainChanged} voxelVersion={worldMap.Voxels.Version} elapsedMs={Stopwatch.GetElapsedTime(syncStarted).TotalMilliseconds:0.000}");
+
                 long currentVoxelVersion = worldMap.Voxels.Version;
                 if (currentVoxelVersion != savedVoxelVersion &&
                     GetTime() - lastVoxelSaveTime >= 1.25d)
@@ -662,11 +667,14 @@ public static class RaylibTerrainViewer
                         worldMap.SaveVoxelEdits(voxelSavePath);
                         savedVoxelVersion = currentVoxelVersion;
                         lastVoxelSaveTime = GetTime();
+                        renderLogger.Write(RenderLogMode.Detailed, "VOXEL_AUTOSAVE",
+                            $"version={currentVoxelVersion} path=\"{voxelSavePath}\"");
                     }
                     catch (Exception exception)
                     {
                         Console.Error.WriteLine(
                             $"[Voxel] Autosave failed: {exception.Message}");
+                        renderLogger.Error("VOXEL_AUTOSAVE_FAILED", exception.ToString());
                         lastVoxelSaveTime = GetTime();
                     }
                 }
