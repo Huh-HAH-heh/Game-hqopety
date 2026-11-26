@@ -797,6 +797,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private readonly Dictionary<(int X, int Z), ulong> _editedChunkYMasks = new();
     private readonly Dictionary<(int X, int Z), HashSet<int>> _editedHighChunkYs = new();
     private readonly Func<int, int, int, int, (int Min, int Max)>? _baseSurfaceRange;
+    // The renderer asks for the same XZ macro columns every frame. Cache their
+    // coarse height range until the procedural base terrain changes.
+    private readonly Dictionary<(int X, int Z), (int Min, int Max)> _baseSurfaceRangeCache = new();
+    private long _baseSurfaceRangeCacheVersion = long.MinValue;
     private readonly List<EditHistoryEntry> _undoHistory = new();
     private readonly List<EditHistoryEntry> _redoHistory = new();
     private readonly Func<int, int, int, float> _baseDensity;
@@ -1675,11 +1679,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (_baseSurfaceRange == null)
             return true;
 
-        int originX = checked(macroX * macroCells);
-        int originZ = checked(macroZ * macroCells);
-        (int minSurface, int maxSurface) = _baseSurfaceRange(
-            originX, Math.Min(Width, originX + macroCells),
-            originZ, Math.Min(Depth, originZ + macroCells));
+        (int minSurface, int maxSurface) = GetCachedBaseSurfaceRange(
+            macroX, macroZ, macroCells);
 
         if (minSurface < 0 || maxSurface < minSurface)
             return false;
@@ -1694,35 +1695,57 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (macroX < 0 || macroZ < 0 || macroCells != SpatialMacroSize)
             throw new ArgumentOutOfRangeException(nameof(macroCells));
 
-        ulong mask = 0;
         if (_baseSurfaceRange == null)
             return ulong.MaxValue;
 
-        int originX = checked(macroX * macroCells);
-        int originZ = checked(macroZ * macroCells);
-        (int minSurface, int maxSurface) = _baseSurfaceRange(
-            originX, Math.Min(Width, originX + macroCells),
-            originZ, Math.Min(Depth, originZ + macroCells));
+        (int minSurface, int maxSurface) = GetCachedBaseSurfaceRange(
+            macroX, macroZ, macroCells);
+        ulong mask = 0;
 
         if (minSurface >= 0 && maxSurface >= minSurface)
         {
-            // Terrain is bottom-filled, so only its floor and exterior top
-            // can emit faces. All completely buried vertical bands are skipped.
+            // The base terrain is bottom-filled. Keep only the floor and
+            // surface bands representable by this mask; higher bands are
+            // checked exactly through HasPotentialVerticalChunk.
             mask |= 1UL;
             int firstChunkY = Math.Max(0, (minSurface - 1) / ChunkSize);
             int lastChunkY = Math.Max(firstChunkY, (maxSurface + 1) / ChunkSize);
-            for (int y = firstChunkY; y <= lastChunkY; y++)
-            {
-                if (y >= 64)
-                    return ulong.MaxValue;
+            int lastMaskY = Math.Min(lastChunkY, 63);
+            for (int y = firstChunkY; y <= lastMaskY; y++)
                 mask |= 1UL << y;
-            }
         }
 
         if (_editedChunkYMasks.TryGetValue((macroX, macroZ), out ulong editedMask))
             mask |= editedMask;
 
         return mask;
+    }
+
+    private (int Min, int Max) GetCachedBaseSurfaceRange(
+        int macroX,
+        int macroZ,
+        int macroCells)
+    {
+        if (_baseSurfaceRange == null)
+            return (-1, -1);
+
+        if (_baseSurfaceRangeCacheVersion != BaseVersion)
+        {
+            _baseSurfaceRangeCache.Clear();
+            _baseSurfaceRangeCacheVersion = BaseVersion;
+        }
+
+        var key = (macroX, macroZ);
+        if (_baseSurfaceRangeCache.TryGetValue(key, out var cached))
+            return cached;
+
+        int originX = checked(macroX * macroCells);
+        int originZ = checked(macroZ * macroCells);
+        var range = _baseSurfaceRange(
+            originX, Math.Min(Width, originX + macroCells),
+            originZ, Math.Min(Depth, originZ + macroCells));
+        _baseSurfaceRangeCache.Add(key, range);
+        return range;
     }
 
     /// <summary>Removes empty bricks left by interrupted or restored edits.</summary>
