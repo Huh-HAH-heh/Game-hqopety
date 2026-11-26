@@ -1224,7 +1224,12 @@ private void PrepareCandidateEntries(
             _totalDuplicateRequestAttempts++;
             return;
         }
-        if (_buildQueue.Count >= MaximumPendingMeshJobs)
+        // Keep half of the bounded queue available for meshes currently shown.
+        // Background LOD prebuilds must never starve the displayed terrain.
+        int queueLimit = key.Step == _displayStep
+            ? MaximumPendingMeshJobs
+            : MaximumPendingMeshJobs / 2;
+        if (_buildQueue.Count >= queueLimit)
         {
             // Count one deferred revision, not every per-frame retry while the queue stays full.
             if (entry.QueueRejectedRevision != entry.RequestRevision)
