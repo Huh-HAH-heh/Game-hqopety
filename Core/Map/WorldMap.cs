@@ -1865,8 +1865,10 @@ public sealed class WorldMap
 
             // Edits in the expanded voxel-only area do not touch legacy tile
             // navigation or the original heightfield surface caches.
-            if (bounds.MaxX <= 0 || bounds.MaxZ <= 0 ||
-                bounds.MinX >= _baseVoxelWidth || bounds.MinZ >= _baseVoxelDepth)
+            if (bounds.MaxX <= 0 || bounds.MaxY <= 0 || bounds.MaxZ <= 0 ||
+                bounds.MinX >= _baseVoxelWidth ||
+                bounds.MinY >= _baseVoxelHeight ||
+                bounds.MinZ >= _baseVoxelDepth)
                 return;
 
             int minVoxelX = Math.Max(0, bounds.MinX);
