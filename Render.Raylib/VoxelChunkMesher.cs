@@ -699,16 +699,12 @@ internal static class VoxelChunkMesher
         int i3,
         bool positiveSide)
     {
-        if ((uint)i0 >= (uint)positions.Length ||
+        if (i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0 ||
+            (uint)i0 >= (uint)positions.Length ||
             (uint)i1 >= (uint)positions.Length ||
             (uint)i2 >= (uint)positions.Length ||
-            (uint)i3 >= (uint)positions.Length ||
-            i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0)
+            (uint)i3 >= (uint)positions.Length)
             return;
-
-        byte material = materials[i0] != 0 ? materials[i0] :
-            materials[i1] != 0 ? materials[i1] :
-            materials[i2] != 0 ? materials[i2] : materials[i3];
 
         batch.AddIndexedQuad(
             i0, i1, i2, i3,
