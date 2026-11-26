@@ -76,6 +76,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         public int DensityCount => Volatile.Read(ref _densityCount);
         public int MaterialCount => Volatile.Read(ref _materialCount);
         public bool IsEmpty => DensityCount == 0 && MaterialCount == 0;
+        public bool IsSparse =>
+            Volatile.Read(ref _denseDensity) == null &&
+            Volatile.Read(ref _denseMaterials) == null;
         public long EstimatedBytes =>
             (long)(Volatile.Read(ref _sparseDensity)?.Length ?? 0) * 4 +
             (long)(Volatile.Read(ref _sparseMaterials)?.Length ?? 0) * 4 +
@@ -674,7 +677,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         {
             int count = 0;
             foreach (Chunk chunk in _chunks.Values)
-                if (!chunk.IsEmpty && chunk.EstimatedBytes < 16_000)
+                if (!chunk.IsEmpty && chunk.IsSparse)
                     count++;
             return count;
         }
@@ -2737,13 +2740,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         static int MaxSample(float value) =>
             (int)MathF.Ceiling(value / VoxelSizeMeters - 0.5f) + 2;
 
-        int minX = Math.Clamp(MinSample(bodyPositionMeters.X - worldHalf.X), 0, Width);
-        int minY = Math.Clamp(MinSample(bodyPositionMeters.Y - worldHalf.Y), 0, Height);
-        int minZ = Math.Clamp(MinSample(bodyPositionMeters.Z - worldHalf.Z), 0, Depth);
-        int maxX = Math.Clamp(MaxSample(bodyPositionMeters.X + worldHalf.X), minX, Width);
-        int maxY = Math.Clamp(MaxSample(bodyPositionMeters.Y + worldHalf.Y), minY, Height);
-        int maxZ = Math.Clamp(MaxSample(bodyPositionMeters.Z + worldHalf.Z), minZ, Depth);
+        int minX = Math.Max(0, MinSample(bodyPositionMeters.X - worldHalf.X));
+        int minY = Math.Max(0, MinSample(bodyPositionMeters.Y - worldHalf.Y));
+        int minZ = Math.Max(0, MinSample(bodyPositionMeters.Z - worldHalf.Z));
+        int maxX = Math.Max(minX, MaxSample(bodyPositionMeters.X + worldHalf.X));
+        int maxY = Math.Max(minY, MaxSample(bodyPositionMeters.Y + worldHalf.Y));
+        int maxZ = Math.Max(minZ, MaxSample(bodyPositionMeters.Z + worldHalf.Z));
 
+        ExpandTo(Math.Max(Width, maxX), Math.Max(Height, maxY), Math.Max(Depth, maxZ));
         VoxelBounds bounds = new(minX, minY, minZ, maxX, maxY, maxZ);
         long sampleCount = (long)(maxX - minX) *
             (maxY - minY) * (maxZ - minZ);
