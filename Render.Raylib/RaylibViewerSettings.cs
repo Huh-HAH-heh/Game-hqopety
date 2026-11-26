@@ -19,6 +19,14 @@ internal enum TerrainRenderMode : byte
     HeightmapFallback
 }
 
+internal enum RenderLogMode : byte
+{
+    ErrorsOnly,
+    FrameSummary,
+    Detailed,
+    Trace
+}
+
 internal enum TerrainColorSlot : byte
 {
     BaseRock,
@@ -176,6 +184,9 @@ internal sealed class RaylibViewerSettings
 
     public float RenderDistanceMeters { get; set; } = 8000f;
 
+    public bool RenderLoggingEnabled { get; set; }
+    public RenderLogMode LogMode { get; set; } = RenderLogMode.Detailed;
+
     public TerrainPalette Palette { get; set; } = new();
 
     public static RaylibViewerSettings Load()
@@ -263,6 +274,8 @@ internal sealed class RaylibViewerSettings
             CameraMode = RaylibCameraMode.Rts;
         if (!Enum.IsDefined(TerrainMode))
             TerrainMode = TerrainRenderMode.Voxel;
+        if (!Enum.IsDefined(LogMode))
+            LogMode = RenderLogMode.Detailed;
 
         CameraMoveSpeed = Math.Clamp(CameraMoveSpeed, 0.25f, 4f);
         CameraRotationSpeed = Math.Clamp(CameraRotationSpeed, 0.25f, 4f);

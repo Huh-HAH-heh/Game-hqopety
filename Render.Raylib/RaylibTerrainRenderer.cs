@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using Raylib_cs;
 using static Raylib_cs.Raylib;
@@ -89,6 +90,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     private readonly int _sunIntensityLocation;
     private readonly TerrainRenderMode _mode;
     private readonly VoxelTerrainRenderer? _densityVoxelRenderer;
+    private readonly TerrainPipelineLogger _logger;
+    private readonly bool _ownsLogger;
 
     private TerrainPalette _palette;
     private int _paletteVersion;
@@ -144,12 +147,15 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         TerrainRenderSnapshot terrain,
         TerrainPalette palette,
         TerrainRenderMode mode,
-        TerrainRenderSnapshot? coarseTerrain = null)
+        TerrainRenderSnapshot? coarseTerrain = null,
+        TerrainPipelineLogger? logger = null)
     {
+        _logger = logger ?? new TerrainPipelineLogger(false, RenderLogMode.Detailed);
+        _ownsLogger = logger == null;
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
         _mode = mode;
         _densityVoxelRenderer = mode == TerrainRenderMode.Voxel
-            ? new VoxelTerrainRenderer(palette)
+            ? new VoxelTerrainRenderer(palette, _logger)
             : null;
         _coarseTerrain = mode == TerrainRenderMode.Voxel &&
             coarseTerrain?.IsVoxelMode == true
@@ -176,6 +182,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         // Mesh creation is deliberately lazy. Only visible storage regions are
         // meshed, with a bounded per-frame upload budget.
         Synchronize(terrain, _coarseTerrain);
+        _logger.Write(RenderLogMode.Detailed, "TERRAIN_RENDERER_CREATED", $"mode={_mode} regions={terrain.StorageRegionCount} voxelBackend={_densityVoxelRenderer != null}");
     }
 
     public void Synchronize(
@@ -184,6 +191,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         bool forceRebuild = false)
     {
         ThrowIfDisposed();
+        _logger.Write(RenderLogMode.Detailed, "TERRAIN_SYNCHRONIZE", $"forceRebuild={forceRebuild} regionCount={terrain.StorageRegionCount} mode={_mode}");
         InvalidateMeshes(_regionMeshes, forceRebuild);
 
         if (_coarseRegionMeshes.Length > 0)
@@ -221,6 +229,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         float maximumViewDistanceMeters)
     {
         ThrowIfDisposed();
+        long drawStarted = Stopwatch.GetTimestamp();
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "TERRAIN_DRAW_BEGIN", $"mode={_mode} viewport={viewportWidth}x{viewportHeight} distance={maximumViewDistanceMeters:0.0} camera=({camera.Position.X:0.0},{camera.Position.Y:0.0},{camera.Position.Z:0.0})");
 
         if (_densityVoxelRenderer != null)
         {
@@ -238,6 +249,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             RebuiltRegions = _densityVoxelRenderer.RebuiltChunks;
             CutSurfaceRebuilds = _densityVoxelRenderer.RebuiltCutCaps;
             _activeVoxelCellSize = _densityVoxelRenderer.ActiveRenderCellSize;
+            if (_logger.IsEnabled(RenderLogMode.FrameSummary))
+                _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
+                    $"backend=voxel elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visible={VisibleRegionsLastFrame} draws={DrawCallsLastFrame} rebuilt={RebuiltRegions} cutRebuilt={CutSurfaceRebuilds} chunks={CachedVoxelChunks} uploads={VoxelGpuUploadsLastFrame}");
             return;
         }
 
@@ -313,6 +327,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 viewportHeight,
                 maximumViewDistanceMeters))
             {
+                if (_logger.IsEnabled(RenderLogMode.Trace))
+                    _logger.Write(RenderLogMode.Trace, "REGION_FRUSTUM_CULLED", $"index={i} center=({center.X:0.0},{center.Y:0.0},{center.Z:0.0}) radius={radius:0.0}");
                 continue;
             }
 
@@ -349,6 +365,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                     region = rebuilt;
                     RebuiltRegions++;
                     baseBuildsThisFrame++;
+                    _logger.Write(RenderLogMode.Detailed, "REGION_MESH_REBUILT", $"index={i} region=({regionX},{regionY}) mode={_mode} palette={_paletteVersion}");
                 }
             }
 
@@ -379,6 +396,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
                     cutBuildsThisFrame++;
                     CutSurfaceRebuilds++;
+                    _logger.Write(RenderLogMode.Detailed, "REGION_CUT_MESH_REBUILT", $"index={i} region=({regionX},{regionY}) layer={cutLayer} meshes={rebuiltCutMeshes.Length}");
                 }
             }
             else if (region.CutMeshes.Length > 0)
@@ -395,14 +413,19 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         SetVoxelLighting();
 
         BeginMode3D(camera);
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "RAYLIB_PASS_BEGIN", $"name=BeginMode3D visibleRegions={visibleRegionCount}");
 
         for (int i = 0; i < visibleRegionCount; i++)
         {
             RegionGpuMesh region = _visibleRegionMeshes[i]!;
+            int meshIndex = 0;
             foreach (Mesh mesh in region.Meshes)
             {
                 DrawMesh(mesh, _material, Matrix4x4.Identity);
                 visibleDrawCalls++;
+                if (_logger.IsEnabled(RenderLogMode.Trace))
+                    _logger.Write(RenderLogMode.Trace, "DRAW_MESH", $"pass=terrain region={i} mesh={meshIndex++} vertices={mesh.VertexCount} triangles={mesh.TriangleCount}");
             }
         }
 
@@ -418,21 +441,29 @@ internal sealed class RaylibTerrainRenderer : IDisposable
                 if (region.CutSurfaceLayer != cutLayer)
                     continue;
 
+                int meshIndex = 0;
                 foreach (Mesh mesh in region.CutMeshes)
                 {
                     DrawMesh(mesh, _material, Matrix4x4.Identity);
                     visibleDrawCalls++;
+                    if (_logger.IsEnabled(RenderLogMode.Trace))
+                        _logger.Write(RenderLogMode.Trace, "DRAW_MESH", $"pass=cut-surface region={i} mesh={meshIndex++} vertices={mesh.VertexCount} triangles={mesh.TriangleCount}");
                 }
             }
         }
 
         EndMode3D();
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "RAYLIB_PASS_END", "name=EndMode3D");
 
         Array.Clear(_visibleRegionMeshes, 0, visibleRegionCount);
         if (regionCount > 0)
             _regionBuildCursor = (scanStart + 1) % regionCount;
         DrawCallsLastFrame = visibleDrawCalls;
         VisibleRegionsLastFrame = visibleRegionCount;
+        if (_logger.IsEnabled(RenderLogMode.FrameSummary))
+            _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
+                $"backend=region-mesh elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visible={VisibleRegionsLastFrame} draws={DrawCallsLastFrame} regionBuilds={baseBuildsThisFrame} cutBuilds={cutBuildsThisFrame} coarseLod={_usingCoarseLod}");
     }
 
     public int DetachLooseFragments(
@@ -533,8 +564,10 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             terrain.VerticalWorldExtentMeters * terrain.VerticalWorldExtentMeters * 0.25f);
     }
 
-    private static void ClearCutMeshes(RegionGpuMesh region)
+    private void ClearCutMeshes(RegionGpuMesh region)
     {
+        if (region.CutMeshes.Length > 0)
+            _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UNLOAD", $"kind=cut-surface count={region.CutMeshes.Length} reason=cut-disabled");
         foreach (Mesh mesh in region.CutMeshes)
             UnloadMesh(mesh);
 
@@ -546,6 +579,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     {
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
         _paletteVersion++;
+        _logger.Write(RenderLogMode.Detailed, "PALETTE_CHANGED", $"version={_paletteVersion} ambient={palette.AmbientLight:0.000} sun={palette.SunIntensity:0.000} color=({palette.BaseRock.R},{palette.BaseRock.G},{palette.BaseRock.B})");
         _densityVoxelRenderer?.SetPalette(palette);
     }
 
@@ -554,6 +588,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         if (_disposed)
             return;
 
+        _logger.Write(RenderLogMode.ErrorsOnly, "TERRAIN_RENDERER_DISPOSE", $"mode={_mode} draws={DrawCallsLastFrame} visible={VisibleRegionsLastFrame}");
         _densityVoxelRenderer?.Dispose();
         DisposeMeshes(_regionMeshes);
         DisposeMeshes(_coarseRegionMeshes);
@@ -562,6 +597,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         if (_hasVoxelShader)
             UnloadShader(_voxelShader);
         _disposed = true;
+        if (_ownsLogger)
+            _logger.Dispose();
     }
 
     private void ThrowIfDisposed()

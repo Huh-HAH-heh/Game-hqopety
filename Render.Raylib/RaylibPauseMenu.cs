@@ -15,7 +15,9 @@ internal enum RaylibMenuAction : byte
     FocusLowerTunnel,
     FocusUpperPassage,
     ToggleCutaway,
-    RebuildTerrainMode
+    RebuildTerrainMode,
+    ToggleRenderLogging,
+    CycleRenderLogMode
 }
 
 internal sealed class RaylibPauseMenu : IDisposable
@@ -473,6 +475,10 @@ internal sealed class RaylibPauseMenu : IDisposable
         else if (HitSlider(mouse, panel, SliderId.RenderDistance, 234f))
             BeginSlider(SliderId.RenderDistance, mouse, panel);
         else if (HitActionButton(mouse, panel, 414f))
+            return RaylibMenuAction.ToggleRenderLogging;
+        else if (HitActionButton(mouse, panel, 484f))
+            return RaylibMenuAction.CycleRenderLogMode;
+        else if (HitActionButton(mouse, panel, 614f))
             return ResetAllSettings();
 
         return RaylibMenuAction.None;
@@ -985,8 +991,44 @@ internal sealed class RaylibPauseMenu : IDisposable
             y + 188f,
             12f,
             new Color(170, 184, 201));
-        DrawOptionRow(panel, mouse, y + 250f, "ПРОФИЛЬ НАСТРОЕК",
-            "СБРОСИТЬ ВСЁ", 414f);
+        DrawOptionRow(
+            panel,
+            mouse,
+            y + 250f,
+            "ЛОГИРОВАНИЕ ВСЕГО РЕНДЕРА",
+            Settings.RenderLoggingEnabled ? "ВКЛ" : "ВЫКЛ",
+            414f,
+            Settings.RenderLoggingEnabled);
+
+        string logMode = Settings.LogMode switch
+        {
+            RenderLogMode.ErrorsOnly => "ТОЛЬКО ОШИБКИ",
+            RenderLogMode.FrameSummary => "СВОДКА КАДРОВ",
+            RenderLogMode.Detailed => "ПОДРОБНЫЙ",
+            _ => "TRACE / ВСЕ СОБЫТИЯ"
+        };
+        DrawOptionRow(
+            panel,
+            mouse,
+            y + 320f,
+            "ДЕТАЛЬНОСТЬ ЛОГОВ",
+            logMode,
+            484f,
+            Settings.RenderLoggingEnabled,
+            "Ctrl+F8 — вкл/выкл, Ctrl+F9 — режим");
+        DrawLabel(
+            "Файлы сохраняются в папке Logs в корне проекта.",
+            panel.X + 304f,
+            y + 390f,
+            11f,
+            new Color(154, 168, 185));
+        DrawOptionRow(
+            panel,
+            mouse,
+            y + 450f,
+            "ПРОФИЛЬ НАСТРОЕК",
+            "СБРОСИТЬ ВСЁ",
+            614f);
     }
 
     private void DrawOptionRow(

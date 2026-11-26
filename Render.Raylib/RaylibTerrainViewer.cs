@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using Core.Map;
@@ -33,6 +34,13 @@ public static class RaylibTerrainViewer
     {
         ArgumentNullException.ThrowIfNull(worldMap);
 
+        RaylibViewerSettings settings = RaylibViewerSettings.Load();
+        using TerrainPipelineLogger renderLogger = new(
+            settings.RenderLoggingEnabled,
+            settings.LogMode);
+        renderLogger.Write(RenderLogMode.ErrorsOnly, "VIEWER_START",
+            $"terrainMode={settings.TerrainMode} enabled={settings.RenderLoggingEnabled} mode={settings.LogMode} path=\"{renderLogger.LogPath}\"");
+
         string voxelSavePath = GetVoxelSavePath();
         try
         {
@@ -43,13 +51,16 @@ public static class RaylibTerrainViewer
         {
             Console.Error.WriteLine(
                 $"[Voxel] Could not load terrain edits from '{voxelSavePath}': {exception.Message}");
+            renderLogger.Error("VOXEL_SAVE_LOAD_FAILED", exception.ToString());
         }
 
         long savedVoxelVersion = worldMap.Voxels.Version;
         double lastVoxelSaveTime = GetTime();
-        RaylibViewerSettings settings = RaylibViewerSettings.Load();
+        long snapshotStarted = Stopwatch.GetTimestamp();
         TerrainRenderSnapshot terrain =
             TerrainRenderSnapshot.Create(worldMap, settings.TerrainMode);
+        renderLogger.Write(RenderLogMode.Detailed, "WORLD_SNAPSHOT_READY",
+            $"mode={settings.TerrainMode} regions={terrain.RegionsX}x{terrain.RegionsY} storage={terrain.StorageRegionsX}x{terrain.StorageRegionsY} world={terrain.WorldWidth:0.0}x{terrain.WorldDepth:0.0}m height={terrain.VerticalWorldExtentMeters:0.0}m elapsedMs={Stopwatch.GetElapsedTime(snapshotStarted).TotalMilliseconds:0.000}");
         // The 3D density renderer owns its own chunk LOD; do not allocate a
         // second legacy column snapshot for the same voxel world.
         TerrainRenderSnapshot? coarseVoxelTerrain = null;
@@ -60,11 +71,13 @@ public static class RaylibTerrainViewer
         if (settings.Msaa4x)
             windowFlags |= ConfigFlags.Msaa4xHint;
 
+        renderLogger.Write(RenderLogMode.Detailed, "WINDOW_CONFIG", $"flags={windowFlags} width={settings.WindowWidth} height={settings.WindowHeight} vsync={settings.VSync} msaa={settings.Msaa4x} fullscreen={settings.Fullscreen}");
         SetConfigFlags(windowFlags);
         InitWindow(
             settings.WindowWidth,
             settings.WindowHeight,
             "RimClone | Raylib Terrain Viewer");
+        renderLogger.Write(RenderLogMode.ErrorsOnly, "WINDOW_READY", $"width={GetScreenWidth()} height={GetScreenHeight()} monitor={GetCurrentMonitor()}");
 
         // Monitor queries require an initialized window/graphics context.
         int monitor = Math.Max(0, GetCurrentMonitor());
@@ -126,7 +139,8 @@ public static class RaylibTerrainViewer
                 terrain,
                 settings.Palette,
                 settings.TerrainMode,
-                coarseVoxelTerrain);
+                coarseVoxelTerrain,
+                renderLogger);
             int appliedPaletteRevision = menu.PaletteRevision;
 
             Console.WriteLine(
@@ -146,11 +160,34 @@ public static class RaylibTerrainViewer
                 "H 25-33m. F1/F2 focus, C surface.");
 
             bool exitRequested = false;
+            long frameNumber = 0;
 
             while (!WindowShouldClose() && !exitRequested)
             {
                 float deltaTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
+                long frameStarted = Stopwatch.GetTimestamp();
+                renderLogger.SetFrame(++frameNumber);
+
+                bool controlDown =
+                    IsKeyDown(KeyboardKey.LeftControl) ||
+                    IsKeyDown(KeyboardKey.RightControl);
+                if (controlDown && IsKeyPressed(KeyboardKey.F8))
+                {
+                    menu.Settings.RenderLoggingEnabled = !menu.Settings.RenderLoggingEnabled;
+                    renderLogger.SetEnabled(menu.Settings.RenderLoggingEnabled);
+                    menu.SaveSettings();
+                }
+
+                if (controlDown && IsKeyPressed(KeyboardKey.F9))
+                {
+                    menu.Settings.LogMode = NextRenderLogMode(menu.Settings.LogMode);
+                    renderLogger.SetMode(menu.Settings.LogMode);
+                    menu.SaveSettings();
+                }
+
                 RaylibMenuAction menuAction = menu.Update();
+                if (menuAction != RaylibMenuAction.None)
+                    renderLogger.Write(RenderLogMode.Detailed, "MENU_ACTION", $"action={menuAction}");
 
                 if (menu.IsOpen)
                 {
@@ -244,8 +281,21 @@ public static class RaylibTerrainViewer
                             terrain,
                             menu.Settings.Palette,
                             menu.Settings.TerrainMode,
-                            coarseVoxelTerrain);
+                            coarseVoxelTerrain,
+                            renderLogger);
                         appliedPaletteRevision = menu.PaletteRevision;
+                        break;
+
+                    case RaylibMenuAction.ToggleRenderLogging:
+                        menu.Settings.RenderLoggingEnabled = !menu.Settings.RenderLoggingEnabled;
+                        renderLogger.SetEnabled(menu.Settings.RenderLoggingEnabled);
+                        menu.SaveSettings();
+                        break;
+
+                    case RaylibMenuAction.CycleRenderLogMode:
+                        menu.Settings.LogMode = NextRenderLogMode(menu.Settings.LogMode);
+                        renderLogger.SetMode(menu.Settings.LogMode);
+                        menu.SaveSettings();
                         break;
 
                     case RaylibMenuAction.ToggleCutaway:
@@ -395,7 +445,7 @@ public static class RaylibTerrainViewer
                                 Console.WriteLine("[Voxel] Nothing to undo.");
                         }
 
-                        if (IsKeyPressed(KeyboardKey.F8) && !renderer.IsMergingFragments)
+                        if (IsKeyPressed(KeyboardKey.F8) && !controlDown && !renderer.IsMergingFragments)
                         {
                             if (worldMap.Voxels.Redo())
                                 renderer.RedoVoxelEdit();
@@ -614,16 +664,26 @@ public static class RaylibTerrainViewer
                 }
 
                 BeginDrawing();
+                if (renderLogger.IsEnabled(RenderLogMode.Trace))
+                    renderLogger.Write(RenderLogMode.Trace, "RAYLIB_PASS_BEGIN", "name=BeginDrawing");
                 ClearBackground(menu.Settings.Palette.Background.ToRaylibColor());
 
+                long terrainDrawStarted = Stopwatch.GetTimestamp();
                 renderer.Draw(
                     terrain,
                     camera.Camera,
                     GetScreenWidth(),
                     GetScreenHeight(),
                     menu.Settings.RenderDistanceMeters);
+                double terrainDrawMs = Stopwatch.GetElapsedTime(terrainDrawStarted).TotalMilliseconds;
+                if (renderLogger.IsEnabled(RenderLogMode.Detailed))
+                    renderLogger.Write(RenderLogMode.Detailed, "RENDER_PASS",
+                        $"name=terrain-3d elapsedMs={terrainDrawMs:0.000} draws={renderer.DrawCallsLastFrame} visible={renderer.VisibleRegionsLastFrame} rebuilt={renderer.RebuiltRegions}");
 
+                double hudMs = 0d;
                 if (menu.ShowHud)
+                {
+                    long hudStarted = Stopwatch.GetTimestamp();
                     DrawHud(
                         terrain,
                         renderer,
@@ -636,16 +696,48 @@ public static class RaylibTerrainViewer
                             voxelEditMode,
                             voxelBrushRadiusMeters,
                             voxelBrushMaterial));
+                    hudMs = Stopwatch.GetElapsedTime(hudStarted).TotalMilliseconds;
+                    if (renderLogger.IsEnabled(RenderLogMode.Detailed))
+                        renderLogger.Write(RenderLogMode.Detailed, "RENDER_PASS", $"name=hud elapsedMs={hudMs:0.000}");
+                }
 
+                double layerPanelMs = 0d;
                 if (!menu.IsOpen)
+                {
+                    long layerStarted = Stopwatch.GetTimestamp();
                     layerPanel.Draw(menu.Settings, maximumCutHeight, menu.HudFont);
+                    layerPanelMs = Stopwatch.GetElapsedTime(layerStarted).TotalMilliseconds;
+                    if (renderLogger.IsEnabled(RenderLogMode.Detailed))
+                        renderLogger.Write(RenderLogMode.Detailed, "RENDER_PASS", $"name=layer-panel elapsedMs={layerPanelMs:0.000}");
+                }
 
+                long menuStarted = Stopwatch.GetTimestamp();
                 menu.Draw();
+                double menuMs = Stopwatch.GetElapsedTime(menuStarted).TotalMilliseconds;
+                if (menu.IsOpen && renderLogger.IsEnabled(RenderLogMode.Detailed))
+                    renderLogger.Write(RenderLogMode.Detailed, "RENDER_PASS", $"name=pause-menu elapsedMs={menuMs:0.000}");
+
+                if (renderLogger.IsEnabled(RenderLogMode.Trace))
+                    renderLogger.Write(RenderLogMode.Trace, "RAYLIB_PASS_END", "name=EndDrawing");
                 EndDrawing();
+
+                double frameMs = Stopwatch.GetElapsedTime(frameStarted).TotalMilliseconds;
+                if (renderLogger.IsEnabled(RenderLogMode.Detailed))
+                    renderLogger.Write(RenderLogMode.Detailed, "FRAME_PHASES",
+                        $"terrain3dMs={terrainDrawMs:0.000} hudMs={hudMs:0.000} layerPanelMs={layerPanelMs:0.000} menuMs={menuMs:0.000} totalMs={frameMs:0.000}");
+                if (renderLogger.IsEnabled(RenderLogMode.FrameSummary))
+                    renderLogger.Write(RenderLogMode.FrameSummary, "FRAME",
+                        $"fps={GetFPS()} dtMs={deltaTime * 1000f:0.000} ms={frameMs:0.000} viewport={GetScreenWidth()}x{GetScreenHeight()} mode={menu.Settings.TerrainMode} cameraMode={menu.Settings.CameraMode} camera=({camera.Camera.Position.X:0.0},{camera.Camera.Position.Y:0.0},{camera.Camera.Position.Z:0.0}) target=({camera.Camera.Target.X:0.0},{camera.Camera.Target.Y:0.0},{camera.Camera.Target.Z:0.0}) cutaway={cutawayMode}:{menu.Settings.CutawayHeightMeters:0.0} visible={renderer.VisibleRegionsLastFrame} draws={renderer.DrawCallsLastFrame} rebuilt={renderer.RebuiltRegions} chunks={renderer.CachedVoxelChunks} workers={renderer.VoxelMeshWorkers} queue={renderer.VoxelPendingMeshJobs} results={renderer.VoxelCompletedMeshResultsPending} uploads={renderer.VoxelGpuUploadsLastFrame} gpuMs={renderer.VoxelGpuUploadMilliseconds:0.000}");
             }
+        }
+        catch (Exception exception)
+        {
+            renderLogger.Error("VIEWER_FATAL", exception.ToString());
+            throw;
         }
         finally
         {
+            renderLogger.Write(RenderLogMode.ErrorsOnly, "VIEWER_STOP", $"voxelVersion={worldMap.Voxels.Version}");
             if (worldMap.Voxels.Version != savedVoxelVersion)
             {
                 try
@@ -657,6 +749,7 @@ public static class RaylibTerrainViewer
                 {
                     Console.Error.WriteLine(
                         $"[Voxel] Final save failed: {exception.Message}");
+                    renderLogger.Error("VOXEL_FINAL_SAVE_FAILED", exception.ToString());
                 }
             }
 
@@ -666,6 +759,9 @@ public static class RaylibTerrainViewer
             CloseWindow();
         }
     }
+
+    private static RenderLogMode NextRenderLogMode(RenderLogMode mode) =>
+        (RenderLogMode)(((int)mode + 1) % 4);
 
     private static string GetVoxelSavePath()
     {

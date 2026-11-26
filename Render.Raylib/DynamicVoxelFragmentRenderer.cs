@@ -65,10 +65,14 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
         }
     }
 
+    private readonly TerrainPipelineLogger _logger;
     private readonly List<Body> _bodies = new(MaximumBodies);
     private readonly SemaphoreSlim _meshBuildSemaphore = new(1, 1);
     private readonly List<Body[]> _undoEdits = new();
     private readonly List<Body[]> _redoEdits = new();
+
+    public DynamicVoxelFragmentRenderer(TerrainPipelineLogger logger) =>
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private List<Body>? _pendingEdit;
     private int _activeBodyCount;
     private long _snapshotBytes;
@@ -294,8 +298,11 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
             while (body.MeshUploadIndex < data.Length &&
                 timer.Elapsed.TotalMilliseconds < budgetMilliseconds)
             {
-                body.UploadingMeshes.Add(
-                    VoxelChunkMesher.UploadOne(data[body.MeshUploadIndex++]));
+                int meshIndex = body.MeshUploadIndex++;
+                VoxelMeshData source = data[meshIndex];
+                long uploadStarted = Stopwatch.GetTimestamp();
+                body.UploadingMeshes.Add(VoxelChunkMesher.UploadOne(source));
+                _logger.Write(RenderLogMode.Detailed, "FRAGMENT_GPU_UPLOAD", $"meshIndex={meshIndex} vertices={source.VertexCount} triangles={source.IndexCount / 3} elapsedMs={Stopwatch.GetElapsedTime(uploadStarted).TotalMilliseconds:0.000}");
             }
 
             if (body.MeshUploadIndex < data.Length)
@@ -406,8 +413,13 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 Matrix4x4.CreateFromQuaternion(body.Rotation) *
                 Matrix4x4.CreateTranslation(body.Position);
 
+            int meshIndex = 0;
             foreach (Mesh mesh in body.Meshes)
+            {
                 DrawMesh(mesh, material, transform);
+                if (_logger.IsEnabled(RenderLogMode.Trace))
+                    _logger.Write(RenderLogMode.Trace, "DRAW_MESH", $"pass=dynamic-fragment mesh={meshIndex++} vertices={mesh.VertexCount} triangles={mesh.TriangleCount} position=({body.Position.X:0.00},{body.Position.Y:0.00},{body.Position.Z:0.00})");
+            }
         }
     }
 
