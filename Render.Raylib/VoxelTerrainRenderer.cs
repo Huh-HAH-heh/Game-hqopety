@@ -616,7 +616,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ref int macroFrustumTests,
         ref int visibleMacroRegions)
     {
-        const int macroChunkCount = 4;
+        const int macroChunkCount = SparseVoxelField.SpatialMacroSize / ChunkCells;
         const float sphereScale = 0.8660254038f;
 
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
@@ -660,12 +660,23 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int firstMacroZ = firstZ / macroChunkCount;
         int lastMacroZ = lastZ / macroChunkCount;
 
-        // Coarse pass: reject whole 4x4x4 chunk regions before touching leaf chunks.
+        // Coarse pass: data metadata removes buried/empty vertical bands
+        // before frustum tests or per-chunk candidate work.
         for (int macroZ = firstMacroZ; macroZ <= lastMacroZ; macroZ++)
-        for (int macroY = firstMacroY; macroY <= lastMacroY; macroY++)
         for (int macroX = firstMacroX; macroX <= lastMacroX; macroX++)
         {
-            int firstChunkX = macroX * macroChunkCount;
+            ulong potentialYMask = field.GetPotentialVerticalMacroMask(
+                macroX, macroZ, macroCells);
+            if (potentialYMask == 0)
+                continue;
+
+            for (int macroY = firstMacroY; macroY <= lastMacroY; macroY++)
+            {
+                if (macroY < 64 &&
+                    (potentialYMask & (1UL << macroY)) == 0)
+                    continue;
+
+                int firstChunkX = macroX * macroChunkCount;
             int firstChunkY = macroY * macroChunkCount;
             int firstChunkZ = macroZ * macroChunkCount;
             int endChunkX = Math.Min(firstChunkX + macroChunkCount, chunksX);
@@ -772,6 +783,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     center,
                     chunkRadiusMeters,
                     Vector3.DistanceSquared(center, cameraPosition)));
+                }
             }
         }
     }
