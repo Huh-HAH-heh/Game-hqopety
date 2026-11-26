@@ -3076,10 +3076,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
+        bool firstOverride = chunk.IsEmpty;
         chunk.SetDensity(index, Quantize(density));
         chunk.Revision = revision;
         touched.Add(key);
-        MarkEditedChunk(key);
+        if (firstOverride)
+            MarkEditedChunk(key);
     }
 
     private void SetMaterialOverride(
@@ -3099,10 +3101,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
+        bool firstOverride = chunk.IsEmpty;
         chunk.SetMaterial(index, materialId);
         chunk.Revision = revision;
         touched.Add(key);
-        MarkEditedChunk(key);
+        if (firstOverride)
+            MarkEditedChunk(key);
     }
 
     private void CompleteEdit(
