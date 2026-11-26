@@ -799,7 +799,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private readonly Func<int, int, int, int, (int Min, int Max)>? _baseSurfaceRange;
     // The renderer asks for the same XZ macro columns every frame. Cache their
     // coarse height range until the procedural base terrain changes.
-    private readonly Dictionary<(int X, int Z), (int Min, int Max)> _baseSurfaceRangeCache = new();
+    private readonly Dictionary<(int X, int Z, int Size), (int Min, int Max)> _baseSurfaceRangeCache = new();
     private long _baseSurfaceRangeCacheVersion = long.MinValue;
     private readonly List<EditHistoryEntry> _undoHistory = new();
     private readonly List<EditHistoryEntry> _redoHistory = new();
@@ -951,16 +951,42 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int maxChunkY = maxY / ChunkSize;
         int maxChunkZ = maxZ / ChunkSize;
 
+        long storageChunkVolume =
+            (long)(maxChunkX - minChunkX + 1) *
+            (maxChunkY - minChunkY + 1) *
+            (maxChunkZ - minChunkZ + 1);
+        int editedChunkCount = _chunks.Count;
         Dictionary<ChunkCoordinate, ChunkSnapshot>? snapshots = null;
-        for (int z = minChunkZ; z <= maxChunkZ; z++)
-        for (int y = minChunkY; y <= maxChunkY; y++)
-        for (int x = minChunkX; x <= maxChunkX; x++)
+
+        // Small fine-LOD regions are cheaper to probe directly. Large coarse
+        // regions enumerate only allocated edit bricks instead of walking the
+        // full 3D storage volume, which grows with step³.
+        if (storageChunkVolume <= editedChunkCount * 2L + 64L)
         {
-            ChunkCoordinate key = new(x, y, z);
-            if (_chunks.TryGetValue(key, out Chunk? chunk))
+            for (int z = minChunkZ; z <= maxChunkZ; z++)
+            for (int y = minChunkY; y <= maxChunkY; y++)
+            for (int x = minChunkX; x <= maxChunkX; x++)
             {
+                ChunkCoordinate key = new(x, y, z);
+                if (!_chunks.TryGetValue(key, out Chunk? chunk))
+                    continue;
+
                 snapshots ??= new Dictionary<ChunkCoordinate, ChunkSnapshot>();
                 snapshots.Add(key, ChunkSnapshot.From(chunk));
+            }
+        }
+        else
+        {
+            foreach (KeyValuePair<ChunkCoordinate, Chunk> pair in _chunks)
+            {
+                ChunkCoordinate key = pair.Key;
+                if (key.X < minChunkX || key.X > maxChunkX ||
+                    key.Y < minChunkY || key.Y > maxChunkY ||
+                    key.Z < minChunkZ || key.Z > maxChunkZ)
+                    continue;
+
+                snapshots ??= new Dictionary<ChunkCoordinate, ChunkSnapshot>();
+                snapshots.Add(key, ChunkSnapshot.From(pair.Value));
             }
         }
 
@@ -972,12 +998,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             _baseMaterial,
             snapshots);
     }
-
-    /// <summary>
-    /// Captures the sparse edited storage chunks touched by an arbitrary
-    /// fixed-resolution render region. The region uses voxel coordinates,
-    /// independently of the 16^3 storage chunk dimensions.
-    /// </summary>
     public IVoxelFieldSource CreateRegionSnapshot(
         int originX,
         int originY,
@@ -1666,24 +1686,29 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int chunkY,
         int macroCells)
     {
-        if (macroX < 0 || macroZ < 0 || chunkY < 0 ||
-            macroCells != SpatialMacroSize)
+        if (macroX < 0 || macroZ < 0 || chunkY < 0)
             throw new ArgumentOutOfRangeException(nameof(chunkY));
 
+        int childCount = GetMacroChildCount(macroCells);
         if (chunkY < 64)
             return (GetPotentialVerticalChunkMask(macroX, macroZ, macroCells) &
                 (1UL << chunkY)) != 0;
 
-        if (_editedHighChunkYs.TryGetValue((macroX, macroZ), out HashSet<int>? edited) &&
-            edited.Contains(chunkY))
-            return true;
+        int firstMacroX = checked(macroX * childCount);
+        int firstMacroZ = checked(macroZ * childCount);
+        for (int z = firstMacroZ; z < firstMacroZ + childCount; z++)
+        for (int x = firstMacroX; x < firstMacroX + childCount; x++)
+        {
+            if (_editedHighChunkYs.TryGetValue((x, z), out HashSet<int>? edited) &&
+                edited.Contains(chunkY))
+                return true;
+        }
 
         if (_baseSurfaceRange == null)
             return true;
 
         (int minSurface, int maxSurface) = GetCachedBaseSurfaceRange(
             macroX, macroZ, macroCells);
-
         if (minSurface < 0 || maxSurface < minSurface)
             return false;
 
@@ -1691,12 +1716,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int lastChunkY = Math.Max(firstChunkY, (maxSurface + 1) / ChunkSize);
         return chunkY == 0 || (chunkY >= firstChunkY && chunkY <= lastChunkY);
     }
-
     public ulong GetPotentialVerticalChunkMask(int macroX, int macroZ, int macroCells)
     {
-        if (macroX < 0 || macroZ < 0 || macroCells != SpatialMacroSize)
+        if (macroX < 0 || macroZ < 0)
             throw new ArgumentOutOfRangeException(nameof(macroCells));
 
+        int childCount = GetMacroChildCount(macroCells);
         if (_baseSurfaceRange == null)
             return ulong.MaxValue;
 
@@ -1717,12 +1742,17 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 mask |= 1UL << y;
         }
 
-        if (_editedChunkYMasks.TryGetValue((macroX, macroZ), out ulong editedMask))
-            mask |= editedMask;
+        int firstMacroX = checked(macroX * childCount);
+        int firstMacroZ = checked(macroZ * childCount);
+        for (int z = firstMacroZ; z < firstMacroZ + childCount; z++)
+        for (int x = firstMacroX; x < firstMacroX + childCount; x++)
+        {
+            if (_editedChunkYMasks.TryGetValue((x, z), out ulong editedMask))
+                mask |= editedMask;
+        }
 
         return mask;
     }
-
     /// <summary>
     /// Tests whether clipping this macro column can expose a horizontal solid/air
     /// boundary. The base range is cached, so this does not sample the 3D field.
@@ -1734,12 +1764,19 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int macroCells)
     {
         if (cutLayer < 0 || cutLayer >= Height ||
-            macroX < 0 || macroZ < 0 ||
-            macroCells != SpatialMacroSize)
+            macroX < 0 || macroZ < 0)
             return false;
 
-        if (HasEditsInMacroColumn(macroX, macroZ))
-            return true;
+        int childCount = GetMacroChildCount(macroCells);
+        int firstMacroX = checked(macroX * childCount);
+        int firstMacroZ = checked(macroZ * childCount);
+        for (int z = firstMacroZ; z < firstMacroZ + childCount; z++)
+        for (int x = firstMacroX; x < firstMacroX + childCount; x++)
+        {
+            if (_editedChunkYMasks.ContainsKey((x, z)) ||
+                _editedHighChunkYs.ContainsKey((x, z)))
+                return true;
+        }
 
         if (_baseSurfaceRange == null)
             return true;
@@ -1748,6 +1785,14 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             macroX, macroZ, macroCells);
         return baseRange.Max >= cutLayer;
     }
+
+    private static int GetMacroChildCount(int macroCells)
+    {
+        if (macroCells < SpatialMacroSize || macroCells % SpatialMacroSize != 0)
+            throw new ArgumentOutOfRangeException(nameof(macroCells));
+        return macroCells / SpatialMacroSize;
+    }
+
 
     private (int Min, int Max) GetCachedBaseSurfaceRange(
         int macroX,
@@ -1763,7 +1808,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             _baseSurfaceRangeCacheVersion = BaseVersion;
         }
 
-        var key = (macroX, macroZ);
+        var key = (macroX, macroZ, macroCells);
         if (_baseSurfaceRangeCache.TryGetValue(key, out var cached))
             return cached;
 
