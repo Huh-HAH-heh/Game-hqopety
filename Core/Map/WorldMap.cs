@@ -9,6 +9,9 @@ public sealed class WorldMap
 {
     private readonly ReaderWriterLockSlim _voxelBaseSamplerLock =
         new(LockRecursionPolicy.SupportsRecursion);
+    private readonly int _baseVoxelWidth;
+    private readonly int _baseVoxelHeight;
+    private readonly int _baseVoxelDepth;
 
     public const byte StateEmpty = 0;
     public const byte StateSolid = 1;
@@ -118,11 +121,15 @@ public sealed class WorldMap
         _voxelSurfaceHeightCache = new ushort[columnCount];
         _rangeCache = new TileRange[]?[columnCount];
 
+        _baseVoxelWidth = checked(width * 10);
+        _baseVoxelHeight = layerCount;
+        _baseVoxelDepth = checked(height * 10);
+
         Water = new WaterLayer(width, height);
         Voxels = new SparseVoxelField(
-            checked(width * 10),
-            layerCount,
-            checked(height * 10),
+            _baseVoxelWidth,
+            _baseVoxelHeight,
+            _baseVoxelDepth,
             SampleBaseVoxelDensity,
             SampleBaseVoxelMaterial);
         Voxels.Changed += OnVoxelFieldChanged;
@@ -1550,6 +1557,23 @@ public sealed class WorldMap
     }
 
 
+    /// <summary>
+    /// Expands the voxel volume in metres. Newly added space is empty and does
+    /// not allocate voxel data until a volume is authored there.
+    /// The legacy 1 m tile/navigation grid remains limited to its original map.
+    /// </summary>
+    public bool ExpandVoxelWorld(int widthMeters, int heightMeters, int depthMeters)
+    {
+        if (widthMeters <= 0) throw new ArgumentOutOfRangeException(nameof(widthMeters));
+        if (heightMeters <= 0) throw new ArgumentOutOfRangeException(nameof(heightMeters));
+        if (depthMeters <= 0) throw new ArgumentOutOfRangeException(nameof(depthMeters));
+
+        return Voxels.ExpandTo(
+            checked(widthMeters * 10),
+            checked(heightMeters * 10),
+            checked(depthMeters * 10));
+    }
+
     public void CarveVoxelSphere(Vector3 centerMeters, float radiusMeters) =>
         Voxels.CarveSphere(centerMeters, radiusMeters);
 
@@ -1732,8 +1756,12 @@ public sealed class WorldMap
     /// </summary>
     private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
     {
+        // The original procedural heightfield occupies only the initial map
+        // footprint. Expanded coordinates are genuine empty 3D space until edited.
         if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-            voxelX >= Voxels.Width || voxelY > Voxels.Height || voxelZ >= Voxels.Depth)
+            voxelX >= _baseVoxelWidth ||
+            voxelY >= _baseVoxelHeight ||
+            voxelZ >= _baseVoxelDepth)
             return -1f;
 
         float surfaceHeight = SampleBaseSurfaceHeight(
@@ -1750,7 +1778,9 @@ public sealed class WorldMap
     private ushort SampleBaseVoxelMaterial(int voxelX, int voxelY, int voxelZ)
     {
         if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-            voxelX >= Voxels.Width || voxelY >= Voxels.Height || voxelZ >= Voxels.Depth)
+            voxelX >= _baseVoxelWidth ||
+            voxelY >= _baseVoxelHeight ||
+            voxelZ >= _baseVoxelDepth)
             return 0;
 
         int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
