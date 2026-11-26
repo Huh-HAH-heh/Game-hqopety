@@ -957,7 +957,7 @@ private void PrepareCandidateEntries(
             {
                 if (!HasPotentialVerticalBand(
                         field, groupX, groupZ, y,
-                        storageChunksPerChunk * groupChunks,
+                        storageChunksPerChunk,
                         groupMask, groupSpan))
                     continue;
 
