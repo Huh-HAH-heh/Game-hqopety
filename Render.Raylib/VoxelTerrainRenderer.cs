@@ -946,18 +946,6 @@ private void PrepareCandidateEntries(
                 if (nearestGroupDistanceSquared > viewDistanceSquared)
                     continue;
 
-                Vector3 groupCenter = new(
-                    (groupOriginX + groupSizeX * 0.5f) * voxelSize,
-                    (originY + sizeY * 0.5f) * voxelSize,
-                    (groupOriginZ + groupSizeZ * 0.5f) * voxelSize);
-                float halfGroupX = groupSizeX * voxelSize * 0.5f;
-                float halfGroupY = sizeY * voxelSize * 0.5f;
-                float halfGroupZ = groupSizeZ * voxelSize * 0.5f;
-                float groupRadius = MathF.Sqrt(
-                    halfGroupX * halfGroupX +
-                    halfGroupY * halfGroupY +
-                    halfGroupZ * halfGroupZ);
-
                 for (int macroX = childFirstX; macroX <= childLastX; macroX++)
                 for (int macroZ = childFirstZ; macroZ <= childLastZ; macroZ++)
                 {
