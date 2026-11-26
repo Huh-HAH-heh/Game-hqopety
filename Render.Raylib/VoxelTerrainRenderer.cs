@@ -398,6 +398,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             : -1;
 
         UpdateStableCutLayer(cutEnabled, cutLayer);
+        int stableCutLayer = cutEnabled &&
+            _cutLayerStableFrames >= CutCapSettleFrames
+                ? _stableCutLayer
+                : -1;
 
         List<Candidate> candidates = _candidateScratch;
         candidates.Clear();
@@ -411,7 +415,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             viewportWidth,
             viewportHeight,
             maximumViewDistanceMeters,
-            cutEnabled ? cutLayer : -1,
+            stableCutLayer,
             candidates,
             ref frustumTests,
             ref macroFrustumTests,
@@ -430,11 +434,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         List<(Candidate Candidate, ChunkEntry Entry)> candidateEntries =
             _candidateEntriesScratch;
         candidateEntries.Clear();
-
-        int stableCutLayer = cutEnabled &&
-            _cutLayerStableFrames >= CutCapSettleFrames
-                ? _stableCutLayer
-                : -1;
 
         foreach (Candidate candidate in candidates)
         {
@@ -654,12 +653,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             ulong mask = field.GetPotentialVerticalChunkMask(
                 macroX, macroZ, macroCells);
 
-            if (cutLayer >= 0 &&
-                field.HasPotentialCutSurface(macroX, macroZ, cutLayer, macroCells))
+            if (cutLayer >= 0)
             {
                 int cutStorageY = cutLayer / SparseVoxelField.ChunkSize;
-                if (cutStorageY < 64)
+                if (cutStorageY < 63)
+                    mask &= (1UL << (cutStorageY + 1)) - 1UL;
+
+                if (field.HasPotentialCutSurface(macroX, macroZ, cutLayer, macroCells) &&
+                    cutStorageY < 64)
+                {
                     mask |= 1UL << cutStorageY;
+                }
             }
 
             if (mask == 0)
