@@ -897,7 +897,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             return;
         }
 
-        IVoxelFieldSource source = field;
+        // Capture edited storage bricks and the mesher halo on the main thread.
+        // Worker code must never read the live mutable voxel backing directly.
+        IVoxelFieldSource source = field.CreateChunkSnapshot(
+            key.X, key.Y, key.Z, step: 1);
 
         BuildRequest request = new()
         {
