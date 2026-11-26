@@ -67,7 +67,7 @@ internal sealed class VoxelMeshData
 /// <summary>
 /// Compact signed-density input: configurable N^3 scalar samples plus a one-sample halo.
 /// Positive values are solid, zero/negative values are air.
-/// Samples are X-contiguous: x + y * SampleSide + z * SamplePlane.
+/// Samples are Y-contiguous per XZ column for fast vertical capture.
 /// </summary>
 internal sealed class VoxelChunkBuildInput : IDisposable
 {
@@ -149,30 +149,46 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         _source = source;
         bool hasSolid = false;
         bool hasAir = false;
+        Span<float> densityColumn = stackalloc float[SampleSide];
+        IVoxelColumnDensitySource? columnSource =
+            source as IVoxelColumnDensitySource;
+        int firstWorldY = OriginY - HaloSize * Step;
 
-        int write = 0;
         for (int z = -HaloSize; z <= CellsPerAxis + HaloSize; z++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            for (int y = -HaloSize; y <= CellsPerAxis + HaloSize; y++)
+            int worldZ = OriginZ + z * Step;
+
             for (int x = -HaloSize; x <= CellsPerAxis + HaloSize; x++)
             {
                 int worldX = OriginX + x * Step;
-                int worldY = OriginY + y * Step;
-                int worldZ = OriginZ + z * Step;
-                float density = source.GetDensity(worldX, worldY, worldZ);
-                if (CutLayer != int.MinValue)
-                {
-                    // Intersect the terrain with the half-space below the cut.
-                    // Density samples live at voxel centres (index + 0.5), so
-                    // this signed distance places the cap exactly at CutLayer.
-                    float cutDensity = CutLayer - (worldY + 0.5f);
-                    density = MathF.Min(density, cutDensity);
-                }
+                bool columnCaptured = columnSource != null &&
+                    columnSource.TryGetDensityColumn(
+                        worldX, worldZ, firstWorldY, Step, densityColumn);
 
-                Densities[write++] = density;
-                hasSolid |= density > 0f;
-                hasAir |= density <= 0f;
+                int columnOffset = (x + HaloSize) * SampleSide +
+                    (z + HaloSize) * SamplePlane;
+
+                for (int y = -HaloSize; y <= CellsPerAxis + HaloSize; y++)
+                {
+                    int sampleY = y + HaloSize;
+                    int worldY = OriginY + y * Step;
+                    float density = columnCaptured
+                        ? densityColumn[sampleY]
+                        : source.GetDensity(worldX, worldY, worldZ);
+
+                    if (CutLayer != int.MinValue)
+                    {
+                        // Apply the cut after reading the authoritative density,
+                        // including sparse edits restored by the column sampler.
+                        float cutDensity = CutLayer - (worldY + 0.5f);
+                        density = MathF.Min(density, cutDensity);
+                    }
+
+                    Densities[columnOffset + sampleY] = density;
+                    hasSolid |= density > 0f;
+                    hasAir |= density <= 0f;
+                }
             }
         }
 
@@ -182,6 +198,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
     }
 
     // Sample-point coordinates include the one-sample halo: -1..N+1.
+    // Vertical samples are contiguous within each XZ column.
     public float GetDensity(int x, int y, int z)
     {
         x += HaloSize;
@@ -190,7 +207,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         if ((uint)x >= SampleSide || (uint)y >= SampleSide || (uint)z >= SampleSide)
             return -1f;
 
-        return Densities[x + y * SampleSide + z * SamplePlane];
+        return Densities[y + x * SampleSide + z * SamplePlane];
     }
 
     public byte GetMaterialId(int x, int y, int z)
