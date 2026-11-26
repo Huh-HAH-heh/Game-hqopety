@@ -71,7 +71,7 @@ The base canyon profile is still generated from the existing 1 m XY surface data
 ## Remaining acceptance work
 
 1. Build the full .NET solution and resolve any compile/API issues.
-2. Run the Raylib viewer at close, medium and far zoom. Check the visible 0.1 / 0.5 / 1 / 4 m mesh steps and transitions.
+2. Run the Raylib viewer at close, medium and far zoom. Current renderer remains fixed Step=1; record frame time, number of surface candidates, capture time, mesh time and memory. LOD seam acceptance starts only after the multi-resolution path exists.
 3. Sculpt a sphere, long capsule, box cut, additive arch and sloped ramp. Confirm a bridge/overhang and an air gap below it can exist at the same X/Z coordinates.
 4. Move the cut plane through a carved cave and the upper/lower passages. Check for caps, holes, flicker and seams across 3D chunk boundaries.
 5. Measure frame time and memory while moving the camera and editing at close range. Current per-frame budgets are source-level safeguards, not measured performance results.
