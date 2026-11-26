@@ -1816,6 +1816,17 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             sampleZ / ChunkSize));
     }
 
+    public bool HasEditsInMacroColumn(int macroX, int macroZ)
+    {
+        if (macroX < 0 || macroZ < 0 ||
+            (long)macroX * SpatialMacroSize >= Width ||
+            (long)macroZ * SpatialMacroSize >= Depth)
+            return false;
+
+        return _editedChunkYMasks.ContainsKey((macroX, macroZ)) ||
+            _editedHighChunkYs.ContainsKey((macroX, macroZ));
+    }
+
     /// <summary>
     /// Marks a procedural base-surface change without allocating voxel chunks.
     /// The owner is responsible for invalidating its navigation/surface caches.
