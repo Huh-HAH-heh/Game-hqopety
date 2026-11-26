@@ -205,7 +205,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                                                        renderer?.Synchronize(terrain, null);
+                                                        renderer?.Synchronize(terrain);
                         }
                     }
 
@@ -231,7 +231,7 @@ public static class RaylibTerrainViewer
                         menu.SaveSettings();
                         focusName = "SURFACE";
                         terrain.DisableCutaway();
-                                                    renderer.Synchronize(terrain, null);
+                                                    renderer.Synchronize(terrain);
                         camera.ResetTopDownView();
                         break;
 
@@ -304,7 +304,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                                                        renderer.Synchronize(terrain, null);
+                                                        renderer.Synchronize(terrain);
                             camera.ResetTopDownView();
                         }
                         break;
@@ -367,7 +367,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                                                        renderer.Synchronize(terrain, null);
+                                                        renderer.Synchronize(terrain);
                             camera.ResetTopDownView();
                         }
                     }
@@ -514,7 +514,7 @@ public static class RaylibTerrainViewer
                                             new Vector3(voxelBrushRadiusMeters + 1f);
                                         LogDetachedFragments(renderer.DetachLooseFragments(
                                             worldMap.Voxels, fragmentCenter, fragmentHalfExtents));
-                                    }
+                }
                                     renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                                 else if (voxelEditMode == VoxelEditMode.AddCapsule)
@@ -528,7 +528,7 @@ public static class RaylibTerrainViewer
                                             end,
                                             voxelBrushRadiusMeters,
                                             voxelBrushMaterial);
-                                    }
+                }
                                     renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                                 else if (voxelEditMode is VoxelEditMode.CarveBox or VoxelEditMode.AddBox)
@@ -541,13 +541,12 @@ public static class RaylibTerrainViewer
                                     {
                                         minimum.X -= voxelBrushRadiusMeters;
                                         maximum.X += voxelBrushRadiusMeters;
-                                    }
+                }
                                     if (maximum.Y - minimum.Y < 0.2f)
                                     {
                                         minimum.Y -= voxelBrushRadiusMeters;
                                         maximum.Y += voxelBrushRadiusMeters;
-                                    }
-
+                }
                                     long editVersionBefore = worldMap.Voxels.Version;
                                     renderer.BeginVoxelEdit();
                                     using (worldMap.Voxels.BeginUndoableEdit())
@@ -566,7 +565,7 @@ public static class RaylibTerrainViewer
                                             worldMap.AddVoxelBox(
                                                 minimum, maximum, voxelBrushMaterial);
                                         }
-                                    }
+                }
                                     renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                                 else if (voxelEditMode is VoxelEditMode.CarveRamp or VoxelEditMode.AddRamp)
@@ -598,7 +597,7 @@ public static class RaylibTerrainViewer
                                                 voxelBrushRadiusMeters,
                                                 voxelBrushMaterial);
                                         }
-                                    }
+                }
                                     renderer.EndVoxelEdit(worldMap.Voxels.Version != editVersionBefore);
                                 }
                             }
@@ -621,14 +620,13 @@ public static class RaylibTerrainViewer
                         worldMap.LayerCount - 1);
 
                     terrain.SetCutawayLayer(cutLayer);
-                                    }
+                }
                 else
                 {
                     terrain.DisableCutaway();
-                                    }
-
+                }
                 if (terrainChanged)
-                    renderer.Synchronize(terrain, null);
+                    renderer.Synchronize(terrain);
 
                 if (renderLogger.IsEnabled(RenderLogMode.Detailed))
                     renderLogger.Write(RenderLogMode.Detailed, "WORLD_SYNC",
