@@ -12,6 +12,7 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class RaylibLayerSlicePanel
 {
+    private readonly TerrainPipelineLogger _logger;
     private const float LayerHeightMeters =
         WorldMap.LayerHeightUnits * 0.1f;
 
@@ -21,6 +22,9 @@ internal sealed class RaylibLayerSlicePanel
     private bool _isOpen;
     private bool _draggingSlider;
     private bool _settingsCommitRequested;
+
+    public RaylibLayerSlicePanel(TerrainPipelineLogger logger) =>
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public bool IsOpen => _isOpen;
 
@@ -127,6 +131,8 @@ internal sealed class RaylibLayerSlicePanel
         float maximumCutHeight,
         Font font)
     {
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_LAYER_PANEL", $"open={_isOpen} cut={settings.CutawayEnabled} height={settings.CutawayHeightMeters:0.00} maximum={maximumCutHeight:0.00}");
         Vector2 mouse = GetMousePosition();
         if (_isOpen)
             DrawPanel(settings, maximumCutHeight, font, mouse);
@@ -183,6 +189,8 @@ internal sealed class RaylibLayerSlicePanel
         Vector2 mouse)
     {
         Rectangle panel = GetPanelBounds();
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_PANEL", $"surface=layer-slice bounds=({panel.X:0.0},{panel.Y:0.0},{panel.Width:0.0},{panel.Height:0.0}) height={settings.CutawayHeightMeters:0.00}");
         DrawRectangle(
             (int)panel.X,
             (int)panel.Y,
@@ -308,7 +316,7 @@ internal sealed class RaylibLayerSlicePanel
             new Color(151, 164, 180, 225));
     }
 
-    private static void DrawCenteredText(
+    private void DrawCenteredText(
         Font font,
         string text,
         Rectangle bounds,
@@ -316,15 +324,12 @@ internal sealed class RaylibLayerSlicePanel
         Color color)
     {
         Vector2 measured = MeasureTextEx(font, text, fontSize, 0.4f);
-        DrawTextEx(
-            font,
-            text,
-            new Vector2(
-                MathF.Round(bounds.X + (bounds.Width - measured.X) * 0.5f),
-                MathF.Round(bounds.Y + (bounds.Height - measured.Y) * 0.5f)),
-            fontSize,
-            0.4f,
-            color);
+        Vector2 position = new(
+            MathF.Round(bounds.X + (bounds.Width - measured.X) * 0.5f),
+            MathF.Round(bounds.Y + (bounds.Height - measured.Y) * 0.5f));
+        DrawTextEx(font, text, position, fontSize, 0.4f, color);
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_TEXT", $"surface=layer-slice text=\"{text}\" position=({position.X:0.0},{position.Y:0.0}) size={fontSize:0.0}");
     }
 
     private static Rectangle GetToggleBounds() =>

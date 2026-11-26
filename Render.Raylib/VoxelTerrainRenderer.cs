@@ -1387,6 +1387,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.Surface = entry.UploadingSurface.ToArray();
                 entry.UploadingSurface.Clear();
 
+                if (oldMeshes.Length > 0)
+                    _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UNLOAD", $"kind=surface chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) count={oldMeshes.Length} reason=surface-replaced");
                 foreach (Mesh oldMesh in oldMeshes)
                 {
                     UnloadMesh(oldMesh);
@@ -1412,6 +1414,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.CutCap = entry.UploadingCutCap.ToArray();
                 entry.UploadingCutCap.Clear();
 
+                if (oldMeshes.Length > 0)
+                    _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UNLOAD", $"kind=cut-cap chunk=({queued.Key.X},{queued.Key.Y},{queued.Key.Z}) count={oldMeshes.Length} reason=cut-cap-replaced");
                 foreach (Mesh oldMesh in oldMeshes)
                 {
                     UnloadMesh(oldMesh);
@@ -1845,6 +1849,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.UploadingSurface.Count +
                 entry.UploadingCutCap.Count;
             _totalGpuUnloads += gpuMeshCount;
+            if (gpuMeshCount > 0)
+                _logger.Write(RenderLogMode.Detailed, "GPU_MESH_UNLOAD", $"reason=renderer-dispose surface={entry.Surface.Length} cut={entry.CutCap.Length} partialSurface={entry.UploadingSurface.Count} partialCut={entry.UploadingCutCap.Count}");
             entry.Dispose();
         }
 

@@ -22,6 +22,7 @@ internal enum RaylibMenuAction : byte
 
 internal sealed class RaylibPauseMenu : IDisposable
 {
+    private readonly TerrainPipelineLogger _logger;
     private enum MenuPage : byte
     {
         Closed,
@@ -140,9 +141,10 @@ internal sealed class RaylibPauseMenu : IDisposable
     public int TargetFrameRate => Settings.TargetFps;
     public int PaletteRevision { get; private set; }
 
-    public RaylibPauseMenu(RaylibViewerSettings settings)
+    public RaylibPauseMenu(RaylibViewerSettings settings, TerrainPipelineLogger logger)
     {
         Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         Settings.Normalize();
 
         _smallFont = LoadMenuFont(14, out bool ownsSmallFont);
@@ -260,12 +262,17 @@ internal sealed class RaylibPauseMenu : IDisposable
 
         Vector2 mouse = GetMousePosition();
         Rectangle panel = GetPanelBounds();
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_MENU_BEGIN", $"page={_page} bounds=({panel.X:0.0},{panel.Y:0.0},{panel.Width:0.0},{panel.Height:0.0}) viewport={GetScreenWidth()}x{GetScreenHeight()}");
         DrawPanel(panel);
 
         if (_page == MenuPage.Main)
             DrawMainMenu(panel, mouse);
         else
             DrawSettings(panel, mouse);
+
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_MENU_END", $"page={_page}");
     }
 
     public void SaveSettings() => Settings.Save();
@@ -1091,6 +1098,8 @@ internal sealed class RaylibPauseMenu : IDisposable
 
     private void DrawPanel(Rectangle panel)
     {
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_PANEL", $"surface=pause-menu bounds=({panel.X:0.0},{panel.Y:0.0},{panel.Width:0.0},{panel.Height:0.0})");
         DrawRectangle(
             (int)panel.X,
             (int)panel.Y,
@@ -1148,6 +1157,8 @@ internal sealed class RaylibPauseMenu : IDisposable
             fill);
         DrawRectangleLinesEx(bounds, 1f, new Color(74, 88, 106, 255));
         DrawCenteredLabel(text, bounds, 13f, new Color(241, 245, 250));
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_BUTTON", $"text=\"{text}\" bounds=({bounds.X:0.0},{bounds.Y:0.0},{bounds.Width:0.0},{bounds.Height:0.0}) hovered={hovered} active={active}");
     }
 
     private void DrawCloseButton(Rectangle panel, Vector2 mouse)
@@ -1184,6 +1195,8 @@ internal sealed class RaylibPauseMenu : IDisposable
         Font font = GetFontForSize(fontSize);
         Vector2 position = new(MathF.Round(x), MathF.Round(y));
         DrawTextEx(font, text, position, fontSize, 0.5f, color);
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_TEXT", $"surface=pause-menu text=\"{text}\" position=({position.X:0.0},{position.Y:0.0}) size={fontSize:0.0}");
     }
 
     private void DrawCenteredLabel(string text, Rectangle bounds, float fontSize, Color color)
@@ -1195,6 +1208,8 @@ internal sealed class RaylibPauseMenu : IDisposable
             MathF.Round(bounds.Y + (bounds.Height - measured.Y) * 0.5f - 1f));
 
         DrawTextEx(font, text, position, fontSize, 0.5f, color);
+        if (_logger.IsEnabled(RenderLogMode.Trace))
+            _logger.Write(RenderLogMode.Trace, "UI_TEXT", $"surface=pause-menu text=\"{text}\" position=({position.X:0.0},{position.Y:0.0}) size={fontSize:0.0}");
     }
 
     private Rectangle GetPanelBounds()
