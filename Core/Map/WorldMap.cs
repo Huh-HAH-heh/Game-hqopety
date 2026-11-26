@@ -1764,10 +1764,12 @@ public sealed class WorldMap
             maxX <= 0 || maxZ <= 0 || maxX <= minX || maxZ <= minZ)
             return (-1, -1);
 
-        int firstTileX = Math.Clamp(minX / 10, 0, TileWidth - 1);
-        int firstTileZ = Math.Clamp(minZ / 10, 0, TileHeight - 1);
-        int lastTileX = Math.Clamp((Math.Min(maxX, _baseVoxelWidth) - 1) / 10, 0, TileWidth - 1);
-        int lastTileZ = Math.Clamp((Math.Min(maxZ, _baseVoxelDepth) - 1) / 10, 0, TileHeight - 1);
+        // Bilinear base sampling can read one height anchor beyond either
+        // macro edge. Include that halo so the range can never understate it.
+        int firstTileX = Math.Clamp(minX / 10 - 1, 0, TileWidth - 1);
+        int firstTileZ = Math.Clamp(minZ / 10 - 1, 0, TileHeight - 1);
+        int lastTileX = Math.Clamp((Math.Min(maxX, _baseVoxelWidth) - 1) / 10 + 1, 0, TileWidth - 1);
+        int lastTileZ = Math.Clamp((Math.Min(maxZ, _baseVoxelDepth) - 1) / 10 + 1, 0, TileHeight - 1);
 
         int minimum = int.MaxValue;
         int maximum = -1;
