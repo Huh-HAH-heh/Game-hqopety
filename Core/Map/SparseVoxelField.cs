@@ -555,7 +555,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         private readonly Func<int, int, int, float> _baseDensity;
         private readonly Func<int, int, int, ushort> _baseMaterial;
-        private readonly Dictionary<ChunkCoordinate, ChunkSnapshot> _chunks;
+        private readonly Dictionary<ChunkCoordinate, ChunkSnapshot>? _chunks;
 
         public int Width { get; }
         public int Height { get; }
@@ -567,7 +567,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int depth,
             Func<int, int, int, float> baseDensity,
             Func<int, int, int, ushort> baseMaterial,
-            Dictionary<ChunkCoordinate, ChunkSnapshot> chunks)
+            Dictionary<ChunkCoordinate, ChunkSnapshot>? chunks)
         {
             Width = width;
             Height = height;
@@ -587,7 +587,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int index = x % ChunkSize +
                 (y % ChunkSize) * DensitySamplesPerAxis +
                 (z % ChunkSize) * SamplePlane;
-            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+            if (_chunks != null && _chunks.TryGetValue(key, out ChunkSnapshot? chunk))
             {
                 int found = Chunk.FindDensity(chunk.Density, chunk.Density.Length, index);
                 if (found >= 0)
@@ -889,14 +889,17 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int maxChunkY = maxY / ChunkSize;
         int maxChunkZ = maxZ / ChunkSize;
 
-        Dictionary<ChunkCoordinate, ChunkSnapshot> snapshots = new();
+        Dictionary<ChunkCoordinate, ChunkSnapshot>? snapshots = null;
         for (int z = minChunkZ; z <= maxChunkZ; z++)
         for (int y = minChunkY; y <= maxChunkY; y++)
         for (int x = minChunkX; x <= maxChunkX; x++)
         {
             ChunkCoordinate key = new(x, y, z);
             if (_chunks.TryGetValue(key, out Chunk? chunk))
+            {
+                snapshots ??= new Dictionary<ChunkCoordinate, ChunkSnapshot>();
                 snapshots.Add(key, ChunkSnapshot.From(chunk));
+            }
         }
 
         return new ChunkFieldSnapshot(
@@ -941,14 +944,17 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         int maxChunkY = maxY / ChunkSize;
         int maxChunkZ = maxZ / ChunkSize;
 
-        Dictionary<ChunkCoordinate, ChunkSnapshot> snapshots = new();
+        Dictionary<ChunkCoordinate, ChunkSnapshot>? snapshots = null;
         for (int z = minChunkZ; z <= maxChunkZ; z++)
         for (int y = minChunkY; y <= maxChunkY; y++)
         for (int x = minChunkX; x <= maxChunkX; x++)
         {
             ChunkCoordinate key = new(x, y, z);
             if (_chunks.TryGetValue(key, out Chunk? chunk))
+            {
+                snapshots ??= new Dictionary<ChunkCoordinate, ChunkSnapshot>();
                 snapshots.Add(key, ChunkSnapshot.From(chunk));
+            }
         }
 
         return new ChunkFieldSnapshot(
