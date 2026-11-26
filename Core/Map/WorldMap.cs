@@ -585,9 +585,8 @@ public sealed class WorldMap
 
     // ============================================================
     // VOXEL STORAGE AND COMPATIBILITY VIEWS
-    // SparseVoxelStore is the sole owner of solid/air occupancy.
-    // XY cells are 1 m x 1 m; vertical layers are 0.1 m.
-    // TerrainLayer/TerrainRegion are lazy read/write adapters only.
+    // SparseVoxelField owns density/material overrides. Height anchors are its
+    // compact procedural base; legacy tile ranges are generated on demand.
     // ============================================================
 
     public TerrainLayer GetLayer(
@@ -1114,7 +1113,6 @@ public sealed class WorldMap
             if (!IsInside(globalX, globalY))
                 return;
 
-            int columnIndex = GetColumnIndex(globalX, globalY);
             ClearColumn(globalX, globalY);
             MarkTerrainChanged(globalX, globalY);
         
@@ -1871,10 +1869,21 @@ public sealed class WorldMap
                 return;
             }
 
-            int firstTileX = Math.Clamp(bounds.MinX / 10, 0, TileWidth - 1);
-            int firstTileY = Math.Clamp(bounds.MinZ / 10, 0, TileHeight - 1);
-            int lastTileX = Math.Clamp((Math.Max(bounds.MinX, bounds.MaxX - 1)) / 10, 0, TileWidth - 1);
-            int lastTileY = Math.Clamp((Math.Max(bounds.MinZ, bounds.MaxZ - 1)) / 10, 0, TileHeight - 1);
+            // Edits in the expanded voxel-only area do not touch legacy tile
+            // navigation or the original heightfield surface caches.
+            if (bounds.MaxX <= 0 || bounds.MaxZ <= 0 ||
+                bounds.MinX >= _baseVoxelWidth || bounds.MinZ >= _baseVoxelDepth)
+                return;
+
+            int minVoxelX = Math.Max(0, bounds.MinX);
+            int minVoxelZ = Math.Max(0, bounds.MinZ);
+            int maxVoxelX = Math.Min(_baseVoxelWidth, bounds.MaxX);
+            int maxVoxelZ = Math.Min(_baseVoxelDepth, bounds.MaxZ);
+
+            int firstTileX = minVoxelX / 10;
+            int firstTileY = minVoxelZ / 10;
+            int lastTileX = (maxVoxelX - 1) / 10;
+            int lastTileY = (maxVoxelZ - 1) / 10;
 
             for (int tileY = firstTileY; tileY <= lastTileY; tileY++)
             {
