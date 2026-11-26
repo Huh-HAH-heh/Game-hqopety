@@ -65,9 +65,9 @@ internal sealed class VoxelMeshData
 }
 
 /// <summary>
-/// Compact density input: 64^3 scalar samples plus a one-sample halo on all sides.
-/// Zero is air; non-zero values are byte-sized material IDs.
-/// Blocks are X-contiguous: x + y * SampleSide + z * SamplePlane.
+/// Compact signed-density input: 64^3 scalar samples plus a one-sample halo.
+/// Positive values are solid, zero/negative values are air.
+/// Samples are X-contiguous: x + y * SampleSide + z * SamplePlane.
 /// </summary>
 internal sealed class VoxelChunkBuildInput : IDisposable
 {
