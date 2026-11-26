@@ -241,21 +241,11 @@ internal static class RegionMeshBuilder
         int tileZ)
     {
         const int samplesPerMeter = 10;
-        int minSampleX = tileX * samplesPerMeter;
-        int minSampleZ = tileZ * samplesPerMeter;
-        int firstMacroX = minSampleX / SparseVoxelField.SpatialMacroSize;
-        int lastMacroX = (minSampleX + samplesPerMeter - 1) /
-            SparseVoxelField.SpatialMacroSize;
-        int firstMacroZ = minSampleZ / SparseVoxelField.SpatialMacroSize;
-        int lastMacroZ = (minSampleZ + samplesPerMeter - 1) /
-            SparseVoxelField.SpatialMacroSize;
-
-        for (int macroZ = firstMacroZ; macroZ <= lastMacroZ; macroZ++)
-        for (int macroX = firstMacroX; macroX <= lastMacroX; macroX++)
-            if (voxels.HasEditsInMacroColumn(macroX, macroZ))
-                return true;
-
-        return false;
+        int sampleX = tileX * samplesPerMeter + samplesPerMeter / 2;
+        int sampleZ = tileZ * samplesPerMeter + samplesPerMeter / 2;
+        return voxels.HasEditsInMacroColumn(
+            sampleX / SparseVoxelField.SpatialMacroSize,
+            sampleZ / SparseVoxelField.SpatialMacroSize);
     }
 
     public static Mesh[] BuildVoxelCutSurface(
