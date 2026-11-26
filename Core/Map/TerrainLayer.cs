@@ -3,9 +3,9 @@ using System;
 namespace Core.Map;
 
 /// <summary>
-/// Compatibility view of one Z plane in the authoritative SparseVoxelStore.
-/// TerrainRegion objects are lightweight and created only when a caller requests
-/// the legacy per-layer API; occupancy is never stored in these objects.
+/// Compatibility view of one vertical layer in WorldMap's voxel field.
+/// TerrainRegion objects are created lazily for legacy tile APIs; they do not own
+/// density, occupancy or material storage.
 /// </summary>
 public sealed class TerrainLayer
 {
