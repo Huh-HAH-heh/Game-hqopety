@@ -649,7 +649,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int lastZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z + scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
 
         field.CopyEditedMacroColumns(_editedMacroScratch);
-        foreach ((int macroX, int macroZ) in _editedMacroScratch)
+        foreach (var (macroX, macroZ) in _editedMacroScratch)
         {
             if (macroX < firstX || macroX > lastX ||
                 macroZ < firstZ || macroZ > lastZ)
