@@ -615,10 +615,6 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private const int MaximumUndoEntries = 16;
     private const long MaximumUndoBytes = 64L * 1024 * 1024;
-    private const long ChunkSnapshotBytes =
-        SampleCount * (sizeof(short) + sizeof(byte)) +
-        CellCount * (sizeof(ushort) + sizeof(byte));
-
     private readonly ConcurrentDictionary<ChunkCoordinate, Chunk> _chunks = new();
     private readonly HashSet<(int X, int Z)> _editedChunkColumns = new();
     private readonly List<EditHistoryEntry> _undoHistory = new();
@@ -629,9 +625,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private long _undoHistoryBytes;
     private bool _isRestoringHistory;
 
-    public int Width { get; }
-    public int Height { get; }
-    public int Depth { get; }
+    public int Width { get; private set; }
+    public int Height { get; private set; }
+    public int Depth { get; private set; }
 
     /// <summary>
     /// Maps a chunk-local halo sample index (0..18) onto the shared global
@@ -662,6 +658,27 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     }
 
     public int ChunkCount => _chunks.Count;
+    public long EstimatedStorageBytes
+    {
+        get
+        {
+            long bytes = 0;
+            foreach (Chunk chunk in _chunks.Values)
+                bytes += chunk.EstimatedBytes;
+            return bytes;
+        }
+    }
+    public int SparseChunkCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (Chunk chunk in _chunks.Values)
+                if (!chunk.IsEmpty && chunk.EstimatedBytes < 16_000)
+                    count++;
+            return count;
+        }
+    }
     public int UndoCount => _undoHistory.Count;
     public int RedoCount => _redoHistory.Count;
     public bool CanUndo => _undoHistory.Count > 0;
@@ -687,6 +704,30 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         Depth = depth;
         _baseDensity = baseDensity ?? throw new ArgumentNullException(nameof(baseDensity));
         _baseMaterial = baseMaterial ?? throw new ArgumentNullException(nameof(baseMaterial));
+    }
+
+    /// <summary>
+    /// Expands the logical voxel bounds without allocating new voxel arrays.
+    /// Existing chunk coordinates and edits remain unchanged.
+    /// </summary>
+    public bool ExpandTo(int width, int height, int depth)
+    {
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        if (depth <= 0) throw new ArgumentOutOfRangeException(nameof(depth));
+        if (width < Width || height < Height || depth < Depth)
+            throw new ArgumentOutOfRangeException(nameof(width), "Voxel storage can expand but cannot shrink.");
+
+        if (width == Width && height == Height && depth == Depth)
+            return false;
+
+        Width = width;
+        Height = height;
+        Depth = depth;
+        Version++;
+        BaseVersion++;
+        Changed?.Invoke(new VoxelBounds(0, 0, 0, Width, Height, Depth));
+        return true;
     }
 
     /// <summary>
@@ -2068,8 +2109,11 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     /// <summary>Writes one native 0.1 m cubic cell using an exact box CSG operation.</summary>
     public void SetCell(int x, int y, int z, ushort materialId)
     {
-        if (!IsInsideCell(x, y, z))
+        if (x < 0 || y < 0 || z < 0)
             throw new ArgumentOutOfRangeException(nameof(x));
+        ExpandTo(Math.Max(Width, checked(x + 1)),
+            Math.Max(Height, checked(y + 1)),
+            Math.Max(Depth, checked(z + 1)));
 
         Vector3 minimum = new(
             x * VoxelSizeMeters,
@@ -2927,9 +2971,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
             anyDifference = true;
             if (before != null)
-                estimatedBytes += ChunkSnapshotBytes;
+                estimatedBytes += before.EstimatedBytes;
             if (current != null)
-                estimatedBytes += ChunkSnapshotBytes;
+                estimatedBytes += current.EstimatedBytes;
         }
 
         if (!anyDifference)
@@ -3035,14 +3079,23 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
     private VoxelBounds ClampCellBounds(
         int minX, int minY, int minZ,
-        int maxX, int maxY, int maxZ) =>
-        new(
-            Math.Clamp(minX, 0, Width),
-            Math.Clamp(minY, 0, Height),
-            Math.Clamp(minZ, 0, Depth),
-            Math.Clamp(maxX, 0, Width),
-            Math.Clamp(maxY, 0, Height),
-            Math.Clamp(maxZ, 0, Depth));
+        int maxX, int maxY, int maxZ)
+    {
+        minX = Math.Max(0, minX);
+        minY = Math.Max(0, minY);
+        minZ = Math.Max(0, minZ);
+        maxX = Math.Max(minX, maxX);
+        maxY = Math.Max(minY, maxY);
+        maxZ = Math.Max(minZ, maxZ);
+
+        int width = Math.Max(Width, maxX);
+        int height = Math.Max(Height, maxY);
+        int depth = Math.Max(Depth, maxZ);
+        if (width != Width || height != Height || depth != Depth)
+            ExpandTo(width, height, depth);
+
+        return new VoxelBounds(minX, minY, minZ, maxX, maxY, maxZ);
+    }
 
     private void GetCellBounds(Vector3 center, float radius, out VoxelBounds bounds)
     {
