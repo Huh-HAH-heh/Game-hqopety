@@ -1,6 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Numerics;
+using System.Threading;
 using Core.Map;
 using RimClone.Render.Raylib;
 
@@ -9,27 +9,18 @@ internal static class Program
     private static int Main()
     {
         int failures = 0;
-        Console.WriteLine("=== RimClone byte-grid / greedy voxel tests ===");
+        Console.WriteLine("=== RimClone signed-density Surface Nets tests ===");
         Console.WriteLine($"Runtime: {Environment.Version} | CPU: {Environment.ProcessorCount}");
 
-        Run("16^3 input uses a flat 18^3 byte grid",
-            TestFlatByteGrid, ref failures);
-        Run("Adjacent chunks read identical shared halo blocks",
-            TestSharedBlockHalo, ref failures);
-        Run("Greedy meshing merges a flat block surface into one quad",
-            TestGreedyPlane, ref failures);
-        Run("Different block IDs keep material faces separate",
-            TestGreedyMaterialBoundary, ref failures);
-        Run("Voxel cut exposes a flat block cap",
-            TestGreedyCutCap, ref failures);
-        Run("Fully enclosed solid chunk emits no faces",
-            TestEnclosedChunkEarlyOut, ref failures);
-        Run("Greedy meshing creates the six internal tunnel walls",
-            TestEnclosedTunnel, ref failures);
-        Run("Empty chunk exits before greedy meshing",
-            TestEmptyChunkEarlyOut, ref failures);
-        Run("Greedy mesher writes only axis-aligned constant normals",
-            TestAxisNormals, ref failures);
+        Run("Chunk input captures a flat 67^3 density window", TestDensityCapture, ref failures);
+        Run("Adjacent chunks sample the same shared halo plane", TestSharedHalo, ref failures);
+        Run("Flat procedural density produces a continuous horizontal surface", TestFlatSurface, ref failures);
+        Run("Voxel cut creates a horizontal cap at the requested world height", TestCutSurface, ref failures);
+        Run("Enclosed solid chunk exits without creating a surface", TestEnclosedSolid, ref failures);
+        Run("Three-dimensional tunnel walls are meshed inside solid terrain", TestTunnelSurface, ref failures);
+        Run("Empty chunks exit before Surface Nets", TestEmptyField, ref failures);
+        Run("Density capture observes cancellation", TestCaptureCancellation, ref failures);
+        Run("Surface normals are finite and normalized", TestNormalQuality, ref failures);
 
         Console.WriteLine();
         Console.WriteLine($"RESULT: {(failures == 0 ? "PASS" : "FAIL")} | failed={failures}");
@@ -55,123 +46,62 @@ internal static class Program
         }
     }
 
-    private static (bool Passed, string Detail) TestFlatByteGrid()
+    private static (bool Passed, string Detail) TestDensityCapture()
     {
-        SyntheticBlockField field = new(128, 128, 128, surfaceHeight: 80);
-        using VoxelChunkBuildInput input = new(field, 1, 4, 1);
-        input.CaptureAll(field);
+        SyntheticDensityField field = new(256, 256, 256, surfaceHeight: 80);
+        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
 
         bool correct =
-            input.CellsPerAxis == 16 &&
-            input.SampleSide == 18 &&
-            input.SamplePlane == 324 &&
-            input.TotalSamples == 5832 &&
-            input.Blocks.Length >= input.TotalSamples &&
+            input.CellsPerAxis == 64 &&
+            input.SampleSide == 67 &&
+            input.SamplePlane == 4489 &&
+            input.TotalSamples == 300763 &&
+            input.Densities.Length >= input.TotalSamples &&
             input.HasPotentialSurface &&
             input.IsCaptured;
 
         return (
             correct,
-            $"cells={input.CellsPerAxis}^3, samples={input.SampleSide}^3, bytes={input.TotalSamples}, solid={input.HasPotentialSurface}");
+            $"cells={input.CellsPerAxis}^3 samples={input.SampleSide}^3 total={input.TotalSamples} potential={input.HasPotentialSurface}");
     }
 
-    private static (bool Passed, string Detail) TestSharedBlockHalo()
+    private static (bool Passed, string Detail) TestSharedHalo()
     {
-        SyntheticBlockField field = new(128, 128, 128, surfaceHeight: 80);
-        using VoxelChunkBuildInput left = Capture(field, 1, 4, 1);
-        using VoxelChunkBuildInput right = Capture(field, 2, 4, 1);
+        SyntheticDensityField field = new(256, 256, 256, surfaceHeight: 80);
+        using VoxelChunkBuildInput left = Capture(field, 1, 1, 1);
+        using VoxelChunkBuildInput right = Capture(field, 2, 1, 1);
 
-        int side = left.SampleSide;
-        int plane = left.SamplePlane;
         int mismatches = 0;
-
-        for (int z = 0; z < side; z++)
-        for (int y = 0; y < side; y++)
+        for (int z = -1; z <= 65; z++)
+        for (int y = -1; y <= 65; y++)
         {
-            byte a = left.Blocks[side - 1 + y * side + z * plane];
-            byte b = right.Blocks[1 + y * side + z * plane];
-            if (a != b)
+            if (MathF.Abs(
+                left.GetDensity(64, y, z) -
+                right.GetDensity(0, y, z)) > 1e-6f)
+            {
                 mismatches++;
+            }
         }
 
-        return (
-            mismatches == 0,
-            $"shared block plane mismatches={mismatches}");
+        return (mismatches == 0, $"shared density samples mismatches={mismatches}");
     }
 
-    private static (bool Passed, string Detail) TestGreedyPlane()
+    private static (bool Passed, string Detail) TestFlatSurface()
     {
-        SyntheticBlockField field = new(128, 128, 128, surfaceHeight: 80);
-        using VoxelChunkBuildInput input = Capture(field, 1, 4, 1);
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
+        SyntheticDensityField field = new(256, 256, 256, surfaceHeight: 80);
+        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, new TerrainPalette());
 
         try
         {
             int vertices = CountVertices(meshes);
             int triangles = CountTriangles(meshes);
             bool flat = AllVerticesAtHeight(meshes, 8f);
-
-            bool merged = vertices == 4 && triangles == 2;
-            return (
-                merged && flat,
-                $"meshes={meshes.Length}, vertices={vertices}, triangles={triangles}, topPlane={flat}");
-        }
-        finally
-        {
-            ReturnMeshData(meshes);
-        }
-    }
-
-    private static (bool Passed, string Detail) TestGreedyMaterialBoundary()
-    {
-        SyntheticBlockField field = new(
-            128, 128, 128,
-            materialSplit: 24,
-            surfaceHeight: 80);
-        using VoxelChunkBuildInput input = Capture(field, 1, 4, 1);
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
-
-        try
-        {
-            HashSet<uint> colors = CollectColors(meshes);
-            int vertices = CountVertices(meshes);
-            int triangles = CountTriangles(meshes);
-
-            bool split = vertices == 8 && triangles == 4 && colors.Count == 2;
-            return (
-                split,
-                $"vertices={vertices}, triangles={triangles}, blockColors={colors.Count}");
-        }
-        finally
-        {
-            ReturnMeshData(meshes);
-        }
-    }
-
-    private static (bool Passed, string Detail) TestGreedyCutCap()
-    {
-        const int cutLayer = 50;
-        const float cutHeightMeters = cutLayer * SparseVoxelField.VoxelSizeMeters;
-        SyntheticBlockField field = new(128, 128, 128, surfaceHeight: 80);
-
-        using VoxelChunkBuildInput input = new(field, 1, 3, 1, cutLayer);
-        input.CaptureAll(field);
-
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
-
-        try
-        {
-            int vertices = CountVertices(meshes);
-            int triangles = CountTriangles(meshes);
-            bool flat = AllVerticesAtHeight(meshes, cutHeightMeters);
             bool upward = AllNormalsPointUp(meshes);
 
             return (
-                vertices == 4 && triangles == 2 && flat && upward,
-                $"vertices={vertices}, triangles={triangles}, flat={flat}, upward={upward}");
+                vertices > 0 && triangles > 0 && flat && upward,
+                $"meshes={meshes.Length} vertices={vertices} triangles={triangles} y=8m flat={flat} upward={upward}");
         }
         finally
         {
@@ -179,84 +109,77 @@ internal static class Program
         }
     }
 
-    private static (bool Passed, string Detail) TestEnclosedChunkEarlyOut()
+    private static (bool Passed, string Detail) TestCutSurface()
     {
-        SyntheticBlockField field = new(128, 128, 128, solidAll: true);
-        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
+        const int cutLayer = 50;
+        const float cutHeightMeters = cutLayer * SparseVoxelField.VoxelSizeMeters;
+        SyntheticDensityField field = new(256, 256, 256, surfaceHeight: 80);
 
-        try
-        {
-            bool noFaces = meshes.Length == 0;
-            return (
-                input.HasPotentialSurface && noFaces,
-                $"solid={input.HasPotentialSurface}, meshes={meshes.Length}, faces=0");
-        }
-        finally
-        {
-            ReturnMeshData(meshes);
-        }
-    }
-
-    private static (bool Passed, string Detail) TestEnclosedTunnel()
-    {
-        SyntheticBlockField field = new(128, 128, 128, solidAll: true, tunnel: true);
-        using VoxelChunkBuildInput input = Capture(field, 1, 4, 1);
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
-
-        try
-        {
-            int vertices = CountVertices(meshes);
-            int triangles = CountTriangles(meshes);
-            bool internalWall = false;
-
-            foreach (VoxelMeshData mesh in meshes)
-            {
-                ReadOnlySpan<Vector3> positions = mesh.Vertices;
-                ReadOnlySpan<Vector3> normals = mesh.Normals;
-                for (int i = 0; i < positions.Length; i++)
-                {
-                    if (MathF.Abs(positions[i].X - 2f) < 1e-5f &&
-                        positions[i].Y >= 6.8f && positions[i].Y <= 7.2f &&
-                        positions[i].Z >= 2f && positions[i].Z <= 2.8f &&
-                        normals[i] == Vector3.UnitX)
-                    {
-                        internalWall = true;
-                        break;
-                    }
-                }
-
-                if (internalWall)
-                    break;
-            }
-
-            return (
-                vertices == 24 && triangles == 12 && internalWall,
-                $"vertices={vertices}, triangles={triangles}, internalTunnelWall={internalWall}");
-        }
-        finally
-        {
-            ReturnMeshData(meshes);
-        }
-    }
-
-    private static (bool Passed, string Detail) TestEmptyChunkEarlyOut()
-    {
-        SyntheticBlockField field = new(128, 128, 128, empty: true);
-        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        using VoxelChunkBuildInput input = new(
+            field, 1, 0, 1, cutLayer, cellsPerAxis: 64);
         input.CaptureAll(field);
 
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, new TerrainPalette());
+        try
+        {
+            bool hasCap = HasUpwardSurfaceAtHeight(meshes, cutHeightMeters);
+            return (
+                hasCap,
+                $"cut={cutHeightMeters:0.0}m horizontalCap={hasCap} vertices={CountVertices(meshes)}");
+        }
+        finally
+        {
+            ReturnMeshData(meshes);
+        }
+    }
+
+    private static (bool Passed, string Detail) TestEnclosedSolid()
+    {
+        SyntheticDensityField field = new(256, 256, 256, solidAll: true);
+        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, new TerrainPalette());
+
+        try
+        {
+            bool noSurface = !input.HasPotentialSurface && meshes.Length == 0;
+            return (noSurface, $"potential={input.HasPotentialSurface} meshes={meshes.Length}");
+        }
+        finally
+        {
+            ReturnMeshData(meshes);
+        }
+    }
+
+    private static (bool Passed, string Detail) TestTunnelSurface()
+    {
+        SyntheticDensityField field = new(256, 256, 256, solidAll: true, tunnel: true);
+        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, new TerrainPalette());
+
+        try
+        {
+            bool hasInteriorSurface = CountVertices(meshes) > 0 &&
+                HasVertexNear(meshes, new Vector3(9.0f, 9.0f, 9.0f), 0.8f);
+            return (
+                input.HasPotentialSurface && hasInteriorSurface,
+                $"potential={input.HasPotentialSurface} vertices={CountVertices(meshes)} tunnelWall={hasInteriorSurface}");
+        }
+        finally
+        {
+            ReturnMeshData(meshes);
+        }
+    }
+
+    private static (bool Passed, string Detail) TestEmptyField()
+    {
+        SyntheticDensityField field = new(256, 256, 256, empty: true);
+        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, new TerrainPalette());
 
         try
         {
             bool empty = !input.HasPotentialSurface && meshes.Length == 0;
-            return (
-                empty && field.MaterialReadCount == input.TotalSamples,
-                $"potentialSurface={input.HasPotentialSurface}, meshes={meshes.Length}, blockReads={field.MaterialReadCount}");
+            return (empty, $"potential={input.HasPotentialSurface} meshes={meshes.Length}");
         }
         finally
         {
@@ -264,12 +187,29 @@ internal static class Program
         }
     }
 
-    private static (bool Passed, string Detail) TestAxisNormals()
+    private static (bool Passed, string Detail) TestCaptureCancellation()
     {
-        SyntheticBlockField field = new(128, 128, 128, surfaceHeight: 80);
-        using VoxelChunkBuildInput input = Capture(field, 1, 4, 1);
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
+        SyntheticDensityField field = new(256, 256, 256, surfaceHeight: 80);
+        using VoxelChunkBuildInput input = new(field, 1, 1, 1);
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+
+        try
+        {
+            input.CaptureAll(cancellation.Token);
+            return (false, "capture ignored a pre-cancelled token");
+        }
+        catch (OperationCanceledException)
+        {
+            return (true, "capture stopped before sampling");
+        }
+    }
+
+    private static (bool Passed, string Detail) TestNormalQuality()
+    {
+        SyntheticDensityField field = new(256, 256, 256, surfaceHeight: 80);
+        using VoxelChunkBuildInput input = Capture(field, 1, 1, 1);
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, new TerrainPalette());
 
         try
         {
@@ -278,16 +218,16 @@ internal static class Program
             foreach (Vector3 normal in mesh.Normals)
             {
                 count++;
-                bool axisAligned =
-                    (normal.X == 1f || normal.X == -1f) && normal.Y == 0f && normal.Z == 0f ||
-                    (normal.Y == 1f || normal.Y == -1f) && normal.X == 0f && normal.Z == 0f ||
-                    (normal.Z == 1f || normal.Z == -1f) && normal.X == 0f && normal.Y == 0f;
-
-                if (!axisAligned)
+                if (!float.IsFinite(normal.X) ||
+                    !float.IsFinite(normal.Y) ||
+                    !float.IsFinite(normal.Z) ||
+                    MathF.Abs(normal.LengthSquared() - 1f) > 0.001f)
+                {
                     return (false, $"invalid normal={normal}");
+                }
             }
 
-            return (count > 0, $"normals={count}, all-axis-aligned={count > 0}");
+            return (count > 0, $"normals={count} all-finite-unit={count > 0}");
         }
         finally
         {
@@ -295,23 +235,32 @@ internal static class Program
         }
     }
 
-    private static HashSet<uint> CollectColors(VoxelMeshData[] meshes)
+    private static bool HasUpwardSurfaceAtHeight(VoxelMeshData[] meshes, float height)
     {
-        HashSet<uint> colors = new();
         foreach (VoxelMeshData mesh in meshes)
         {
-            ReadOnlySpan<byte> rgba = mesh.Colors;
-            for (int i = 0; i < rgba.Length; i += 4)
+            ReadOnlySpan<Vector3> positions = mesh.Vertices;
+            ReadOnlySpan<Vector3> normals = mesh.Normals;
+            for (int i = 0; i < positions.Length; i++)
             {
-                uint packed = (uint)rgba[i] |
-                    ((uint)rgba[i + 1] << 8) |
-                    ((uint)rgba[i + 2] << 16) |
-                    ((uint)rgba[i + 3] << 24);
-                colors.Add(packed);
+                if (MathF.Abs(positions[i].Y - height) <= 0.001f &&
+                    normals[i].Y > 0.9f)
+                    return true;
             }
         }
 
-        return colors;
+        return false;
+    }
+
+    private static bool HasVertexNear(VoxelMeshData[] meshes, Vector3 point, float radius)
+    {
+        float radiusSquared = radius * radius;
+        foreach (VoxelMeshData mesh in meshes)
+        foreach (Vector3 vertex in mesh.Vertices)
+            if (Vector3.DistanceSquared(vertex, point) <= radiusSquared)
+                return true;
+
+        return false;
     }
 
     private static bool AllVerticesAtHeight(VoxelMeshData[] meshes, float height)
@@ -321,8 +270,7 @@ internal static class Program
         foreach (Vector3 vertex in mesh.Vertices)
         {
             count++;
-            if (!float.IsFinite(vertex.Y) ||
-                MathF.Abs(vertex.Y - height) > 1e-5f)
+            if (!float.IsFinite(vertex.Y) || MathF.Abs(vertex.Y - height) > 0.001f)
                 return false;
         }
 
@@ -336,7 +284,7 @@ internal static class Program
         foreach (Vector3 normal in mesh.Normals)
         {
             count++;
-            if (normal != Vector3.UnitY)
+            if (normal.Y < 0.9f)
                 return false;
         }
 
@@ -366,8 +314,7 @@ internal static class Program
         int chunkZ,
         int cutLayer = int.MinValue)
     {
-        VoxelChunkBuildInput input = new(
-            source, chunkX, chunkY, chunkZ, cutLayer);
+        VoxelChunkBuildInput input = new(source, chunkX, chunkY, chunkZ, cutLayer);
         input.CaptureAll(source);
         return input;
     }
@@ -378,63 +325,53 @@ internal static class Program
             mesh.ReturnCpuArrays();
     }
 
-    private sealed class SyntheticBlockField : IVoxelFieldSource
+    private sealed class SyntheticDensityField : IVoxelFieldSource
     {
-        public int Width { get; }
-        public int Height { get; }
-        public int Depth { get; }
-        public int MaterialReadCount { get; private set; }
-
-        private readonly int _materialSplit;
+        private readonly int _surfaceHeight;
         private readonly bool _empty;
         private readonly bool _solidAll;
         private readonly bool _tunnel;
-        private readonly int _surfaceHeight;
 
-        public SyntheticBlockField(
+        public int Width { get; }
+        public int Height { get; }
+        public int Depth { get; }
+
+        public SyntheticDensityField(
             int width,
             int height,
             int depth,
-            int materialSplit = int.MaxValue,
+            int surfaceHeight = 20,
             bool empty = false,
             bool solidAll = false,
-            bool tunnel = false,
-            int surfaceHeight = 20)
+            bool tunnel = false)
         {
             Width = width;
             Height = height;
             Depth = depth;
-            _materialSplit = materialSplit;
+            _surfaceHeight = surfaceHeight;
             _empty = empty;
             _solidAll = solidAll;
             _tunnel = tunnel;
-            _surfaceHeight = surfaceHeight;
         }
 
-        public float GetDensity(int x, int y, int z) =>
-            GetMaterialId(x, y, z) == 0 ? -1f : 1f;
-
-        public ushort GetMaterialId(int x, int y, int z)
+        public float GetDensity(int x, int y, int z)
         {
-            MaterialReadCount++;
-
-            if (x < 0 || y < 0 || z < 0 ||
-                x >= Width || y >= Height || z >= Depth ||
-                _empty ||
-                (!_solidAll && y >= _surfaceHeight))
-            {
-                return 0;
-            }
+            if ((uint)x >= Width || (uint)y >= Height || (uint)z >= Depth || _empty)
+                return -1f;
 
             if (_tunnel &&
-                x >= 20 && x < 28 &&
-                y >= 68 && y < 72 &&
-                z >= 20 && z < 28)
-            {
-                return 0;
-            }
+                x >= 90 && x < 98 &&
+                y >= 90 && y < 94 &&
+                z >= 90 && z < 98)
+                return -1f;
 
-            return x < _materialSplit ? (ushort)1 : (ushort)2;
+            if (_solidAll)
+                return 1f;
+
+            return _surfaceHeight - (y + 0.5f);
         }
+
+        public ushort GetMaterialId(int x, int y, int z) =>
+            GetDensity(x, y, z) > 0f ? (ushort)1 : (ushort)0;
     }
 }
