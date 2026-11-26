@@ -144,7 +144,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         TerrainRenderSnapshot terrain,
         TerrainPalette palette,
         TerrainRenderMode mode,
-        TerrainRenderSnapshot? coarseTerrain = null,
         TerrainPipelineLogger? logger = null)
     {
         _logger = logger ?? new TerrainPipelineLogger(false, RenderLogMode.Detailed);
@@ -199,7 +198,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _hasVoxelShader = hasVoxelShader;
         _material = material;
 
-        Synchronize(terrain, null);
+        Synchronize(terrain);
 
         if (mode == TerrainRenderMode.Voxel)
         {
@@ -237,7 +236,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
     public void Synchronize(
         TerrainRenderSnapshot terrain,
-        TerrainRenderSnapshot? coarseTerrain,
         bool forceRebuild = false)
     {
         ThrowIfDisposed();
