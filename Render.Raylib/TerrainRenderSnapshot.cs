@@ -108,30 +108,6 @@ public sealed class TerrainRenderSnapshot
     }
 
     /// <summary>
-    /// Creates a coarser presentation snapshot from the same voxel world.
-    /// Each coarse cell samples one real source column and retains its full
-    /// vertical solid/air intervals when that source column is complex.
-    /// The underlying WorldMap is never resampled or modified.
-    /// </summary>
-    internal static TerrainRenderSnapshot CreateVoxelLod(
-        WorldMap worldMap,
-        int cellSizeInMeters = 4)
-    {
-        ArgumentNullException.ThrowIfNull(worldMap);
-        if (cellSizeInMeters <= VoxelRenderRegionSizeInTiles ||
-            cellSizeInMeters > TerrainRegion.TilesPerSide ||
-            TerrainRegion.TilesPerSide % cellSizeInMeters != 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(cellSizeInMeters));
-        }
-
-        return new TerrainRenderSnapshot(
-            worldMap,
-            cellSizeInMeters,
-            voxelMode: true);
-    }
-
-    /// <summary>
     /// Refreshes presentation data only when source terrain changes. A full
     /// vertical interval copy is retained only for non-simple or volume-edited
     /// columns; ordinary solid terrain stays compact.
@@ -209,9 +185,8 @@ public sealed class TerrainRenderSnapshot
 
         _complexColumnRanges.Clear();
 
-        // Every voxel LOD resolves complex columns on demand from WorldMap.
-        // Its range cache retains queried columns, avoiding a full coarse-grid
-        // scan whenever the terrain changes.
+        // Voxel mode resolves complex columns on demand from WorldMap.
+        // The base height snapshot remains compact and is refreshed separately.
         if (IsVoxelMode)
         {
             _complexSourceWorldVersion = worldMap.TerrainVersion;
@@ -277,9 +252,8 @@ public sealed class TerrainRenderSnapshot
 
         if (IsVoxelMode)
         {
-            // Both fine and coarse voxel LODs sample an exact source column.
-            // Simple columns use the refreshed compact snapshot; complex
-            // columns are fetched lazily from WorldMap's shared range cache.
+            // Voxel mode samples an exact source column. Simple columns use
+            // the compact snapshot; complex columns use WorldMap's range cache.
             int sourceX = regionX * RegionSize + RegionSize / 2;
             int sourceY = regionY * RegionSize + RegionSize / 2;
             if (_worldMap.IsColumnSimpleFill(sourceX, sourceY))
