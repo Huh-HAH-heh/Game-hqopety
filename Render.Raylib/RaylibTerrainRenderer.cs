@@ -157,32 +157,89 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _densityVoxelRenderer = mode == TerrainRenderMode.Voxel
             ? new VoxelTerrainRenderer(palette, _logger)
             : null;
-        _coarseTerrain = mode == TerrainRenderMode.Voxel &&
-            coarseTerrain?.IsVoxelMode == true
-                ? coarseTerrain
-                : null;
+        _coarseTerrain = null;
+        _usingCoarseLod = false;
 
         _regionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
-        _coarseRegionMeshes = _coarseTerrain != null
-            ? new RegionGpuMesh?[terrain.StorageRegionCount]
-            : Array.Empty<RegionGpuMesh?>();
+        _coarseRegionMeshes = Array.Empty<RegionGpuMesh?>();
         _visibleRegionMeshes = new RegionGpuMesh?[terrain.StorageRegionCount];
 
         Material material = LoadMaterialDefault();
-        _voxelShader = default;
-        _cutEnabledLocation = -1;
-        _cutHeightLocation = -1;
-        _sunDirectionLocation = -1;
-        _ambientLightLocation = -1;
-        _sunIntensityLocation = -1;
-        _hasVoxelShader = false;
+        Shader voxelShader = default;
+        int cutEnabledLocation = -1;
+        int cutHeightLocation = -1;
+        int sunDirectionLocation = -1;
+        int ambientLightLocation = -1;
+        int sunIntensityLocation = -1;
+        bool hasVoxelShader = false;
 
+        if (mode == TerrainRenderMode.Voxel)
+        {
+            voxelShader = LoadShaderFromMemory(VoxelVertexShader, VoxelFragmentShader);
+            if (!IsShaderValid(voxelShader))
+                throw new InvalidOperationException("The static voxel terrain shader could not be created.");
+
+            cutEnabledLocation = GetShaderLocation(voxelShader, "uCutEnabled");
+            cutHeightLocation = GetShaderLocation(voxelShader, "uCutHeight");
+            sunDirectionLocation = GetShaderLocation(voxelShader, "uSunDirection");
+            ambientLightLocation = GetShaderLocation(voxelShader, "uAmbientLight");
+            sunIntensityLocation = GetShaderLocation(voxelShader, "uSunIntensity");
+
+            if (cutEnabledLocation < 0 || cutHeightLocation < 0 ||
+                sunDirectionLocation < 0 || ambientLightLocation < 0 ||
+                sunIntensityLocation < 0)
+            {
+                UnloadShader(voxelShader);
+                throw new InvalidOperationException("The static voxel terrain shader is missing a required uniform.");
+            }
+
+            material.Shader = voxelShader;
+            hasVoxelShader = true;
+        }
+
+        _voxelShader = voxelShader;
+        _cutEnabledLocation = cutEnabledLocation;
+        _cutHeightLocation = cutHeightLocation;
+        _sunDirectionLocation = sunDirectionLocation;
+        _ambientLightLocation = ambientLightLocation;
+        _sunIntensityLocation = sunIntensityLocation;
+        _hasVoxelShader = hasVoxelShader;
         _material = material;
 
-        // Mesh creation is deliberately lazy. Only visible storage regions are
-        // meshed, with a bounded per-frame upload budget.
-        Synchronize(terrain, _coarseTerrain);
-        _logger.Write(RenderLogMode.Detailed, "TERRAIN_RENDERER_CREATED", $"mode={_mode} regions={terrain.StorageRegionCount} voxelBackend={_densityVoxelRenderer != null}");
+        Synchronize(terrain, null);
+
+        if (mode == TerrainRenderMode.Voxel)
+        {
+            Stopwatch buildTimer = Stopwatch.StartNew();
+            _logger.Write(RenderLogMode.Detailed, "VOXEL_BASE_BUILD_START",
+                $"regions={terrain.StorageRegionCount} regionSize={terrain.StorageRegionSize} resolution=1m indexedSurface=true");
+
+            try
+            {
+                for (int i = 0; i < _regionMeshes.Length; i++)
+                {
+                    int regionX = i % terrain.StorageRegionsX;
+                    int regionY = i / terrain.StorageRegionsX;
+                    _regionMeshes[i] = RegionMeshBuilder.BuildVoxel(
+                        terrain, regionX, regionY, _palette, _paletteVersion);
+                }
+            }
+            catch
+            {
+                DisposeMeshes(_regionMeshes);
+                _densityVoxelRenderer?.Dispose();
+                UnloadMaterial(_material);
+                if (_hasVoxelShader)
+                    UnloadShader(_voxelShader);
+                throw;
+            }
+
+            _logger.Write(RenderLogMode.Detailed, "VOXEL_BASE_BUILD_COMPLETE",
+                $"regions={_regionMeshes.Length} built={_regionMeshes.Length} elapsedMs={buildTimer.Elapsed.TotalMilliseconds:0.000} mode=all-at-once");
+        }
+
+        _logger.Write(RenderLogMode.Detailed, "TERRAIN_RENDERER_CREATED",
+            $"mode={_mode} regions={terrain.StorageRegionCount} staticVoxelBase={mode == TerrainRenderMode.Voxel} editedVoxelBackend={_densityVoxelRenderer != null}");
     }
 
     public void Synchronize(
@@ -230,28 +287,8 @@ internal sealed class RaylibTerrainRenderer : IDisposable
     {
         ThrowIfDisposed();
         long drawStarted = Stopwatch.GetTimestamp();
-
-        if (_densityVoxelRenderer != null)
-        {
-            _densityVoxelRenderer.Draw(
-                terrain.Voxels,
-                camera,
-                viewportWidth,
-                viewportHeight,
-                maximumViewDistanceMeters,
-                terrain.CutawayEnabled,
-                terrain.CutawayHeightMeters);
-
-            DrawCallsLastFrame = _densityVoxelRenderer.DrawCallsLastFrame;
-            VisibleRegionsLastFrame = _densityVoxelRenderer.VisibleChunksLastFrame;
-            RebuiltRegions = _densityVoxelRenderer.RebuiltChunks;
-            CutSurfaceRebuilds = _densityVoxelRenderer.RebuiltCutCaps;
-            _activeVoxelCellSize = _densityVoxelRenderer.ActiveRenderCellSize;
-            if (_logger.IsEnabled(RenderLogMode.FrameSummary))
-                _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
-                    $"backend=voxel elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visible={VisibleRegionsLastFrame} draws={DrawCallsLastFrame} rebuilt={RebuiltRegions} cutRebuilt={CutSurfaceRebuilds} chunks={CachedVoxelChunks} uploads={VoxelGpuUploadsLastFrame}");
-            return;
-        }
+        RebuiltRegions = 0;
+        CutSurfaceRebuilds = 0;
 
         float cameraDistance = Vector3.Distance(camera.Position, camera.Target);
         Vector3 worldCenter = new(
@@ -275,37 +312,16 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         // planes large enough for the active landscape.
         Rlgl.SetClipPlanes(nearClip, farClip);
 
-        bool canUseCoarseLod = _mode == TerrainRenderMode.Voxel &&
-            _coarseTerrain != null;
-        if (canUseCoarseLod)
-        {
-            bool nextCoarseState = _usingCoarseLod
-                ? cameraDistance > FineLodEnterDistanceMeters
-                : cameraDistance >= FineLodExitDistanceMeters;
-
-            // Keep the fine cache when switching to coarse LOD. Re-entering
-            // close view can then reuse existing meshes instead of blanking and
-            // rebuilding the visible terrain every time the zoom crosses LOD.
-            _usingCoarseLod = nextCoarseState;
-        }
-
-        TerrainRenderSnapshot drawTerrain =
-            _usingCoarseLod && canUseCoarseLod
-                ? _coarseTerrain!
-                : terrain;
-        RegionGpuMesh?[] drawMeshes =
-            _usingCoarseLod && canUseCoarseLod
-                ? _coarseRegionMeshes
-                : _regionMeshes;
-
+        TerrainRenderSnapshot drawTerrain = terrain;
+        RegionGpuMesh?[] drawMeshes = _regionMeshes;
         _activeVoxelCellSize = drawTerrain.RegionSize;
 
         int visibleRegionCount = 0;
         int visibleDrawCalls = 0;
         int baseBuildsThisFrame = 0;
         int cutBuildsThisFrame = 0;
-        int maximumBaseBuilds = canUseCoarseLod && !_usingCoarseLod
-            ? MaximumFineMeshBuildsPerFrame
+        int maximumBaseBuilds = _mode == TerrainRenderMode.Voxel
+            ? int.MaxValue
             : MaximumCoarseMeshBuildsPerFrame;
         int cutLayer = drawTerrain.CutawayEnabled ? drawTerrain.CutawayLayer : -1;
 
@@ -445,11 +461,31 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         Array.Clear(_visibleRegionMeshes, 0, visibleRegionCount);
         if (regionCount > 0)
             _regionBuildCursor = (scanStart + 1) % regionCount;
-        DrawCallsLastFrame = visibleDrawCalls;
-        VisibleRegionsLastFrame = visibleRegionCount;
+
+        int editedVoxelDrawCalls = 0;
+        int editedVoxelVisible = 0;
+        if (_densityVoxelRenderer != null)
+        {
+            _densityVoxelRenderer.Draw(
+                terrain.Voxels,
+                camera,
+                viewportWidth,
+                viewportHeight,
+                maximumViewDistanceMeters,
+                terrain.CutawayEnabled,
+                terrain.CutawayHeightMeters);
+
+            editedVoxelDrawCalls = _densityVoxelRenderer.DrawCallsLastFrame;
+            editedVoxelVisible = _densityVoxelRenderer.VisibleChunksLastFrame;
+            RebuiltRegions += _densityVoxelRenderer.RebuiltChunks;
+            CutSurfaceRebuilds += _densityVoxelRenderer.RebuiltCutCaps;
+        }
+
+        DrawCallsLastFrame = visibleDrawCalls + editedVoxelDrawCalls;
+        VisibleRegionsLastFrame = visibleRegionCount + editedVoxelVisible;
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
             _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
-                $"backend=region-mesh elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visible={VisibleRegionsLastFrame} draws={DrawCallsLastFrame} regionBuilds={baseBuildsThisFrame} cutBuilds={cutBuildsThisFrame} coarseLod={_usingCoarseLod}");
+                $"backend=static-height-surface+edited-surface-nets elapsedMs={Stopwatch.GetElapsedTime(drawStarted).TotalMilliseconds:0.000} visibleRegions={visibleRegionCount} editedVoxelChunks={editedVoxelVisible} draws={DrawCallsLastFrame} regionBuilds={baseBuildsThisFrame} cutBuilds={cutBuildsThisFrame}");
     }
 
     public int DetachLooseFragments(
