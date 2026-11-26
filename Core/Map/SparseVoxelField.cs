@@ -1605,6 +1605,24 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         return mask;
     }
 
+    /// <summary>Removes empty bricks left by interrupted or restored edits.</summary>
+    public int Compact()
+    {
+        int removed = 0;
+        foreach ((ChunkCoordinate key, Chunk chunk) in _chunks)
+        {
+            if (!chunk.IsEmpty && chunk.EstimatedBytes != 0)
+                continue;
+            if (_chunks.TryRemove(key, out _))
+                removed++;
+        }
+
+        if (removed > 0)
+            RebuildEditedSpatialIndex();
+
+        return removed;
+    }
+
     public long GetChunkRevision(int chunkX, int chunkY, int chunkZ)
     {
         return _chunks.TryGetValue(
