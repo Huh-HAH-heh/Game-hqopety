@@ -170,8 +170,9 @@ internal sealed class TerrainPipelineLogger : IDisposable
     {
         "MESH_BUILD_REQUEST" or "MESH_BUILD_STARTED" or "MESH_BUILD_COMPLETED" or
         "MESH_BUILD_CANCELLED" or "MESH_COMPLETION_CANCELLED" or
-        "MESH_RESULT_STALE" or "MESH_RESULT_ACCEPTED" or "MESH_GPU_EVICT" or
-        "GPU_MESH_UPLOAD" or "GPU_MESH_UNLOAD" or "FRAGMENT_GPU_UPLOAD" => true,
+        "MESH_RESULT_STALE" or "MESH_RESULT_ACCEPTED" or "MESH_BUILD_QUEUE_FULL" or
+        "MESH_GPU_EVICT" or "GPU_MESH_UPLOAD" or "GPU_MESH_UNLOAD" or
+        "REGION_MESH_REBUILT" or "REGION_CUT_MESH_REBUILT" or "FRAGMENT_GPU_UPLOAD" => true,
         _ => false
     };
 
