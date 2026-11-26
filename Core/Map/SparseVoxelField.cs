@@ -1744,9 +1744,9 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (_baseSurfaceRange == null)
             return true;
 
-        (_, int maxSurface) = GetCachedBaseSurfaceRange(
+        var baseRange = GetCachedBaseSurfaceRange(
             macroX, macroZ, macroCells);
-        return maxSurface >= cutLayer;
+        return baseRange.Max >= cutLayer;
     }
 
     private (int Min, int Max) GetCachedBaseSurfaceRange(
