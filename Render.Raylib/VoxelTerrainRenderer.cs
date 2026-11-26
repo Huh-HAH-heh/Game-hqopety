@@ -411,6 +411,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             viewportWidth,
             viewportHeight,
             maximumViewDistanceMeters,
+            cutEnabled ? cutLayer : -1,
             candidates,
             ref frustumTests,
             ref macroFrustumTests,
@@ -611,6 +612,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int viewportWidth,
         int viewportHeight,
         float maximumViewDistanceMeters,
+        int cutLayer,
         List<Candidate> candidates,
         ref int frustumTests,
         ref int macroFrustumTests,
@@ -651,6 +653,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             ulong mask = field.GetPotentialVerticalChunkMask(
                 macroX, macroZ, macroCells);
+
+            if (cutLayer >= 0 &&
+                field.HasPotentialCutSurface(macroX, macroZ, cutLayer, macroCells))
+            {
+                int cutStorageY = cutLayer / SparseVoxelField.ChunkSize;
+                if (cutStorageY < 64)
+                    mask |= 1UL << cutStorageY;
+            }
+
             if (mask == 0)
                 continue;
 
