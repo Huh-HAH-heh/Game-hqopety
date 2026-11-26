@@ -208,6 +208,8 @@ internal static class VoxelChunkMesher
     private sealed class MeshBatch : IDisposable
     {
         private readonly List<VoxelMeshData> _output;
+        private readonly int[] _globalToLocal;
+        private readonly int[] _usedGlobalIds;
 
         private Vector3[] _vertices;
         private Vector3[] _normals;
@@ -216,10 +218,13 @@ internal static class VoxelChunkMesher
 
         private int _vertexCount;
         private int _indexCount;
+        private int _usedGlobalCount;
 
-        public MeshBatch(List<VoxelMeshData> output)
+        public MeshBatch(List<VoxelMeshData> output, int[] globalToLocal, int[] usedGlobalIds)
         {
             _output = output;
+            _globalToLocal = globalToLocal;
+            _usedGlobalIds = usedGlobalIds;
             _vertices = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
             _normals = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
             _colors = ArrayPool<byte>.Shared.Rent(MaximumVerticesPerMesh * 4);
@@ -291,12 +296,82 @@ internal static class VoxelChunkMesher
                 _vertexCount,
                 _indexCount));
 
+            for (int i = 0; i < _usedGlobalCount; i++)
+                _globalToLocal[_usedGlobalIds[i]] = -1;
+            _usedGlobalCount = 0;
+
             _vertices = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
             _normals = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
             _colors = ArrayPool<byte>.Shared.Rent(MaximumVerticesPerMesh * 4);
             _indices = ArrayPool<ushort>.Shared.Rent(MaximumIndicesPerMesh);
             _vertexCount = 0;
             _indexCount = 0;
+        }
+
+        public void AddIndexedQuad(
+            int i0,
+            int i1,
+            int i2,
+            int i3,
+            Vector3[] positions,
+            Vector3[] normals,
+            byte[] materials,
+            TerrainPalette palette,
+            bool frontFace)
+        {
+            if (i0 < 0 || i1 < 0 || i2 < 0 || i3 < 0 ||
+                i0 >= _globalToLocal.Length || i1 >= _globalToLocal.Length ||
+                i2 >= _globalToLocal.Length || i3 >= _globalToLocal.Length)
+                return;
+
+            if (_vertexCount + 4 > MaximumVerticesPerMesh ||
+                _indexCount + 6 > MaximumIndicesPerMesh)
+                Flush();
+
+            ushort a = GetOrAddVertex(i0, positions, normals, materials, palette);
+            ushort b = GetOrAddVertex(i1, positions, normals, materials, palette);
+            ushort c = GetOrAddVertex(i2, positions, normals, materials, palette);
+            ushort d = GetOrAddVertex(i3, positions, normals, materials, palette);
+
+            if (frontFace)
+            {
+                _indices[_indexCount++] = a;
+                _indices[_indexCount++] = b;
+                _indices[_indexCount++] = c;
+                _indices[_indexCount++] = a;
+                _indices[_indexCount++] = c;
+                _indices[_indexCount++] = d;
+            }
+            else
+            {
+                _indices[_indexCount++] = a;
+                _indices[_indexCount++] = c;
+                _indices[_indexCount++] = b;
+                _indices[_indexCount++] = a;
+                _indices[_indexCount++] = d;
+                _indices[_indexCount++] = c;
+            }
+        }
+
+        private ushort GetOrAddVertex(
+            int globalId,
+            Vector3[] positions,
+            Vector3[] normals,
+            byte[] materials,
+            TerrainPalette palette)
+        {
+            int localId = _globalToLocal[globalId];
+            if (localId >= 0)
+                return checked((ushort)localId);
+
+            localId = _vertexCount;
+            _globalToLocal[globalId] = localId;
+            _usedGlobalIds[_usedGlobalCount++] = globalId;
+            AddVertex(
+                positions[globalId],
+                normals[globalId],
+                GetMaterialColor(palette, materials[globalId]));
+            return checked((ushort)localId);
         }
 
         private void AddVertex(Vector3 position, Vector3 normal, Color color)
@@ -414,6 +489,8 @@ internal static class VoxelChunkMesher
         int cellCount = side * side * side;
 
         int[] vertexMap = ArrayPool<int>.Shared.Rent(cellCount);
+        int[] vertexToMesh = ArrayPool<int>.Shared.Rent(cellCount);
+        int[] usedGlobalIds = ArrayPool<int>.Shared.Rent(MaximumVerticesPerMesh);
         Vector3[] positions = ArrayPool<Vector3>.Shared.Rent(cellCount);
         Vector3[] normals = ArrayPool<Vector3>.Shared.Rent(cellCount);
         byte[] materials = ArrayPool<byte>.Shared.Rent(cellCount);
@@ -423,6 +500,7 @@ internal static class VoxelChunkMesher
         try
         {
             Array.Fill(vertexMap, -1, 0, cellCount);
+            Array.Fill(vertexToMesh, -1, 0, cellCount);
             int vertexCount = 0;
 
             // One Surface Nets vertex per mixed-sign density cell.
@@ -523,7 +601,7 @@ internal static class VoxelChunkMesher
             if (vertexCount == 0)
                 return Array.Empty<VoxelMeshData>();
 
-            using MeshBatch batch = new(output);
+            using MeshBatch batch = new(output, vertexToMesh, usedGlobalIds);
 
             // Each grid edge belongs to exactly one render chunk. Its four
             // incident cells may be in the halo, so adjacent chunks stay watertight.
@@ -595,6 +673,8 @@ internal static class VoxelChunkMesher
         finally
         {
             ArrayPool<int>.Shared.Return(vertexMap, clearArray: false);
+            ArrayPool<int>.Shared.Return(vertexToMesh, clearArray: false);
+            ArrayPool<int>.Shared.Return(usedGlobalIds, clearArray: false);
             ArrayPool<Vector3>.Shared.Return(positions, clearArray: false);
             ArrayPool<Vector3>.Shared.Return(normals, clearArray: false);
             ArrayPool<byte>.Shared.Return(materials, clearArray: false);
@@ -630,10 +710,9 @@ internal static class VoxelChunkMesher
             materials[i1] != 0 ? materials[i1] :
             materials[i2] != 0 ? materials[i2] : materials[i3];
 
-        batch.AddQuad(
-            positions[i0], positions[i1], positions[i2], positions[i3],
-            normals[i0], normals[i1], normals[i2], normals[i3],
-            GetMaterialColor(palette, material),
+        batch.AddIndexedQuad(
+            i0, i1, i2, i3,
+            positions, normals, materials, palette,
             frontFace: positiveSide);
     }
 
