@@ -588,10 +588,11 @@ internal static class VoxelChunkMesher
                         ? normal / MathF.Sqrt(normalLengthSquared)
                         : Vector3.UnitY;
 
+                    float sampleOffset = input.Step * 0.5f;
                     positions[vertexCount] = new Vector3(
-                        (input.OriginX + (x + u) * input.Step) * SparseVoxelField.VoxelSizeMeters,
-                        (input.OriginY + (y + v) * input.Step) * SparseVoxelField.VoxelSizeMeters,
-                        (input.OriginZ + (z + w) * input.Step) * SparseVoxelField.VoxelSizeMeters);
+                        (input.OriginX + (x + u) * input.Step + sampleOffset) * SparseVoxelField.VoxelSizeMeters,
+                        (input.OriginY + (y + v) * input.Step + sampleOffset) * SparseVoxelField.VoxelSizeMeters,
+                        (input.OriginZ + (z + w) * input.Step + sampleOffset) * SparseVoxelField.VoxelSizeMeters);
                     normals[vertexCount] = normal;
 
                     if (materialCorner >= 0)
