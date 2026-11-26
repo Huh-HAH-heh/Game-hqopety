@@ -200,6 +200,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int RenderStep = 1;
 
     private readonly List<Candidate> _candidateScratch = new();
+    private readonly List<(int X, int Z)> _editedMacroScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
     private readonly List<ChunkKey> _outsideRadiusScratch = new();
     private readonly List<(ChunkKey Key, ChunkEntry Entry)> _visible = new();
@@ -620,9 +621,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         const float sphereScale = 0.8660254038f;
         const int macroCells = SparseVoxelField.SpatialMacroSize;
         int chunkSpan = ChunkCells * RenderStep;
-        int macroPerChunk = chunkSpan / macroCells;
-        int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
+        if (chunkSpan != macroCells)
+            throw new InvalidOperationException("Voxel render chunks must match the edited spatial macro size.");
 
+        int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
         float chunkSizeMeters = chunkSpan * voxelSize;
         float chunkRadiusMeters = chunkSizeMeters * sphereScale;
@@ -646,31 +648,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int firstZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z - scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
         int lastZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z + scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
 
-        Span<ulong> masks = stackalloc ulong[16];
-        Span<int> macroXs = stackalloc int[16];
-        Span<int> macroZs = stackalloc int[16];
-
-        for (int z = firstZ; z <= lastZ; z++)
-        for (int x = firstX; x <= lastX; x++)
+        field.CopyEditedMacroColumns(_editedMacroScratch);
+        foreach ((int macroX, int macroZ) in _editedMacroScratch)
         {
-            int maskCount = 0;
-            int firstMacroX = x * macroPerChunk;
-            int firstMacroZ = z * macroPerChunk;
+            if (macroX < firstX || macroX > lastX ||
+                macroZ < firstZ || macroZ > lastZ)
+                continue;
 
-            for (int mz = 0; mz < macroPerChunk; mz++)
-            for (int mx = 0; mx < macroPerChunk; mx++)
-            {
-                int macroX = firstMacroX + mx;
-                int macroZ = firstMacroZ + mz;
-                if (!field.HasEditsInMacroColumn(macroX, macroZ))
-                    continue;
-
-                macroXs[maskCount] = macroX;
-                macroZs[maskCount] = macroZ;
-                masks[maskCount] = field.GetPotentialVerticalChunkMask(
-                    macroX, macroZ, macroCells);
-                maskCount++;
-            }
+            ulong mask = field.GetPotentialVerticalChunkMask(
+                macroX, macroZ, macroCells);
 
             for (int y = firstY; y <= lastY; y++)
             {
@@ -678,29 +664,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 int endStorageY = firstStorageY + storageChunksPerChunk;
                 bool hasPotential = false;
 
-                for (int m = 0; m < maskCount && !hasPotential; m++)
+                for (int storageY = firstStorageY; storageY < endStorageY; storageY++)
                 {
-                    ulong mask = masks[m];
-                    for (int storageY = firstStorageY; storageY < endStorageY; storageY++)
-                    {
-                        bool present = storageY < 64
-                            ? (mask & (1UL << storageY)) != 0
-                            : field.HasPotentialVerticalChunk(
-                                macroXs[m], macroZs[m], storageY, macroCells);
-                        if (!present)
-                            continue;
+                    bool present = storageY < 64
+                        ? (mask & (1UL << storageY)) != 0
+                        : field.HasPotentialVerticalChunk(
+                            macroX, macroZ, storageY, macroCells);
+                    if (!present)
+                        continue;
 
-                        hasPotential = true;
-                        break;
-                    }
+                    hasPotential = true;
+                    break;
                 }
 
                 if (!hasPotential)
                     continue;
 
-                int originX = x * chunkSpan;
+                int originX = macroX * chunkSpan;
                 int originY = y * chunkSpan;
-                int originZ = z * chunkSpan;
+                int originZ = macroZ * chunkSpan;
                 int sizeX = Math.Min(chunkSpan, field.Width - originX);
                 int sizeY = Math.Min(chunkSpan, field.Height - originY);
                 int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
@@ -728,7 +710,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
                 visibleMacroRegions++;
                 candidates.Add(new Candidate(
-                    new ChunkKey(x, y, z),
+                    new ChunkKey(macroX, y, macroZ),
                     center,
                     radius,
                     Vector3.DistanceSquared(center, cameraPosition)));
@@ -784,7 +766,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 Math.Min(chunkSpan, field.Width - originX),
                 Math.Min(chunkSpan, field.Height - originY),
                 Math.Min(chunkSpan, field.Depth - originZ));
-            if (distanceSquared > radiusSquared)
+            if (!field.HasEditsInMacroColumn(key.X, key.Z) ||
+                distanceSquared > radiusSquared)
                 _outsideRadiusScratch.Add(key);
         }
 
