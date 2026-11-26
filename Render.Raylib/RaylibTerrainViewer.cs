@@ -205,7 +205,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                                                        renderer?.Synchronize(terrain);
+                            renderer?.Synchronize(terrain);
                         }
                     }
 
@@ -231,7 +231,7 @@ public static class RaylibTerrainViewer
                         menu.SaveSettings();
                         focusName = "SURFACE";
                         terrain.DisableCutaway();
-                                                    renderer.Synchronize(terrain);
+                        renderer.Synchronize(terrain);
                         camera.ResetTopDownView();
                         break;
 
@@ -258,7 +258,7 @@ public static class RaylibTerrainViewer
                         terrain = TerrainRenderSnapshot.Create(
                             worldMap,
                             menu.Settings.TerrainMode);
-                                                if (cutawayMode)
+                        if (cutawayMode)
                         {
                             int currentCutLayer = Math.Clamp(
                                 (int)MathF.Round(
@@ -267,7 +267,7 @@ public static class RaylibTerrainViewer
                                 0,
                                 worldMap.LayerCount - 1);
                             terrain.SetCutawayLayer(currentCutLayer);
-                                                    }
+                        }
 
                         renderer = new RaylibTerrainRenderer(
                             terrain,
@@ -304,7 +304,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                                                        renderer.Synchronize(terrain);
+                            renderer.Synchronize(terrain);
                             camera.ResetTopDownView();
                         }
                         break;
@@ -367,7 +367,7 @@ public static class RaylibTerrainViewer
                         {
                             focusName = "SURFACE";
                             terrain.DisableCutaway();
-                                                        renderer.Synchronize(terrain);
+                            renderer.Synchronize(terrain);
                             camera.ResetTopDownView();
                         }
                     }
