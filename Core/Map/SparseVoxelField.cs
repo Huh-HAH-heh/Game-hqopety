@@ -440,6 +440,62 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             return true;
         }
 
+        /// <summary>
+        /// Demotes sparsely populated dense channels after large edits or resets.
+        /// The lower threshold prevents representation churn around promotion.
+        /// </summary>
+        public bool Compact()
+        {
+            const int demotionThreshold = DensePromotionThreshold / 2;
+            bool changed = false;
+
+            if (_denseDensity != null && _densityCount < demotionThreshold)
+            {
+                DensityEntry[] entries = new DensityEntry[_densityCount];
+                int cursor = 0;
+                for (int word = 0; word < _denseDensityMask!.Length; word++)
+                {
+                    long bits = _denseDensityMask[word];
+                    while (bits != 0)
+                    {
+                        int bit = System.Numerics.BitOperations.TrailingZeroCount((ulong)bits);
+                        int index = (word << 6) + bit;
+                        entries[cursor++] = new DensityEntry((ushort)index, _denseDensity[index]);
+                        bits &= bits - 1;
+                    }
+                }
+
+                _sparseDensity = entries.Length == 0 ? null : entries;
+                _denseDensity = null;
+                _denseDensityMask = null;
+                changed = true;
+            }
+
+            if (_denseMaterials != null && _materialCount < demotionThreshold)
+            {
+                MaterialEntry[] entries = new MaterialEntry[_materialCount];
+                int cursor = 0;
+                for (int word = 0; word < _denseMaterialMask!.Length; word++)
+                {
+                    long bits = _denseMaterialMask[word];
+                    while (bits != 0)
+                    {
+                        int bit = System.Numerics.BitOperations.TrailingZeroCount((ulong)bits);
+                        int index = (word << 6) + bit;
+                        entries[cursor++] = new MaterialEntry((ushort)index, _denseMaterials[index]);
+                        bits &= bits - 1;
+                    }
+                }
+
+                _sparseMaterials = entries.Length == 0 ? null : entries;
+                _denseMaterials = null;
+                _denseMaterialMask = null;
+                changed = true;
+            }
+
+            return changed;
+        }
+
         public DensityEntry[] CopyDensityEntries()
         {
             DensityEntry[]? sparse = _sparseDensity;
@@ -1672,19 +1728,25 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     /// <summary>Removes empty bricks left by interrupted or restored edits.</summary>
     public int Compact()
     {
-        int removed = 0;
+        int compacted = 0;
+        bool removedAny = false;
+
         foreach ((ChunkCoordinate key, Chunk chunk) in _chunks)
         {
-            if (!chunk.IsEmpty)
+            if (chunk.Compact())
+                compacted++;
+
+            if (!chunk.IsEmpty || !_chunks.TryRemove(key, out _))
                 continue;
-            if (_chunks.TryRemove(key, out _))
-                removed++;
+
+            compacted++;
+            removedAny = true;
         }
 
-        if (removed > 0)
+        if (removedAny)
             RebuildEditedSpatialIndex();
 
-        return removed;
+        return compacted;
     }
 
     public long GetChunkRevision(int chunkX, int chunkY, int chunkZ)
