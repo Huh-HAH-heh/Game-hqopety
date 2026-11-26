@@ -1,8 +1,9 @@
 namespace Core.Map;
 
 /// <summary>
-/// Read-only voxel source shared by the world and immutable detached fragments.
-/// Renderer workers consume byte block IDs; simulation may still query density.
+/// Read-only signed-density voxel source shared by the world and immutable
+/// detached fragments. The renderer samples density for Surface Nets and
+/// reads material IDs only when assigning surface colours.
 /// </summary>
 public interface IVoxelFieldSource
 {
