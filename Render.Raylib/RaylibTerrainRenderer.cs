@@ -202,7 +202,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         int visibleRegionCount = 0;
         int visibleDrawCalls = 0;
         int baseBuildsThisFrame = 0;
-        int cutBuildsThisFrame = 0;
         int maximumBaseBuilds = MaximumHeightmapMeshBuildsPerFrame;
         int cutLayer = drawTerrain.CutawayEnabled ? drawTerrain.CutawayLayer : -1;
 
