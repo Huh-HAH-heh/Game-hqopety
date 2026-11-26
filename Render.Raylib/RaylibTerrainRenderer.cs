@@ -13,7 +13,7 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class RaylibTerrainRenderer : IDisposable
 {
-    private const int MaximumCoarseMeshBuildsPerFrame = 6;
+    private const int MaximumHeightmapMeshBuildsPerFrame = 6;
     private const int MaximumCutSurfaceBuildsPerFrame = 144;
 
     private const string VoxelVertexShader = """
@@ -357,7 +357,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         int cutBuildsThisFrame = 0;
         int maximumBaseBuilds = _mode == TerrainRenderMode.Voxel
             ? int.MaxValue
-            : MaximumCoarseMeshBuildsPerFrame;
+            : MaximumHeightmapMeshBuildsPerFrame;
         int cutLayer = drawTerrain.CutawayEnabled ? drawTerrain.CutawayLayer : -1;
 
         int regionCount = drawMeshes.Length;
