@@ -545,7 +545,7 @@ internal static class VoxelChunkMesher
                         i0, i1, i2, i3, a > 0f);
                 }
 
-                for (int x = 0; x <= cells; x++)
+                for (int x = 0; x < cells; x++)
                 for (int y = 0; y < cells; y++)
                 {
                     float a = input.GetDensity(x, y, z);
@@ -561,8 +561,8 @@ internal static class VoxelChunkMesher
                         i0, i1, i2, i3, a > 0f);
                 }
 
-                for (int y = 0; y <= cells; y++)
-                for (int x = 0; x <= cells; x++)
+                for (int y = 0; y < cells; y++)
+                for (int x = 0; x < cells; x++)
                 {
                     float a = input.GetDensity(x, y, z);
                     float b = input.GetDensity(x, y, z + 1);
