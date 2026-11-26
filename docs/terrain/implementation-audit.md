@@ -6,7 +6,9 @@ Baseline: `feature/raylib-terrain-renderer` after the 3D density-field migration
 
 The Raylib terrain path now has a real sparse 3D voxel representation and derives its rendered surface from that field. It is no longer the previous vertical-interval/XY-column mesh labelled as voxel terrain.
 
-This is a **sparse procedural-base + 3D voxel-edit** design. The large untouched canyon base is evaluated from the existing base-surface generator as a 3D signed-distance function. Edited areas materialize true cubic 0.1 m voxel data in 16³ chunks. This avoids a dense X×Y×Z world allocation while supporting 3D volume operations.
+This is a **compact procedural-base + adaptive 3D voxel-edit** design. The original canyon base is represented by flat 1 m X/Z height and material anchors; its density is evaluated procedurally. Edited areas materialize only changed 0.1 m samples and cell materials in 16³ storage bricks. Each data channel starts sparse and promotes to a flat dense array with bit mask only when override occupancy reaches 2048 entries; `Compact()` can demote it below 1024. This avoids paying for four full arrays for every edited brick.
+
+The voxel volume can expand independently of the original tile/navigation grid. New space is empty and remains unallocated until edited. This is a first adaptive storage stage, not yet a full hierarchy of coarse-to-fine base voxels.
 
 The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint/smooth, SDF support-surface queries, portal-linked multi-level routing, vertical falling/landing, bounded Undo/Redo and Raylib edit persistence are implemented in source. Runtime visual acceptance and target-hardware performance remain unverified.
 
@@ -17,7 +19,9 @@ The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint
 | 3D voxel coordinates | Isotropic 0.1 m X/Y/Z cell grid | Met |
 | Per-voxel geometry | Signed-distance sample at voxel centres, quantized to signed 16-bit | Met |
 | Per-voxel material | 16-bit MaterialId per cubic cell; material definitions are shared | Met |
-| Sparse large-world storage | 16³ chunks allocated only where edits require them; untouched base is procedural | Met |
+| Sparse large-world storage | 16³ bricks only where edits exist; sparse entries per channel with dense promotion/demotion | Implemented in source; target memory measurement pending |
+| Expandable voxel bounds | Field grows logically without allocating full volume; new space is air | Implemented; legacy tile/nav dimensions remain fixed |
+| Save migration | Compact v3 overrides; v2 dense-brick saves accepted by loader | Implemented in source; existing files not locally exercised |
 | Real 3D surface | Marching-tetrahedra isosurface from eight density samples per source cube, not XY height extrusion | Met |
 | Smooth surface normals | Density-gradient normals | Met in source; visual verification pending |
 | Overhangs and arches | Additive sphere/capsule/box CSG can create disconnected solid volumes and air underneath | Met in source |
@@ -29,7 +33,7 @@ The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint
 | Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
 | Horizontal cutaway | Cut cap clips/intersects the same density field | Implemented in source; flicker/seam test pending |
 | Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
-| Distance LOD | 0.1 / 0.5 / 1.0 / 4.0 m sampling steps; source data remains 0.1 m | Met in source |
+| Distance LOD | Current Raylib voxel mesher is fixed Step=1 with 16³ greedy chunks; no active Step4/Step16 LOD path | Not implemented in current branch |
 | Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs local 0.5 m A* on `(X,Y,floor)` nodes; portal-linked routes cross adjacent 128 m regions and local edits invalidate only affected routes | Partially met: portal corridor selection tries two Manhattan orders, not a global portal-graph optimum |
 | Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; unsupported pawns integrate gravity and land on voxel floors | Partially met: pawn-pawn contact remains the horizontal crowd solver; no rigid-body/rolling terrain debris |
 | Save/load of edited chunks | Compressed versioned chunk serializer plus atomic world-file save/load; Raylib viewer autosaves edits and restores them at startup | Met for the Raylib terrain viewer; campaign/world seed migration still needs integration |
@@ -75,4 +79,4 @@ The base canyon profile is still generated from the existing 1 m XY surface data
 7. Integrate the voxel edit file with the campaign save-slot/seed lifecycle.
 8. Run the Raylib viewer on the target GPU and capture seam, cutaway, tunnel/bridge and memory/FPS evidence.
 
-Current status: the terrain is a **3D sparse voxel/SDF renderer with editable volumes, plane flattening, persisted terrain edits, bounded undo/redo, multi-level pawn support and vertical falling/landing inside edited areas**. It is not yet a fully integrated Space Engineers-style simulation: cross-region level routing, campaign save slots and target-hardware visual/performance acceptance remain open.
+Current status: the world has a **single adaptive sparse/dense 3D edit store**, a procedural 1 m heightfield base, compact v3 saves with v2 migration, expandable voxel bounds, immutable worker snapshots and a vertical surface index. Local volume edits, support queries, cutaway and navigation consumers still use the same density field. However, untouched base terrain is not a hierarchy of full 3D voxels, and the current greedy renderer has no active multi-resolution LOD. Target-hardware performance and visual acceptance remain unverified.
