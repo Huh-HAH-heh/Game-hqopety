@@ -15,7 +15,7 @@ namespace RimClone.Render.Raylib;
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
-    private const int ChunkCells = SparseVoxelField.ChunkSize;
+    private const int ChunkCells = VoxelChunkBuildInput.DefaultCellsPerAxis;
     private const int MaximumPendingMeshJobs = 128;
     private const int MaximumMeshBuildsPerFrame = 4;
     private const int MaximumGpuMeshUploadsPerFrame = 4;
@@ -588,7 +588,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private static int SelectRenderStep(Camera3D camera)
     {
         float distance = Vector3.Distance(camera.Position, camera.Target);
-        return distance < 24f ? 1 : distance < 64f ? 2 : 4;
+        return distance < 64f ? 1 : distance < 192f ? 2 : 4;
     }
 
     private void SetRenderStep(int step)
@@ -648,8 +648,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ref int visibleMacroRegions)
     {
         const float sphereScale = 0.8660254038f;
+        const int macroCells = SparseVoxelField.SpatialMacroSize;
         int chunkSpan = ChunkCells * _activeStep;
-        int macroChunkCount = SparseVoxelField.SpatialMacroSize / chunkSpan;
+        int macroPerChunk = chunkSpan / macroCells;
+        int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
+
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
         float chunkSizeMeters = chunkSpan * voxelSize;
         float chunkRadiusMeters = chunkSizeMeters * sphereScale;
@@ -663,6 +666,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int chunksX = DivideRoundUp(field.Width, chunkSpan);
         int chunksY = DivideRoundUp(field.Height, chunkSpan);
         int chunksZ = DivideRoundUp(field.Depth, chunkSpan);
+        if (chunksX == 0 || chunksY == 0 || chunksZ == 0)
+            return;
 
         int firstX = Math.Clamp((int)MathF.Floor((cameraPosition.X - scanRadius) / chunkSizeMeters), 0, chunksX - 1);
         int lastX = Math.Clamp((int)MathF.Floor((cameraPosition.X + scanRadius) / chunkSizeMeters), 0, chunksX - 1);
@@ -671,113 +676,89 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int firstZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z - scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
         int lastZ = Math.Clamp((int)MathF.Floor((cameraPosition.Z + scanRadius) / chunkSizeMeters), 0, chunksZ - 1);
 
-        int macroCells = chunkSpan * macroChunkCount;
-        int firstMacroX = firstX / macroChunkCount;
-        int lastMacroX = lastX / macroChunkCount;
-        int firstMacroY = firstY / macroChunkCount;
-        int lastMacroY = lastY / macroChunkCount;
-        int firstMacroZ = firstZ / macroChunkCount;
-        int lastMacroZ = lastZ / macroChunkCount;
+        Span<ulong> masks = stackalloc ulong[16];
+        Span<int> macroXs = stackalloc int[16];
+        Span<int> macroZs = stackalloc int[16];
 
-        for (int macroZ = firstMacroZ; macroZ <= lastMacroZ; macroZ++)
-        for (int macroX = firstMacroX; macroX <= lastMacroX; macroX++)
+        for (int z = firstZ; z <= lastZ; z++)
+        for (int x = firstX; x <= lastX; x++)
         {
-            ulong potentialYMask = field.GetPotentialVerticalChunkMask(macroX, macroZ, macroCells);
+            int maskCount = 0;
+            int firstMacroX = x * macroPerChunk;
+            int firstMacroZ = z * macroPerChunk;
 
-            int firstChunkX = macroX * macroChunkCount;
-            int firstChunkZ = macroZ * macroChunkCount;
-            int endChunkX = Math.Min(firstChunkX + macroChunkCount, chunksX);
-            int endChunkZ = Math.Min(firstChunkZ + macroChunkCount, chunksZ);
-
-            for (int macroY = firstMacroY; macroY <= lastMacroY; macroY++)
+            for (int mz = 0; mz < macroPerChunk; mz++)
+            for (int mx = 0; mx < macroPerChunk; mx++)
             {
-                int firstChunkY = macroY * macroChunkCount;
-                int endChunkY = Math.Min(firstChunkY + macroChunkCount, chunksY);
-                int maskFirstY = Math.Max(firstY, firstChunkY);
-                int maskLastY = Math.Min(lastY, endChunkY - 1);
+                int macroX = firstMacroX + mx;
+                int macroZ = firstMacroZ + mz;
+                macroXs[maskCount] = macroX;
+                macroZs[maskCount] = macroZ;
+                masks[maskCount] = field.GetPotentialVerticalChunkMask(
+                    macroX, macroZ, macroCells);
+                maskCount++;
+            }
 
-                bool hasPotentialChunkY = false;
-                for (int y = maskFirstY; y <= maskLastY; y++)
+            for (int y = firstY; y <= lastY; y++)
+            {
+                int firstStorageY = y * storageChunksPerChunk;
+                int endStorageY = firstStorageY + storageChunksPerChunk;
+                bool hasPotential = false;
+
+                for (int m = 0; m < maskCount && !hasPotential; m++)
                 {
-                    if (!HasPotentialRenderChunkY(field, macroX, macroZ, y, macroCells, potentialYMask))
-                        continue;
-                    hasPotentialChunkY = true;
-                    break;
+                    ulong mask = masks[m];
+                    for (int storageY = firstStorageY; storageY < endStorageY; storageY++)
+                    {
+                        bool present = storageY < 64
+                            ? (mask & (1UL << storageY)) != 0
+                            : field.HasPotentialVerticalChunk(
+                                macroXs[m], macroZs[m], storageY, macroCells);
+                        if (!present)
+                            continue;
+
+                        hasPotential = true;
+                        break;
+                    }
                 }
 
-                if (!hasPotentialChunkY)
+                if (!hasPotential)
                     continue;
 
-                int originX = firstChunkX * chunkSpan;
-                int originY = firstChunkY * chunkSpan;
-                int originZ = firstChunkZ * chunkSpan;
-                int sizeX = Math.Min(macroCells, field.Width - originX);
-                int sizeY = Math.Min(macroCells, field.Height - originY);
-                int sizeZ = Math.Min(macroCells, field.Depth - originZ);
+                int originX = x * chunkSpan;
+                int originY = y * chunkSpan;
+                int originZ = z * chunkSpan;
+                int sizeX = Math.Min(chunkSpan, field.Width - originX);
+                int sizeY = Math.Min(chunkSpan, field.Height - originY);
+                int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
 
                 float nearestDistanceSquared = BoundsNearestDistanceSquared(
                     cameraPosition, originX, originY, originZ, sizeX, sizeY, sizeZ);
                 if (nearestDistanceSquared > viewDistanceSquared)
                     continue;
 
+                Vector3 center = new(
+                    (originX + sizeX * 0.5f) * voxelSize,
+                    (originY + sizeY * 0.5f) * voxelSize,
+                    (originZ + sizeZ * 0.5f) * voxelSize);
                 float halfX = sizeX * voxelSize * 0.5f;
                 float halfY = sizeY * voxelSize * 0.5f;
                 float halfZ = sizeZ * voxelSize * 0.5f;
-                Vector3 macroCenter = new(
-                    originX * voxelSize + halfX,
-                    originY * voxelSize + halfY,
-                    originZ * voxelSize + halfZ);
-                float macroRadius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+                float radius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
 
                 macroFrustumTests++;
+                frustumTests++;
                 if (!TerrainFrustum.IsSphereVisible(
-                    camera, macroCenter, macroRadius,
+                    camera, center, radius,
                     viewportWidth, viewportHeight, viewDistance))
                     continue;
 
                 visibleMacroRegions++;
-
-                int childFirstX = Math.Max(firstX, firstChunkX);
-                int childLastX = Math.Min(lastX, endChunkX - 1);
-                int childFirstY = Math.Max(firstY, firstChunkY);
-                int childLastY = Math.Min(lastY, endChunkY - 1);
-                int childFirstZ = Math.Max(firstZ, firstChunkZ);
-                int childLastZ = Math.Min(lastZ, endChunkZ - 1);
-
-                for (int y = childFirstY; y <= childLastY; y++)
-                {
-                    if (!HasPotentialRenderChunkY(field, macroX, macroZ, y, macroCells, potentialYMask))
-                        continue;
-
-                    for (int z = childFirstZ; z <= childLastZ; z++)
-                    for (int x = childFirstX; x <= childLastX; x++)
-                    {
-                        int chunkOriginX = x * chunkSpan;
-                        int chunkOriginY = y * chunkSpan;
-                        int chunkOriginZ = z * chunkSpan;
-                        float chunkNearestDistanceSquared = BoundsNearestDistanceSquared(
-                            cameraPosition, chunkOriginX, chunkOriginY, chunkOriginZ,
-                            chunkSpan, chunkSpan, chunkSpan);
-                        if (chunkNearestDistanceSquared > viewDistanceSquared)
-                            continue;
-
-                        Vector3 center = new(
-                            (chunkOriginX + chunkSpan * 0.5f) * voxelSize,
-                            (chunkOriginY + chunkSpan * 0.5f) * voxelSize,
-                            (chunkOriginZ + chunkSpan * 0.5f) * voxelSize);
-
-                        frustumTests++;
-                        if (!TerrainFrustum.IsSphereVisible(
-                            camera, center, chunkRadiusMeters,
-                            viewportWidth, viewportHeight, viewDistance))
-                            continue;
-
-                        ChunkKey key = new(x, y, z);
-                        candidates.Add(new Candidate(
-                            key, center, chunkRadiusMeters,
-                            Vector3.DistanceSquared(center, cameraPosition)));
-                    }
-                }
+                candidates.Add(new Candidate(
+                    new ChunkKey(x, y, z),
+                    center,
+                    radius,
+                    Vector3.DistanceSquared(center, cameraPosition)));
             }
         }
     }
@@ -947,14 +928,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             try
             {
                 IVoxelFieldSource source = field.CreateChunkSnapshot(
-                    request.Key.X, request.Key.Y, request.Key.Z, _activeStep);
+                    request.Key.X, request.Key.Y, request.Key.Z, _activeStep, ChunkCells);
                 using VoxelChunkBuildInput input = new(
                     source,
                     request.Key.X,
                     request.Key.Y,
                     request.Key.Z,
                     request.CutLayer,
-                    _activeStep);
+                    _activeStep,
+                    ChunkCells);
 
                 long captureStarted = Stopwatch.GetTimestamp();
                 input.CaptureAll(source);
