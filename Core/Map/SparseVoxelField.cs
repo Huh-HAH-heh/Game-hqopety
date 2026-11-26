@@ -60,7 +60,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     /// </summary>
     private sealed class Chunk
     {
-        private const int DensePromotionThreshold = 2048;
+        private const int DensePromotionThreshold = 256;
         private const int MaskWords = CellCount / 64;
 
         private DensityEntry[]? _sparseDensity;
