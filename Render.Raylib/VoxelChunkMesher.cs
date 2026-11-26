@@ -133,7 +133,12 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         Densities = ArrayPool<float>.Shared.Rent(TotalSamples);
     }
 
-    public void CaptureAll(IVoxelFieldSource source)
+    public void CaptureAll(CancellationToken cancellationToken = default) =>
+        CaptureAll(_source, cancellationToken);
+
+    public void CaptureAll(
+        IVoxelFieldSource source,
+        CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0, this);
@@ -147,21 +152,25 @@ internal sealed class VoxelChunkBuildInput : IDisposable
 
         int write = 0;
         for (int z = -HaloSize; z <= CellsPerAxis + HaloSize; z++)
-        for (int y = -HaloSize; y <= CellsPerAxis + HaloSize; y++)
-        for (int x = -HaloSize; x <= CellsPerAxis + HaloSize; x++)
         {
-            int worldX = OriginX + x * Step;
-            int worldY = OriginY + y * Step;
-            int worldZ = OriginZ + z * Step;
-            float density = CutLayer != int.MinValue && worldY >= CutLayer
-                ? -1f
-                : source.GetDensity(worldX, worldY, worldZ);
+            cancellationToken.ThrowIfCancellationRequested();
+            for (int y = -HaloSize; y <= CellsPerAxis + HaloSize; y++)
+            for (int x = -HaloSize; x <= CellsPerAxis + HaloSize; x++)
+            {
+                int worldX = OriginX + x * Step;
+                int worldY = OriginY + y * Step;
+                int worldZ = OriginZ + z * Step;
+                float density = CutLayer != int.MinValue && worldY >= CutLayer
+                    ? -1f
+                    : source.GetDensity(worldX, worldY, worldZ);
 
-            Densities[write++] = density;
-            hasSolid |= density > 0f;
-            hasAir |= density <= 0f;
+                Densities[write++] = density;
+                hasSolid |= density > 0f;
+                hasAir |= density <= 0f;
+            }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         HasPotentialSurface = hasSolid && hasAir;
         IsCaptured = true;
     }
