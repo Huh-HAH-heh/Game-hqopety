@@ -662,6 +662,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             {
                 int macroX = firstMacroX + mx;
                 int macroZ = firstMacroZ + mz;
+                if (!field.HasEditsInMacroColumn(macroX, macroZ))
+                    continue;
+
                 macroXs[maskCount] = macroX;
                 macroZs[maskCount] = macroZ;
                 masks[maskCount] = field.GetPotentialVerticalChunkMask(
