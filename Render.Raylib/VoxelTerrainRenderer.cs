@@ -743,8 +743,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private void UpdateRenderStep(Camera3D camera, int viewportHeight)
     {
         float distance = Vector3.Distance(camera.Position, camera.Target);
-        float fovy = float.IsFinite(camera.Fovy)
-            ? Math.Clamp(camera.Fovy, 1f, 175f)
+        float fovy = float.IsFinite(camera.FovY)
+            ? Math.Clamp(camera.FovY, 1f, 175f)
             : 45f;
         float pixelsPerMeter = Math.Max(1, viewportHeight) /
             (2f * MathF.Max(distance, 1f) * MathF.Tan(fovy * (MathF.PI / 360f)));
