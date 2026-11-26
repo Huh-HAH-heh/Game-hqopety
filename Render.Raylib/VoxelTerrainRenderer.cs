@@ -23,7 +23,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // Requests now hold metadata + one shared immutable field snapshot; density arrays
     // are rented only by active workers, so the queue can cover the whole visible set.
     private const int MaximumPendingMeshJobs = 4096;
-    private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+    // Use the available physical cores for density capture and Surface Nets builds.
+    private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
     private const int MaximumGpuMeshUploadsPerFrame = 16;
     private const double GpuUploadBudgetMilliseconds = 3.0;
     private const int CutCapSettleFrames = 8;
