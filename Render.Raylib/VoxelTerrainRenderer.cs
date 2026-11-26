@@ -227,9 +227,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private SparseVoxelField? _snapshotField;
     private long _worldBuildSnapshotVersion = long.MinValue;
     private long _worldBuildSnapshotBaseVersion = long.MinValue;
-    private readonly HashSet<ChunkKey> _initialBuildBatchKeys = new();
-    private bool _initialBuildBatchActive;
-    private int _initialBuildCutLayer = int.MinValue;
     private readonly Dictionary<ChunkKey, ChunkGpuHashes> _gpuMeshHashCache = new();
 
     private readonly Queue<ReadyUpload> _readyUploadQueue = new();
@@ -439,8 +436,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.Update(field, frameTime);
 
         _frame++;
-        if (_initialBuildBatchActive)
-            _initialBuildBatchKeys.Clear();
         RebuiltChunks = 0;
         RebuiltCutCaps = 0;
         CpuCaptureMillisecondsLastFrame = 0d;
@@ -461,12 +456,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int targetCutLayer = cutEnabled && stableCutLayer >= 0
             ? stableCutLayer
             : int.MinValue;
-
-        if (_frame == 1)
-        {
-            _initialBuildBatchActive = true;
-            _initialBuildCutLayer = targetCutLayer;
-        }
 
         List<Candidate> displayCandidates = _candidateScratch;
         displayCandidates.Clear();
@@ -544,17 +533,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             field, camera.Position, MathF.Max(0f, maximumViewDistanceMeters));
         CollectCompletedBuilds(field);
         UploadReadyMeshes();
-        bool initialBuildBatchReady = _initialBuildBatchActive &&
-            IsInitialBuildBatchReady(field);
-        if (initialBuildBatchReady)
-        {
-            int committedChunks = _initialBuildBatchKeys.Count;
-            _initialBuildBatchActive = false;
-            _initialBuildBatchKeys.Clear();
-            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_INITIAL_BATCH_COMMITTED",
-                $"chunks={committedChunks} uploads={GpuUploadsLastFrame} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
-        }
-
         if (_renderStep != _displayStep &&
             !_lodTransitionActive &&
             AreCandidateEntriesReady(transitionEntries, field, targetCutLayer))
@@ -573,10 +551,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _visible.Clear();
         foreach ((Candidate candidate, ChunkEntry entry) in _candidateEntriesScratch)
         {
-            if (_initialBuildBatchActive &&
-                _initialBuildBatchKeys.Contains(candidate.Key))
-                continue;
-
             bool hasVisibleSurface = entry.Surface.Length > 0;
             bool hasVisibleCutCap = cutEnabled && stableCutLayer >= 0 &&
                 entry.CutLayer == stableCutLayer && entry.CutCap.Length > 0;
@@ -776,8 +750,6 @@ private void PrepareCandidateEntries(
         {
             ChunkKey key = candidate.Key;
             keys?.Add(key);
-            if (_initialBuildBatchActive)
-                _initialBuildBatchKeys.Add(key);
             if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
             {
                 entry = new ChunkEntry();
@@ -1843,39 +1815,6 @@ private void PrepareCandidateEntries(
         GpuUploadMillisecondsLastFrame = timer.Elapsed.TotalMilliseconds;
     }
 
-    private bool IsInitialBuildBatchReady(SparseVoxelField field)
-    {
-        foreach (ChunkKey key in _initialBuildBatchKeys)
-        {
-            // A camera LOD change may retire the original level while its bulk
-            // build is running. It must not block publication of the new level.
-            if (key.Step != _displayStep && key.Step != _renderStep)
-                continue;
-            // The camera may move while the initial batch is building. Regions
-            // that are no longer visible are not part of the publication barrier.
-            if (!_visibleCandidateKeys.Contains(key) &&
-                !_transitionCandidateKeys.Contains(key))
-                continue;
-            if (!_chunks.TryGetValue(key, out ChunkEntry? entry))
-                continue;
-            if (entry.FailedRevision == entry.RequestRevision)
-                continue;
-            if (HasPendingWork(entry))
-                return false;
-            if (entry.Built &&
-                !entry.SurfaceDirty &&
-                !entry.CutDirty &&
-                entry.BaseVersion == field.BaseVersion &&
-                entry.PaletteVersion == _paletteVersion &&
-                entry.CutLayer == _initialBuildCutLayer)
-                continue;
-
-            return false;
-        }
-
-        return true;
-    }
-
     private void EnqueueReadyUpload(ChunkKey key, ChunkEntry entry)
     {
         if (entry.UploadQueued)
@@ -2286,7 +2225,6 @@ private void PrepareCandidateEntries(
         _chunks.Clear();
         _worldBuildSnapshot = null;
         _snapshotField = null;
-        _initialBuildBatchKeys.Clear();
         _gpuMeshHashCache.Clear();
         _readyUploadQueue.Clear();
         _evictionQueue.Clear();
