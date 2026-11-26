@@ -447,13 +447,51 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int macroFrustumTests = 0;
         int visibleMacroRegions = 0;
 
-        CollectVisibleCandidates(
-            field, camera, viewportWidth, viewportHeight,
-            maximumViewDistanceMeters, _displayStep, stableCutLayer,
-            displayCandidates,
-            ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
-        displayCandidates.Sort(static (a, b) =>
-            a.DistanceSquared.CompareTo(b.DistanceSquared));
+        List<Candidate> transitionCandidates = _transitionCandidateScratch;
+        List<(Candidate Candidate, ChunkEntry Entry)> transitionEntries =
+            _transitionEntriesScratch;
+        transitionCandidates.Clear();
+        transitionEntries.Clear();
+        _transitionCandidateKeys.Clear();
+
+        if (_renderStep == _displayStep)
+        {
+            CollectVisibleCandidates(
+                field, camera, viewportWidth, viewportHeight,
+                maximumViewDistanceMeters, _displayStep, stableCutLayer,
+                displayCandidates,
+                ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
+            displayCandidates.Sort(static (a, b) =>
+                a.DistanceSquared.CompareTo(b.DistanceSquared));
+
+            PrepareCandidateEntries(
+                field, displayCandidates, targetCutLayer,
+                _candidateEntriesScratch, _visibleCandidateKeys);
+        }
+        else
+        {
+            // During a LOD change, keep only already-resident meshes from the
+            // old level. Never schedule thousands of obsolete fine meshes.
+            CollectCachedVisibleCandidates(
+                field, camera, viewportWidth, viewportHeight,
+                maximumViewDistanceMeters, _displayStep,
+                displayCandidates, _candidateEntriesScratch,
+                _visibleCandidateKeys);
+
+            // Build the requested level directly. Do not walk through every
+            // intermediate LOD: a distant camera can jump from step 1 to 64.
+            CollectVisibleCandidates(
+                field, camera, viewportWidth, viewportHeight,
+                maximumViewDistanceMeters, _renderStep, stableCutLayer,
+                transitionCandidates,
+                ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
+            transitionCandidates.Sort(static (a, b) =>
+                a.DistanceSquared.CompareTo(b.DistanceSquared));
+
+            PrepareCandidateEntries(
+                field, transitionCandidates, targetCutLayer,
+                transitionEntries, _transitionCandidateKeys);
+        }
 
         FrustumCandidatesLastFrame = frustumTests;
         MacroFrustumTestsLastFrame = macroFrustumTests;
@@ -466,31 +504,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         Step16ChunksLastFrame = _displayStep == 16 ? displayCandidates.Count : 0;
         Step32ChunksLastFrame = _displayStep == 32 ? displayCandidates.Count : 0;
         Step64ChunksLastFrame = _displayStep == 64 ? displayCandidates.Count : 0;
-
-        PrepareCandidateEntries(
-            field, displayCandidates, targetCutLayer,
-            _candidateEntriesScratch, _visibleCandidateKeys);
-
-        List<Candidate> transitionCandidates = _transitionCandidateScratch;
-        List<(Candidate Candidate, ChunkEntry Entry)> transitionEntries =
-            _transitionEntriesScratch;
-        transitionCandidates.Clear();
-        transitionEntries.Clear();
-        _transitionCandidateKeys.Clear();
-
-        if (_renderStep != _displayStep)
-        {
-            BuildTransitionCandidates(
-                field, camera, viewportWidth, viewportHeight,
-                maximumViewDistanceMeters, stableCutLayer,
-                _displayStep, _renderStep, displayCandidates, transitionCandidates);
-            transitionCandidates.Sort(static (a, b) =>
-                a.DistanceSquared.CompareTo(b.DistanceSquared));
-
-            PrepareCandidateEntries(
-                field, transitionCandidates, targetCutLayer,
-                transitionEntries, keys: null);
-        }
 
         EvictChunksOutsideRadius(
             field, camera.Position, MathF.Max(0f, maximumViewDistanceMeters));
@@ -632,6 +645,73 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"uploads={GpuUploadsLastFrame} workers={_workerTasks.Length} buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} " +
                 $"uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
+    }
+
+    private void CollectCachedVisibleCandidates(
+        SparseVoxelField field,
+        Camera3D camera,
+        int viewportWidth,
+        int viewportHeight,
+        float maximumViewDistanceMeters,
+        int renderStep,
+        List<Candidate> candidates,
+        List<(Candidate Candidate, ChunkEntry Entry)> entries,
+        HashSet<ChunkKey> keys)
+    {
+        candidates.Clear();
+        entries.Clear();
+        keys.Clear();
+
+        float distance = float.IsFinite(maximumViewDistanceMeters)
+            ? MathF.Max(0f, maximumViewDistanceMeters)
+            : 0f;
+        float distanceSquared = distance * distance;
+        float voxelSize = SparseVoxelField.VoxelSizeMeters;
+
+        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
+        {
+            if (key.Step != renderStep || !entry.Built || entry.Surface.Length == 0)
+                continue;
+
+            int chunkSpan = ChunkCells * key.Step;
+            int originX = key.X * chunkSpan;
+            int originY = key.Y * chunkSpan;
+            int originZ = key.Z * chunkSpan;
+            if (originX >= field.Width || originY >= field.Height || originZ >= field.Depth)
+                continue;
+
+            int sizeX = Math.Min(chunkSpan, field.Width - originX);
+            int sizeY = Math.Min(chunkSpan, field.Height - originY);
+            int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
+            float nearestDistanceSquared = BoundsNearestDistanceSquared(
+                camera.Position,
+                originX, originY, originZ,
+                sizeX, sizeY, sizeZ);
+            if (nearestDistanceSquared > distanceSquared)
+                continue;
+
+            Vector3 center = new(
+                (originX + sizeX * 0.5f) * voxelSize,
+                (originY + sizeY * 0.5f) * voxelSize,
+                (originZ + sizeZ * 0.5f) * voxelSize);
+            float halfX = sizeX * voxelSize * 0.5f;
+            float halfY = sizeY * voxelSize * 0.5f;
+            float halfZ = sizeZ * voxelSize * 0.5f;
+            float radius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+
+            if (!TerrainFrustum.IsSphereVisible(
+                    camera, center, radius,
+                    viewportWidth, viewportHeight, distance))
+                continue;
+
+            Candidate candidate = new(
+                key, center, radius,
+                Vector3.DistanceSquared(center, camera.Position));
+            candidates.Add(candidate);
+            entries.Add((candidate, entry));
+            keys.Add(key);
+            entry.LastSeenFrame = _frame;
+        }
     }
 
 private void PrepareCandidateEntries(
@@ -1082,11 +1162,7 @@ private void PrepareCandidateEntries(
         else if (desiredStep < _displayStep && currentVoxelPixels < 1.25f)
             desiredStep = _displayStep;
 
-        int nextTargetStep = desiredStep > _displayStep
-            ? Math.Min(desiredStep, _displayStep * 2)
-            : desiredStep < _displayStep
-                ? Math.Max(desiredStep, _displayStep / 2)
-                : _displayStep;
+        int nextTargetStep = desiredStep;
 
         if (nextTargetStep == _renderStep)
             return;
