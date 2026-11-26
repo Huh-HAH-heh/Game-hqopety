@@ -33,7 +33,7 @@ public sealed class TerrainRenderSnapshot
 
     public int StorageRegionsX { get; }
     public int StorageRegionsY { get; }
-    public int StorageRegionCount => _sourceRegionVersions.Length;
+    public int StorageRegionCount => checked(StorageRegionsX * StorageRegionsY);
     public int StorageRegionSize { get; }
     public int RenderRegionsPerStorageRegion { get; }
 
@@ -81,10 +81,15 @@ public sealed class TerrainRenderSnapshot
         RegionsX = checked(StorageRegionsX * RenderRegionsPerStorageRegion);
         RegionsY = checked(StorageRegionsY * RenderRegionsPerStorageRegion);
 
-        _heightsMeters = new float[checked(RegionsX * RegionsY)];
-        _materialIds = new ushort[_heightsMeters.Length];
-        _sourceRegionVersions =
-            new long[checked(StorageRegionsX * StorageRegionsY)];
+        _heightsMeters = voxelMode
+            ? Array.Empty<float>()
+            : new float[checked(RegionsX * RegionsY)];
+        _materialIds = voxelMode
+            ? Array.Empty<ushort>()
+            : new ushort[_heightsMeters.Length];
+        _sourceRegionVersions = voxelMode
+            ? Array.Empty<long>()
+            : new long[checked(StorageRegionsX * StorageRegionsY)];
 
         Array.Fill(_sourceRegionVersions, long.MinValue);
         RefreshFromWorld(worldMap);
@@ -125,19 +130,23 @@ public sealed class TerrainRenderSnapshot
         }
 
         _worldMap = worldMap;
+
+        // Voxel mode has no heightmap snapshot. The procedural base and all
+        // CSG edits are sampled from the same sparse signed-density field.
+        if (IsVoxelMode)
+        {
+            bool changed = !_initialized ||
+                _lastVoxelBaseVersion != worldMap.Voxels.BaseVersion;
+
+            SourceWorldVersion = worldMap.TerrainVersion;
+            _lastVoxelBaseVersion = worldMap.Voxels.BaseVersion;
+            _complexSourceWorldVersion = worldMap.TerrainVersion;
+            _initialized = true;
+            return changed;
+        }
+
         if (_initialized && SourceWorldVersion == worldMap.TerrainVersion)
             return false;
-
-        // The voxel renderer reads the authoritative 3D field directly. A
-        // local CSG edit must not trigger a 2304x2304 legacy column snapshot
-        // refresh; only a procedural base-surface revision needs this cache.
-        if (IsVoxelMode && _initialized &&
-            _lastVoxelBaseVersion == worldMap.Voxels.BaseVersion)
-        {
-            SourceWorldVersion = worldMap.TerrainVersion;
-            _complexSourceWorldVersion = worldMap.TerrainVersion;
-            return false;
-        }
 
         bool changed = false;
         ReadOnlySpan<WorldRegion> regions = worldMap.WorldRegions;
