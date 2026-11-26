@@ -1250,7 +1250,7 @@ private void PrepareCandidateEntries(
             _totalBuildRequests++;
             if (_logger.IsEnabled(RenderLogMode.Detailed))
                 _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_REQUEST",
-                    $"chunk=({key.X},{key.Y},{key.Z}) step={key.Step} generation={request.Generation} revision={request.RequestRevision} base={request.BaseVersion} palette={request.PaletteVersion} cut={cutLayer} queued={_buildQueue.Count}");
+                    $"chunk=({key.X},{key.Y},{key.Z}) batch=({group.X},{group.Y},{group.Z}) step={key.Step} generation={request.Generation} revision={request.RequestRevision} base={request.BaseVersion} palette={request.PaletteVersion} cut={cutLayer} queued={_buildQueue.Count}");
         }
         catch (Exception exception)
         {
