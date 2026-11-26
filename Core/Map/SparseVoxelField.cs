@@ -1723,6 +1723,32 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         return mask;
     }
 
+    /// <summary>
+    /// Tests whether clipping this macro column can expose a horizontal solid/air
+    /// boundary. The base range is cached, so this does not sample the 3D field.
+    /// </summary>
+    public bool HasPotentialCutSurface(
+        int macroX,
+        int macroZ,
+        int cutLayer,
+        int macroCells)
+    {
+        if (cutLayer < 0 || cutLayer >= Height ||
+            macroX < 0 || macroZ < 0 ||
+            macroCells != SpatialMacroSize)
+            return false;
+
+        if (HasEditsInMacroColumn(macroX, macroZ))
+            return true;
+
+        if (_baseSurfaceRange == null)
+            return true;
+
+        (_, int maxSurface) = GetCachedBaseSurfaceRange(
+            macroX, macroZ, macroCells);
+        return maxSurface >= cutLayer;
+    }
+
     private (int Min, int Max) GetCachedBaseSurfaceRange(
         int macroX,
         int macroZ,
