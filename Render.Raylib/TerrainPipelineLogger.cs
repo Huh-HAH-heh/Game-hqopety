@@ -189,14 +189,15 @@ internal sealed class TerrainPipelineLogger : IDisposable
             CultureInfo.InvariantCulture,
             $"{_clock.ElapsedMilliseconds,8}ms f{frame:D7} t{Environment.CurrentManagedThreadId:D2} #{sequence:D7} {category} {safeMessage}");
 
-        if (critical)
+        if (!_messages.Writer.TryWrite(line))
         {
-            _critical.Enqueue(line);
-            _messages.Writer.TryWrite(string.Empty);
-        }
-        else if (!_messages.Writer.TryWrite(line))
-        {
-            Interlocked.Increment(ref _dropped);
+            if (critical)
+                _critical.Enqueue(line);
+            else
+                Interlocked.Increment(ref _dropped);
+
+            if (critical)
+                _messages.Writer.TryWrite(string.Empty);
         }
     }
 
