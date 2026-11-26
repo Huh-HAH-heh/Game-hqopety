@@ -224,6 +224,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly ConcurrentQueue<BuildRequest> _buildQueue = new();
     private readonly ConcurrentQueue<BuildCompletion> _completedBuildQueue = new();
     private readonly SemaphoreSlim _buildSignal = new(0);
+    private int _batchWakePending;
+    private int _pendingBatchWakeTokens;
     private readonly Task[] _workerTasks;
     private int _activeWorkers;
     private int _runningMeshJobs;
@@ -495,6 +497,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 field, transitionCandidates, targetCutLayer,
                 transitionEntries, _transitionCandidateKeys);
         }
+
+        // All visible requests for this frame are queued before waking workers.
+        // The worker pool receives one batch wake-up, not one signal per chunk.
+        SignalBuildWorkers();
 
         FrustumCandidatesLastFrame = frustumTests;
         MacroFrustumTestsLastFrame = macroFrustumTests;
@@ -1229,7 +1235,6 @@ private void PrepareCandidateEntries(
             entry.BuildQueued = true;
             entry.RunningBuild = request;
             _buildQueue.Enqueue(request);
-            _buildSignal.Release();
             _totalBuildRequests++;
             if (_logger.IsEnabled(RenderLogMode.Detailed))
                 _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_REQUEST",
@@ -1246,6 +1251,21 @@ private void PrepareCandidateEntries(
         }
     }
 
+    private void SignalBuildWorkers()
+    {
+        if (_buildQueue.IsEmpty ||
+            Interlocked.CompareExchange(ref _batchWakePending, 1, 0) != 0)
+            return;
+
+        Volatile.Write(ref _pendingBatchWakeTokens, _workerTasks.Length);
+        for (int i = 0; i < _workerTasks.Length; i++)
+            _buildSignal.Release();
+
+        if (_logger.IsEnabled(RenderLogMode.FrameSummary))
+            _logger.Write(RenderLogMode.FrameSummary, "MESH_BUILD_BATCH_SIGNAL",
+                $"workers={_workerTasks.Length} queued={_buildQueue.Count}");
+    }
+
     private async Task WorkerLoopAsync()
     {
         while (true)
@@ -1254,17 +1274,24 @@ private void PrepareCandidateEntries(
             if (Volatile.Read(ref _workerStopping) != 0)
                 break;
 
-            if (!_buildQueue.TryDequeue(out BuildRequest? request))
-                continue;
-
-            Interlocked.Increment(ref _runningMeshJobs);
-            try
+            if (Interlocked.Decrement(ref _pendingBatchWakeTokens) == 0)
             {
-                ProcessBuildRequest(request);
+                Volatile.Write(ref _batchWakePending, 0);
+                if (!_buildQueue.IsEmpty)
+                    SignalBuildWorkers();
             }
-            finally
+
+            while (_buildQueue.TryDequeue(out BuildRequest? request))
             {
-                Interlocked.Decrement(ref _runningMeshJobs);
+                Interlocked.Increment(ref _runningMeshJobs);
+                try
+                {
+                    ProcessBuildRequest(request);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _runningMeshJobs);
+                }
             }
         }
 
