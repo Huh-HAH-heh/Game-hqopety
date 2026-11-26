@@ -108,7 +108,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
     {
         ArgumentNullException.ThrowIfNull(field);
         if (chunkX < 0 || chunkY < 0 || chunkZ < 0 ||
-            step is not (1 or 2 or 4) || cellsPerAxis <= 0)
+            step is not (1 or 2 or 4 or 8 or 16 or 32 or 64) || cellsPerAxis <= 0)
             throw new ArgumentOutOfRangeException(nameof(chunkX));
 
         _source = field;
@@ -166,7 +166,7 @@ internal sealed class VoxelChunkBuildInput : IDisposable
                     // Intersect the terrain with the half-space below the cut.
                     // Density samples live at voxel centres (index + 0.5), so
                     // this signed distance places the cap exactly at CutLayer.
-                    float cutDensity = CutLayer - (worldY + Step * 0.5f);
+                    float cutDensity = CutLayer - (worldY + 0.5f);
                     density = MathF.Min(density, cutDensity);
                 }
 
@@ -594,7 +594,7 @@ internal static class VoxelChunkMesher
                         ? normal / MathF.Sqrt(normalLengthSquared)
                         : Vector3.UnitY;
 
-                    float sampleOffset = input.Step * 0.5f;
+                    const float sampleOffset = 0.5f;
                     positions[vertexCount] = new Vector3(
                         (input.OriginX + (x + u) * input.Step + sampleOffset) * SparseVoxelField.VoxelSizeMeters,
                         (input.OriginY + (y + v) * input.Step + sampleOffset) * SparseVoxelField.VoxelSizeMeters,
