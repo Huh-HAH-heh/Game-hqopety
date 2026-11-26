@@ -665,23 +665,34 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         for (int macroZ = firstMacroZ; macroZ <= lastMacroZ; macroZ++)
         for (int macroX = firstMacroX; macroX <= lastMacroX; macroX++)
         {
-            ulong potentialYMask = field.GetPotentialVerticalMacroMask(
+            ulong potentialYMask = field.GetPotentialVerticalChunkMask(
                 macroX, macroZ, macroCells);
             if (potentialYMask == 0)
                 continue;
 
             for (int macroY = firstMacroY; macroY <= lastMacroY; macroY++)
             {
-                if (macroY < 64 &&
-                    (potentialYMask & (1UL << macroY)) == 0)
-                    continue;
-
                 int firstChunkX = macroX * macroChunkCount;
-            int firstChunkY = macroY * macroChunkCount;
-            int firstChunkZ = macroZ * macroChunkCount;
-            int endChunkX = Math.Min(firstChunkX + macroChunkCount, chunksX);
-            int endChunkY = Math.Min(firstChunkY + macroChunkCount, chunksY);
-            int endChunkZ = Math.Min(firstChunkZ + macroChunkCount, chunksZ);
+                int firstChunkY = macroY * macroChunkCount;
+                int firstChunkZ = macroZ * macroChunkCount;
+                int endChunkX = Math.Min(firstChunkX + macroChunkCount, chunksX);
+                int endChunkY = Math.Min(firstChunkY + macroChunkCount, chunksY);
+                int endChunkZ = Math.Min(firstChunkZ + macroChunkCount, chunksZ);
+
+                bool hasPotentialChunkY = false;
+                int maskFirstY = Math.Max(firstY, firstChunkY);
+                int maskLastY = Math.Min(lastY, endChunkY - 1);
+                for (int chunkY = maskFirstY; chunkY <= maskLastY; chunkY++)
+                {
+                    if (chunkY >= 64 || (potentialYMask & (1UL << chunkY)) != 0)
+                    {
+                        hasPotentialChunkY = true;
+                        break;
+                    }
+                }
+
+                if (!hasPotentialChunkY)
+                    continue;
 
             int originX = firstChunkX * ChunkCells;
             int originY = firstChunkY * ChunkCells;
@@ -738,10 +749,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int childFirstZ = Math.Max(firstZ, firstChunkZ);
             int childLastZ = Math.Min(lastZ, endChunkZ - 1);
 
-            for (int z = childFirstZ; z <= childLastZ; z++)
             for (int y = childFirstY; y <= childLastY; y++)
-            for (int x = childFirstX; x <= childLastX; x++)
             {
+                if (y < 64 && (potentialYMask & (1UL << y)) == 0)
+                    continue;
+
+                for (int z = childFirstZ; z <= childLastZ; z++)
+                for (int x = childFirstX; x <= childLastX; x++)
+                {
                 int chunkOriginX = x * ChunkCells;
                 int chunkOriginY = y * ChunkCells;
                 int chunkOriginZ = z * ChunkCells;
@@ -784,6 +799,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     chunkRadiusMeters,
                     Vector3.DistanceSquared(center, cameraPosition)));
                 }
+            }
             }
         }
     }
