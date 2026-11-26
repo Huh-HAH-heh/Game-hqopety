@@ -135,14 +135,14 @@ public sealed class TerrainRenderSnapshot
         // CSG edits are sampled from the same sparse signed-density field.
         if (IsVoxelMode)
         {
-            bool changed = !_initialized ||
+            bool voxelBaseChanged = !_initialized ||
                 _lastVoxelBaseVersion != worldMap.Voxels.BaseVersion;
 
             SourceWorldVersion = worldMap.TerrainVersion;
             _lastVoxelBaseVersion = worldMap.Voxels.BaseVersion;
             _complexSourceWorldVersion = worldMap.TerrainVersion;
             _initialized = true;
-            return changed;
+            return voxelBaseChanged;
         }
 
         if (_initialized && SourceWorldVersion == worldMap.TerrainVersion)
