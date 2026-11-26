@@ -998,6 +998,31 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             _baseMaterial,
             snapshots);
     }
+    /// <summary>
+    /// Captures the complete logical field in one immutable snapshot. Procedural
+    /// base samplers remain shared; only allocated edit bricks are copied.
+    /// </summary>
+    public IVoxelFieldSource CreateWorldSnapshot()
+    {
+        Dictionary<ChunkCoordinate, ChunkSnapshot>? snapshots = null;
+        foreach (KeyValuePair<ChunkCoordinate, Chunk> pair in _chunks)
+        {
+            if (pair.Value.IsEmpty)
+                continue;
+
+            snapshots ??= new Dictionary<ChunkCoordinate, ChunkSnapshot>(_chunks.Count);
+            snapshots.Add(pair.Key, ChunkSnapshot.From(pair.Value));
+        }
+
+        return new ChunkFieldSnapshot(
+            Width,
+            Height,
+            Depth,
+            _baseDensity,
+            _baseMaterial,
+            snapshots);
+    }
+
     public IVoxelFieldSource CreateRegionSnapshot(
         int originX,
         int originY,
