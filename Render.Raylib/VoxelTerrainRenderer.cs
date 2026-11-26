@@ -196,7 +196,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Queue<ReadyUpload> _readyUploadQueue = new();
     private readonly Queue<BuildRequest> _buildQueue = new();
     private readonly Queue<BuildCompletion> _completedBuildQueue = new();
-    private int _activeStep = 2;
+    private const int RenderStep = 1;
 
     private readonly List<Candidate> _candidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
@@ -241,14 +241,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalIdenticalCutSkips;
     private long _totalEmptyChunks;
 
-    public int ActiveRenderCellSize => _activeStep;
+    public int ActiveRenderCellSize => RenderStep;
     public float ActiveVoxelSizeMeters => SparseVoxelField.VoxelSizeMeters * _activeStep;
     public float RenderChunkSizeMeters =>
         ChunkCells * _activeStep * SparseVoxelField.VoxelSizeMeters;
     public bool IsUsingCoarseLod => _activeStep > 1;
     public int Step1ChunksLastFrame { get; private set; }
-    public int Step2ChunksLastFrame { get; private set; }
-    public int Step4ChunksLastFrame { get; private set; }
+    public int Step2ChunksLastFrame => 0;
+    public int Step4ChunksLastFrame => 0;
     public int Step16ChunksLastFrame => 0;
     public int DrawCallsLastFrame { get; private set; }
     public int VisibleChunksLastFrame { get; private set; }
@@ -329,7 +329,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=SurfaceNets(1,2,4);chunkCells={ChunkCells};step=auto;chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers=0;build=main-thread-budget;meshBudgetMs={MeshBuildBudgetMilliseconds:0.0};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=surface-nets-density");
+            $"resolution=FixedSurfaceNets(0.1m);chunkCells={ChunkCells};step=1;chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers=0;build=main-thread-budget;meshBudgetMs={MeshBuildBudgetMilliseconds:0.0};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=surface-nets-density");
         _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_READY", $"logPath=\"{_logger.LogPath}\" workers=0 build=main-thread");
     }
 
@@ -364,7 +364,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         long voxelFrameStarted = Stopwatch.GetTimestamp();
         _dynamicFragments.Update(field, GetFrameTime());
-        SetRenderStep(SelectRenderStep(camera));
 
         _frame++;
         RebuiltChunks = 0;
@@ -586,36 +585,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _stableCutLayer = cutLayer;
     }
 
-    private static int SelectRenderStep(Camera3D camera)
-    {
-        float distance = Vector3.Distance(camera.Position, camera.Target);
-        return distance < 64f ? 1 : distance < 192f ? 2 : 4;
-    }
-
-    private void SetRenderStep(int step)
-    {
-        if (step == _activeStep)
-            return;
-
-        _outsideRadiusScratch.Clear();
-        foreach (ChunkKey key in _chunks.Keys)
-            _outsideRadiusScratch.Add(key);
-        foreach (ChunkKey key in _outsideRadiusScratch)
-            RemoveCachedChunk(key, "lod-step-changed");
-
-        _buildQueue.Clear();
-        while (_completedBuildQueue.TryDequeue(out BuildCompletion completion))
-            if (completion.Result is VoxelMeshBuildResult result)
-                ReturnBuildCpuData(result);
-        _readyUploadQueue.Clear();
-        _gpuMeshHashCache.Clear();
-
-        _activeStep = step;
-        _logger.Write(RenderLogMode.Detailed, "VOXEL_LOD_CHANGED",
-            $"step={_activeStep} voxelSize={ActiveVoxelSizeMeters:0.000}m chunk={RenderChunkSizeMeters:0.0}m cells={ChunkCells}^3 mesher=surface-nets");
-    }
-
-    private bool HasPotentialRenderChunkY(
+            private bool HasPotentialRenderChunkY(
         SparseVoxelField field,
         int macroX,
         int macroZ,
