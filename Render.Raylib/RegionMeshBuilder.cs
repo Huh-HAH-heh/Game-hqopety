@@ -116,12 +116,15 @@ internal static class RegionMeshBuilder
         TerrainPalette palette,
         int paletteVersion)
     {
-        int storageIndex =
-            storageRegionX + storageRegionY * terrain.StorageRegionsX;
-        int patchesPerSide = terrain.RenderRegionsPerStorageRegion;
-        int firstRenderX = storageRegionX * patchesPerSide;
-        int firstRenderY = storageRegionY * patchesPerSide;
-        int chunkSize = patchesPerSide / SubChunksPerAxis;
+        int storageIndex = storageRegionX + storageRegionY * terrain.StorageRegionsX;
+        int originX = storageRegionX * terrain.StorageRegionSize;
+        int originZ = storageRegionY * terrain.StorageRegionSize;
+        int width = Math.Min(terrain.StorageRegionSize, terrain.RegionsX - originX);
+        int depth = Math.Min(terrain.StorageRegionSize, terrain.RegionsY - originZ);
+        int vertexWidth = width + 1;
+        int vertexDepth = depth + 1;
+        int vertexCount = checked(vertexWidth * vertexDepth);
+        int cellCount = checked(width * depth);
 
         RegionGpuMesh result = new()
         {
@@ -129,35 +132,130 @@ internal static class RegionMeshBuilder
             CutawayLayer = -1,
             PaletteVersion = paletteVersion,
             BoundsCenter = new Vector3(
-                (storageRegionX + 0.5f) * terrain.StorageRegionSize,
+                originX + width * 0.5f,
                 terrain.VerticalWorldExtentMeters * 0.5f,
-                (storageRegionY + 0.5f) * terrain.StorageRegionSize),
+                originZ + depth * 0.5f),
             BoundsRadius = MathF.Sqrt(
-                terrain.StorageRegionSize * terrain.StorageRegionSize * 0.5f +
+                width * width * 0.25f +
+                depth * depth * 0.25f +
                 terrain.VerticalWorldExtentMeters * terrain.VerticalWorldExtentMeters * 0.25f)
         };
 
-        List<Mesh> meshes = new(SubChunksPerAxis * SubChunksPerAxis);
-        for (int chunkY = 0; chunkY < SubChunksPerAxis; chunkY++)
+        Mesh mesh = new(vertexCount, checked(cellCount * 2));
+        mesh.AllocVertices();
+        mesh.AllocNormals();
+        mesh.AllocColors();
+        mesh.AllocIndices();
+
+        Span<Vector3> vertices = mesh.VerticesAs<Vector3>();
+        Span<Vector3> normals = mesh.NormalsAs<Vector3>();
+        Span<byte> colors = mesh.ColorsAs<byte>();
+        Span<ushort> indices = mesh.IndicesAs<ushort>();
+
+        for (int z = 0; z < vertexDepth; z++)
         {
-            for (int chunkX = 0; chunkX < SubChunksPerAxis; chunkX++)
+            int worldZ = Math.Min(originZ + z, terrain.RegionsY - 1);
+            for (int x = 0; x < vertexWidth; x++)
             {
-                BuildChunkMeshes(
-                    terrain,
-                    firstRenderX + chunkX * chunkSize,
-                    firstRenderY + chunkY * chunkSize,
-                    chunkSize,
-                    terrain.LayerCount,
-                    generateCutFaces: false,
-                    applyStaticLighting: false,
-                    palette,
-                    meshes);
+                int worldX = Math.Min(originX + x, terrain.RegionsX - 1);
+                int vertex = x + z * vertexWidth;
+                float height = terrain.GetHeightMeters(worldX, worldZ);
+
+                float left = SampleHeight(terrain, worldX - 1, worldZ);
+                float right = SampleHeight(terrain, worldX + 1, worldZ);
+                float north = SampleHeight(terrain, worldX, worldZ - 1);
+                float south = SampleHeight(terrain, worldX, worldZ + 1);
+                Vector3 normal = Vector3.Normalize(new(
+                    left - right,
+                    2f,
+                    north - south));
+
+                ushort materialId = terrain.GetMaterialId(worldX, worldZ);
+                Color color = palette.GetSurfaceColor(height, materialId);
+
+                vertices[vertex] = new Vector3(worldX, height, worldZ);
+                normals[vertex] = normal;
+                int colorOffset = vertex * 4;
+                colors[colorOffset] = color.R;
+                colors[colorOffset + 1] = color.G;
+                colors[colorOffset + 2] = color.B;
+                colors[colorOffset + 3] = color.A;
             }
         }
 
-        result.Meshes = meshes.ToArray();
-        result.IsUploaded = result.Meshes.Length > 0;
+        int indexOffset = 0;
+        bool hasVoxelEdits = terrain.Voxels.ChunkCount > 0;
+        for (int z = 0; z < depth; z++)
+        {
+            int worldZ = originZ + z;
+            for (int x = 0; x < width; x++)
+            {
+                int worldX = originX + x;
+                int a = x + z * vertexWidth;
+                int b = a + 1;
+                int d = a + vertexWidth;
+                int c = d + 1;
+
+                ushort materialId = terrain.GetMaterialId(worldX, worldZ);
+                bool edited = hasVoxelEdits &&
+                    IsInsideEditedMacroColumn(terrain.Voxels, worldX, worldZ);
+
+                if (materialId == 0 || edited)
+                {
+                    indices[indexOffset++] = (ushort)a;
+                    indices[indexOffset++] = (ushort)a;
+                    indices[indexOffset++] = (ushort)a;
+                    indices[indexOffset++] = (ushort)a;
+                    indices[indexOffset++] = (ushort)a;
+                    indices[indexOffset++] = (ushort)a;
+                    continue;
+                }
+
+                // Two upward-facing triangles share the four grid vertices.
+                indices[indexOffset++] = (ushort)a;
+                indices[indexOffset++] = (ushort)c;
+                indices[indexOffset++] = (ushort)b;
+                indices[indexOffset++] = (ushort)a;
+                indices[indexOffset++] = (ushort)d;
+                indices[indexOffset++] = (ushort)c;
+            }
+        }
+
+        UploadMesh(ref mesh, false);
+        result.Meshes = new[] { mesh };
+        result.IsUploaded = true;
         return result;
+    }
+
+    private static float SampleHeight(
+        TerrainRenderSnapshot terrain,
+        int x,
+        int z) =>
+        terrain.GetHeightMeters(
+            Math.Clamp(x, 0, terrain.RegionsX - 1),
+            Math.Clamp(z, 0, terrain.RegionsY - 1));
+
+    private static bool IsInsideEditedMacroColumn(
+        SparseVoxelField voxels,
+        int tileX,
+        int tileZ)
+    {
+        const int samplesPerMeter = 10;
+        int minSampleX = tileX * samplesPerMeter;
+        int minSampleZ = tileZ * samplesPerMeter;
+        int firstMacroX = minSampleX / SparseVoxelField.SpatialMacroSize;
+        int lastMacroX = (minSampleX + samplesPerMeter - 1) /
+            SparseVoxelField.SpatialMacroSize;
+        int firstMacroZ = minSampleZ / SparseVoxelField.SpatialMacroSize;
+        int lastMacroZ = (minSampleZ + samplesPerMeter - 1) /
+            SparseVoxelField.SpatialMacroSize;
+
+        for (int macroZ = firstMacroZ; macroZ <= lastMacroZ; macroZ++)
+        for (int macroX = firstMacroX; macroX <= lastMacroX; macroX++)
+            if (voxels.HasEditsInMacroColumn(macroX, macroZ))
+                return true;
+
+        return false;
     }
 
     public static Mesh[] BuildVoxelCutSurface(
