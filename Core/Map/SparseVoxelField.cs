@@ -1608,20 +1608,10 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     int densityIndex = localX +
                         localY * DensitySamplesPerAxis +
                         localZ * SamplePlane;
-                    if (Volatile.Read(ref chunk.DensityMask[densityIndex]) != 0)
-                    {
-                        Volatile.Write(ref chunk.DensityMask[densityIndex], (byte)0);
-                        Volatile.Write(ref chunk.Density[densityIndex], (short)0);
-                        changed = true;
-                    }
+                    changed |= chunk.RemoveDensity(densityIndex);
 
                     int materialIndex = cellColumn + localY * CellPlane;
-                    if (Volatile.Read(ref chunk.MaterialMask[materialIndex]) != 0)
-                    {
-                        Volatile.Write(ref chunk.MaterialMask[materialIndex], (byte)0);
-                        Volatile.Write(ref chunk.Materials[materialIndex], (ushort)0);
-                        changed = true;
-                    }
+                    changed |= chunk.RemoveMaterial(materialIndex);
                 }
             }
 
@@ -1630,8 +1620,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
             anyChanged = true;
             chunk.Revision = revision;
-            if (Array.IndexOf(chunk.DensityMask, (byte)1) < 0 &&
-                Array.IndexOf(chunk.MaterialMask, (byte)1) < 0)
+            if (chunk.IsEmpty)
             {
                 (removeChunks ??= new List<ChunkCoordinate>()).Add(key);
             }
@@ -2837,8 +2826,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        Volatile.Write(ref chunk.Density[index], Quantize(density));
-        Volatile.Write(ref chunk.DensityMask[index], (byte)1);
+        chunk.SetDensity(index, Quantize(density));
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
@@ -2855,14 +2843,13 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? existing) &&
-            Volatile.Read(ref existing.MaterialMask[index]) != 0 &&
-            Volatile.Read(ref existing.Materials[index]) == materialId)
+            existing.TryGetMaterial(index, out ushort existingMaterial) &&
+            existingMaterial == materialId)
             return;
 
         CaptureChunkBeforeWrite(key);
         Chunk chunk = GetOrCreateChunk(key);
-        Volatile.Write(ref chunk.Materials[index], materialId);
-        Volatile.Write(ref chunk.MaterialMask[index], (byte)1);
+        chunk.SetMaterial(index, materialId);
         chunk.Revision = revision;
         touched.Add(key);
         _editedChunkColumns.Add((key.X, key.Z));
