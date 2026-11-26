@@ -532,9 +532,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         EvictChunksOutsideRadius(
             field, camera.Position, MathF.Max(0f, maximumViewDistanceMeters));
         CollectCompletedBuilds(field);
+        UploadReadyMeshes();
         bool initialBuildBatchReady = _initialBuildBatchActive &&
             IsInitialBuildBatchReady(field);
-        UploadReadyMeshes(initialBuildBatchReady);
         if (initialBuildBatchReady)
         {
             int committedChunks = _initialBuildBatchKeys.Count;
@@ -562,6 +562,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _visible.Clear();
         foreach ((Candidate candidate, ChunkEntry entry) in _candidateEntriesScratch)
         {
+            if (_initialBuildBatchActive &&
+                _initialBuildBatchKeys.Contains(candidate.Key))
+                continue;
+
             bool hasVisibleSurface = entry.Surface.Length > 0;
             bool hasVisibleCutCap = cutEnabled && stableCutLayer >= 0 &&
                 entry.CutLayer == stableCutLayer && entry.CutCap.Length > 0;
@@ -1611,29 +1615,18 @@ private void PrepareCandidateEntries(
         }
     }
 
-    private void UploadReadyMeshes(bool forceWholeBatch = false)
+    private void UploadReadyMeshes()
     {
-        // Initial terrain is published atomically: keep all completed CPU meshes
-        // until every first-view region is ready, then upload the full set in one frame.
-        if (_initialBuildBatchActive && !forceWholeBatch)
-        {
-            GpuUploadMillisecondsLastFrame = 0d;
-            return;
-        }
-
         Stopwatch timer = Stopwatch.StartNew();
         GpuUploadMillisecondsLastFrame = 0d;
 
         int readyAtFrameStart = _readyUploadQueue.Count;
         int visited = 0;
 
-        while (forceWholeBatch
-            ? _readyUploadQueue.Count > 0
-            : visited < readyAtFrameStart)
+        while (visited < readyAtFrameStart)
         {
-            if (!forceWholeBatch &&
-                (GpuUploadsLastFrame >= MaximumGpuMeshUploadsPerFrame ||
-                 timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds))
+            if (GpuUploadsLastFrame >= MaximumGpuMeshUploadsPerFrame ||
+                timer.Elapsed.TotalMilliseconds >= GpuUploadBudgetMilliseconds)
                 break;
 
             if (!_readyUploadQueue.TryDequeue(out ReadyUpload queued))
@@ -1802,8 +1795,8 @@ private void PrepareCandidateEntries(
                 continue;
             if (entry.FailedRevision == entry.RequestRevision)
                 continue;
-            if (entry.ReadyBuild.HasValue)
-                continue;
+            if (HasPendingWork(entry))
+                return false;
             if (entry.Built &&
                 !entry.SurfaceDirty &&
                 !entry.CutDirty &&
