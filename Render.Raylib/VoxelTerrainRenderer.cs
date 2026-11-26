@@ -22,7 +22,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumPendingMeshJobs = 24;
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
     private const int MaximumGpuMeshUploadsPerFrame = 4;
-    private const double MeshBuildBudgetMilliseconds = 4.0;
     private const double GpuUploadBudgetMilliseconds = 3.0;
     private const int CutCapSettleFrames = 8;
 
@@ -458,6 +457,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 : int.MinValue;
 
             bool cutStateStale = entry.CutLayer != targetCutLayer;
+
+            // A completed old-cut mesh must never block the current cut revision.
+            if (entry.RunningBuild is { } pendingBuild &&
+                pendingBuild.CutLayer != targetCutLayer)
+            {
+                InvalidatePendingBuild(entry);
+            }
+
             bool needsSurfaceBuild =
                 surfaceStale ||
                 cutStateStale ||
@@ -489,7 +496,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         CollectCompletedBuilds(field);
         UploadReadyMeshes();
         if (_logger.IsEnabled(RenderLogMode.Detailed))
-            _logger.Write(RenderLogMode.Detailed, "VOXEL_VISIBILITY", $"frame={_frame} editedCandidates={candidates.Count} macroTests={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkTests={FrustumCandidatesLastFrame} cache={_chunks.Count} editedVisibleCandidates={_visibleCandidateKeys.Count} packets={GpuUploadsLastFrame} uploadMs={GpuUploadMillisecondsLastFrame:0.000}");
+            _logger.Write(RenderLogMode.Detailed, "VOXEL_VISIBILITY", $"frame={_frame} surfaceCandidates={candidates.Count} macroTests={MacroFrustumTestsLastFrame} macroVisible={VisibleMacroRegionsLastFrame} chunkTests={FrustumCandidatesLastFrame} cache={_chunks.Count} visibleSurfaceCandidates={_visibleCandidateKeys.Count} packets={GpuUploadsLastFrame} uploadMs={GpuUploadMillisecondsLastFrame:0.000}");
 
         _visible.Clear();
         foreach ((Candidate candidate, ChunkEntry entry) in candidateEntries)
@@ -566,7 +573,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count;
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
-            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={RenderStep} editedCandidates={VisibleCandidatesLastFrame} editedVisible={VisibleChunksLastFrame} draws={DrawCallsLastFrame} editedCache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers={_workerTasks.Length} buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
+            _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME", $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} step={RenderStep} surfaceCandidates={VisibleCandidatesLastFrame} visibleChunks={VisibleChunksLastFrame} draws={DrawCallsLastFrame} chunkCache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} uploads={GpuUploadsLastFrame} workers={_workerTasks.Length} buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
     }
 
     private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
@@ -594,28 +601,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (_cutLayerStableFrames >= CutCapSettleFrames)
             _stableCutLayer = cutLayer;
-    }
-
-            private bool HasPotentialRenderChunkY(
-        SparseVoxelField field,
-        int macroX,
-        int macroZ,
-        int renderChunkY,
-        int macroCells,
-        ulong potentialYMask)
-    {
-        int firstStorageChunkY = renderChunkY * RenderStep;
-        int lastStorageChunkY = firstStorageChunkY + RenderStep;
-        for (int storageChunkY = firstStorageChunkY; storageChunkY < lastStorageChunkY; storageChunkY++)
-        {
-            bool potential = storageChunkY < 64
-                ? (potentialYMask & (1UL << storageChunkY)) != 0
-                : field.HasPotentialVerticalChunk(macroX, macroZ, storageChunkY, macroCells);
-            if (potential)
-                return true;
-        }
-
-        return false;
     }
 
     private void CollectVisibleCandidates(
