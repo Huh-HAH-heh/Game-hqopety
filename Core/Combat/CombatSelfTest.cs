@@ -1544,8 +1544,8 @@ public static class CombatSelfTest
 
         bool initialValid =
             generationBytes <= 256 * 1024 &&
-            worldMap.Blocks.Volumes.ChunkCount <= 144 &&
-            worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
+            worldMap.Voxels.ChunkCount == 0 &&
+            worldMap.Voxels.EstimatedStorageBytes == 0 &&
             worldMap.GetMaterialId(5, 5, 0) == 1 &&
             worldMap.GetMaterialId(5, 5, 99) == 1 &&
             worldMap.GetMaterialId(5, 5, 100) == 0 &&
@@ -1555,8 +1555,8 @@ public static class CombatSelfTest
         {
             Console.WriteLine(
                 $"[DETAIL] compact initial bytes={generationBytes}, " +
-                $"chunks={worldMap.Blocks.Volumes.ChunkCount}, " +
-                $"complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"voxelChunks={worldMap.Voxels.ChunkCount}, " +
+                $"voxelBytes={worldMap.Voxels.EstimatedStorageBytes}, " +
                 $"m0={worldMap.GetMaterialId(5, 5, 0)}, " +
                 $"m99={worldMap.GetMaterialId(5, 5, 99)}, " +
                 $"m100={worldMap.GetMaterialId(5, 5, 100)}, " +
@@ -1565,10 +1565,11 @@ public static class CombatSelfTest
             return false;
         }
 
-        // Editing a single voxel must first materialize the compact column.
+        // A local edit allocates only its touched sparse 3D bricks.
         worldMap.SetMaterialId(5, 5, 50, 2);
         bool editedValid =
-            worldMap.Blocks.Volumes.ComplexColumnCount == 1 &&
+            worldMap.Voxels.ChunkCount > 0 &&
+            worldMap.Voxels.SparseChunkCount > 0 &&
             worldMap.GetMaterialId(5, 5, 49) == 1 &&
             worldMap.GetMaterialId(5, 5, 50) == 2 &&
             worldMap.GetMaterialId(5, 5, 99) == 1 &&
@@ -1576,7 +1577,7 @@ public static class CombatSelfTest
         if (!editedValid)
         {
             Console.WriteLine(
-                $"[DETAIL] material edit complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"[DETAIL] material edit chunks={worldMap.Voxels.ChunkCount}, sparse={worldMap.Voxels.SparseChunkCount}, " +
                 $"m49={worldMap.GetMaterialId(5, 5, 49)}, " +
                 $"m50={worldMap.GetMaterialId(5, 5, 50)}, " +
                 $"m99={worldMap.GetMaterialId(5, 5, 99)}, " +
@@ -1587,7 +1588,7 @@ public static class CombatSelfTest
         // Replacing that edited column with a simple height must clear stale upper voxels.
         worldMap.SetSolidHeight(5, 5, 30, 1);
         bool resetValid =
-            worldMap.Blocks.Volumes.ComplexColumnCount == 0 &&
+            worldMap.Voxels.ChunkCount == 0 &&
             worldMap.GetMaterialId(5, 5, 29) == 1 &&
             worldMap.GetMaterialId(5, 5, 30) == 0 &&
             worldMap.GetLayer(30).GetMaterialId(5, 5) == 0 &&
@@ -1595,7 +1596,7 @@ public static class CombatSelfTest
         if (!resetValid)
         {
             Console.WriteLine(
-                $"[DETAIL] reset complex={worldMap.Blocks.Volumes.ComplexColumnCount}, " +
+                $"[DETAIL] reset chunks={worldMap.Voxels.ChunkCount}, " +
                 $"m29={worldMap.GetMaterialId(5, 5, 29)}, " +
                 $"m30={worldMap.GetMaterialId(5, 5, 30)}, " +
                 $"layer30={worldMap.GetLayer(30).GetMaterialId(5, 5)}, " +
