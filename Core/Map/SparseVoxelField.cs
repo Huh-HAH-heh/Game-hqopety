@@ -664,7 +664,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int index = x % ChunkSize +
                 (y % ChunkSize) * ChunkSize +
                 (z % ChunkSize) * CellPlane;
-            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+            if (_chunks != null && _chunks.TryGetValue(key, out ChunkSnapshot? chunk))
             {
                 int found = Chunk.FindMaterial(chunk.Materials, chunk.Materials.Length, index);
                 if (found >= 0)
@@ -681,7 +681,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 return 0;
 
             ChunkCoordinate key = new(x / ChunkSize, y / ChunkSize, z / ChunkSize);
-            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+            if (_chunks != null && _chunks.TryGetValue(key, out ChunkSnapshot? chunk))
             {
                 int localX = x % ChunkSize;
                 int localY = y % ChunkSize;
