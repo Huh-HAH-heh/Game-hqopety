@@ -605,13 +605,13 @@ internal static class VoxelTerrainSelfTest
 
         field.FillBox(
             new Vector3(1f, 1f, 1f),
-            new Vector3(2f, 2f, 2f),
+            new Vector3(1.2f, 1.2f, 1.2f),
             BridgeMaterial);
 
         return field.ChunkCount > 0 &&
                field.SparseChunkCount == field.ChunkCount &&
                field.EstimatedStorageBytes < 16_000 &&
-               field.GetMaterialId(15, 15, 15) == BridgeMaterial;
+               field.GetMaterialId(11, 11, 11) == BridgeMaterial;
     }
 
     public static bool VoxelStorageExpandsOnDemand()
