@@ -666,8 +666,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             ulong potentialYMask = field.GetPotentialVerticalChunkMask(
                 macroX, macroZ, macroCells);
-            if (potentialYMask == 0)
-                continue;
 
             for (int macroY = firstMacroY; macroY <= lastMacroY; macroY++)
             {
@@ -683,11 +681,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 int maskLastY = Math.Min(lastY, endChunkY - 1);
                 for (int chunkY = maskFirstY; chunkY <= maskLastY; chunkY++)
                 {
-                    if (chunkY >= 64 || (potentialYMask & (1UL << chunkY)) != 0)
-                    {
-                        hasPotentialChunkY = true;
-                        break;
-                    }
+                    bool potential = chunkY < 64
+                        ? (potentialYMask & (1UL << chunkY)) != 0
+                        : field.HasPotentialVerticalChunk(
+                            macroX, macroZ, chunkY, macroCells);
+                    if (!potential)
+                        continue;
+
+                    hasPotentialChunkY = true;
+                    break;
                 }
 
                 if (!hasPotentialChunkY)
@@ -745,7 +747,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
                 for (int y = childFirstY; y <= childLastY; y++)
                 {
-                    if (y < 64 && (potentialYMask & (1UL << y)) == 0)
+                    bool potential = y < 64
+                        ? (potentialYMask & (1UL << y)) != 0
+                        : field.HasPotentialVerticalChunk(
+                            macroX, macroZ, y, macroCells);
+                    if (!potential)
                         continue;
 
                     for (int z = childFirstZ; z <= childLastZ; z++)
