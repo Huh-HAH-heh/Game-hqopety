@@ -413,12 +413,9 @@ internal sealed class DynamicVoxelFragmentRenderer : IDisposable
                 Matrix4x4.CreateFromQuaternion(body.Rotation) *
                 Matrix4x4.CreateTranslation(body.Position);
 
-            int meshIndex = 0;
             foreach (Mesh mesh in body.Meshes)
             {
                 DrawMesh(mesh, material, transform);
-                if (_logger.IsEnabled(RenderLogMode.Trace))
-                    _logger.Write(RenderLogMode.Trace, "DRAW_MESH", $"pass=dynamic-fragment mesh={meshIndex++} vertices={mesh.VertexCount} triangles={mesh.TriangleCount} position=({body.Position.X:0.00},{body.Position.Y:0.00},{body.Position.Z:0.00})");
             }
         }
     }
