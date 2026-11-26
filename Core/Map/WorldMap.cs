@@ -1235,13 +1235,6 @@ public sealed class WorldMap
 
             ushort normalizedHeight = checked((ushort)clampedHeight);
             ushort normalizedMaterial = clampedHeight > 0 ? materialId : (ushort)0;
-            int filledLayers = clampedHeight <= 0
-                ? 0
-                : Math.Clamp(
-                    (clampedHeight + LayerHeightUnits - 1) / LayerHeightUnits,
-                    0,
-                    LayerCount);
-
             if (region.HasUniformSurface &&
                 region.UniformSurfaceHeightUnits == normalizedHeight &&
                 region.UniformSurfaceMaterialId == normalizedMaterial)
