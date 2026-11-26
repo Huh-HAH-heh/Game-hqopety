@@ -722,11 +722,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             float halfZ = sizeZ * voxelSize * 0.5f;
             float radius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
 
-            if (!TerrainFrustum.IsSphereVisible(
-                    camera, center, radius,
-                    viewportWidth, viewportHeight, distance))
-                continue;
-
             Candidate candidate = new(
                 key, center, radius,
                 Vector3.DistanceSquared(center, camera.Position));
@@ -963,12 +958,6 @@ private void PrepareCandidateEntries(
                     halfGroupY * halfGroupY +
                     halfGroupZ * halfGroupZ);
 
-                macroFrustumTests++;
-                if (!TerrainFrustum.IsSphereVisible(
-                        camera, groupCenter, groupRadius,
-                        viewportWidth, viewportHeight, viewDistance))
-                    continue;
-
                 for (int macroX = childFirstX; macroX <= childLastX; macroX++)
                 for (int macroZ = childFirstZ; macroZ <= childLastZ; macroZ++)
                 {
@@ -1012,12 +1001,6 @@ private void PrepareCandidateEntries(
                     float halfZ = sizeZ * voxelSize * 0.5f;
                     float radius = MathF.Sqrt(
                         halfX * halfX + halfY * halfY + halfZ * halfZ);
-
-                    frustumTests++;
-                    if (!TerrainFrustum.IsSphereVisible(
-                            camera, center, radius,
-                            viewportWidth, viewportHeight, viewDistance))
-                        continue;
 
                     visibleMacroRegions++;
                     candidates.Add(new Candidate(
