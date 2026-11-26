@@ -684,4 +684,23 @@ internal static class VoxelTerrainSelfTest
                restored.SparseChunkCount == 1;
     }
 
+    public static bool AdaptiveVoxelStoragePromotesDenseBricks()
+    {
+        SparseVoxelField field = new(
+            width: 48,
+            height: 48,
+            depth: 48,
+            baseDensity: static (_, _, _) => -1f,
+            baseMaterial: static (_, _, _) => (ushort)0);
+
+        field.FillBox(
+            new Vector3(1.6f, 1.6f, 1.6f),
+            new Vector3(3.2f, 3.2f, 3.2f),
+            BridgeMaterial);
+
+        return field.DenseChunkCount > 0 &&
+               field.EstimatedStorageBytes > 0 &&
+               field.GetMaterialId(24, 24, 24) == BridgeMaterial;
+    }
+
 }
