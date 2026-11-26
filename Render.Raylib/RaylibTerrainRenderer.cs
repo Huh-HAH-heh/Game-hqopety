@@ -14,75 +14,12 @@ namespace RimClone.Render.Raylib;
 internal sealed class RaylibTerrainRenderer : IDisposable
 {
     private const int MaximumHeightmapMeshBuildsPerFrame = 6;
-    private const int MaximumCutSurfaceBuildsPerFrame = 144;
-
-    private const string VoxelVertexShader = """
-        #version 330
-        in vec3 vertexPosition;
-        in vec4 vertexColor;
-        in vec3 vertexNormal;
-
-        uniform mat4 mvp;
-        uniform mat4 matModel;
-
-        out vec3 fragWorldPosition;
-        out vec3 fragWorldNormal;
-        out vec4 fragColor;
-
-        void main()
-        {
-            vec4 worldPosition = matModel * vec4(vertexPosition, 1.0);
-            fragWorldPosition = worldPosition.xyz;
-            fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
-            fragColor = vertexColor;
-            gl_Position = mvp * vec4(vertexPosition, 1.0);
-        }
-        """;
-
-    private const string VoxelFragmentShader = """
-        #version 330
-        in vec3 fragWorldPosition;
-        in vec3 fragWorldNormal;
-        in vec4 fragColor;
-
-        uniform int uCutEnabled;
-        uniform float uCutHeight;
-        uniform vec3 uSunDirection;
-        uniform float uAmbientLight;
-        uniform float uSunIntensity;
-
-        out vec4 finalColor;
-
-        void main()
-        {
-            if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
-                discard;
-
-            float diffuse = max(
-                dot(normalize(fragWorldNormal), normalize(uSunDirection)),
-                0.0);
-            float illumination = clamp(
-                uAmbientLight + diffuse * uSunIntensity,
-                0.05,
-                1.5);
-            finalColor = vec4(
-                fragColor.rgb * illumination,
-                fragColor.a);
-        }
-        """;
 
     private readonly RegionGpuMesh?[] _regionMeshes;
     private readonly RegionGpuMesh?[] _visibleRegionMeshes;
     private int _activeVoxelCellSize = 1;
     private int _regionBuildCursor;
     private readonly Material _material;
-    private readonly Shader _voxelShader;
-    private readonly bool _hasVoxelShader;
-    private readonly int _cutEnabledLocation;
-    private readonly int _cutHeightLocation;
-    private readonly int _sunDirectionLocation;
-    private readonly int _ambientLightLocation;
-    private readonly int _sunIntensityLocation;
     private readonly TerrainRenderMode _mode;
     private readonly VoxelTerrainRenderer? _densityVoxelRenderer;
     private readonly TerrainPipelineLogger _logger;
@@ -90,10 +27,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
     private TerrainPalette _palette;
     private int _paletteVersion;
-    private SparseVoxelField? _observedVoxelField;
-    private int _worldTileWidth;
-    private int _worldTileDepth;
-    private int _storageRegionsX;
     private bool _disposed;
 
     public int DrawCallsLastFrame { get; private set; }
@@ -160,47 +93,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             ? Array.Empty<RegionGpuMesh?>()
             : new RegionGpuMesh?[terrain.StorageRegionCount];
 
-        Material material = LoadMaterialDefault();
-        Shader voxelShader = default;
-        int cutEnabledLocation = -1;
-        int cutHeightLocation = -1;
-        int sunDirectionLocation = -1;
-        int ambientLightLocation = -1;
-        int sunIntensityLocation = -1;
-        bool hasVoxelShader = false;
-
-        if (mode == TerrainRenderMode.Voxel)
-        {
-            voxelShader = LoadShaderFromMemory(VoxelVertexShader, VoxelFragmentShader);
-            if (!IsShaderValid(voxelShader))
-                throw new InvalidOperationException("The static voxel terrain shader could not be created.");
-
-            cutEnabledLocation = GetShaderLocation(voxelShader, "uCutEnabled");
-            cutHeightLocation = GetShaderLocation(voxelShader, "uCutHeight");
-            sunDirectionLocation = GetShaderLocation(voxelShader, "uSunDirection");
-            ambientLightLocation = GetShaderLocation(voxelShader, "uAmbientLight");
-            sunIntensityLocation = GetShaderLocation(voxelShader, "uSunIntensity");
-
-            if (cutEnabledLocation < 0 || cutHeightLocation < 0 ||
-                sunDirectionLocation < 0 || ambientLightLocation < 0 ||
-                sunIntensityLocation < 0)
-            {
-                UnloadShader(voxelShader);
-                throw new InvalidOperationException("The static voxel terrain shader is missing a required uniform.");
-            }
-
-            material.Shader = voxelShader;
-            hasVoxelShader = true;
-        }
-
-        _voxelShader = voxelShader;
-        _cutEnabledLocation = cutEnabledLocation;
-        _cutHeightLocation = cutHeightLocation;
-        _sunDirectionLocation = sunDirectionLocation;
-        _ambientLightLocation = ambientLightLocation;
-        _sunIntensityLocation = sunIntensityLocation;
-        _hasVoxelShader = hasVoxelShader;
-        _material = material;
+        _material = mode == TerrainRenderMode.Voxel
+            ? default
+            : LoadMaterialDefault();
 
         Synchronize(terrain);
 
@@ -213,55 +108,10 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         bool forceRebuild = false)
     {
         ThrowIfDisposed();
-        EnsureVoxelSubscription(terrain);
-        _logger.Write(RenderLogMode.Detailed, "TERRAIN_SYNCHRONIZE", $"forceRebuild={forceRebuild} regionCount={terrain.StorageRegionCount} mode={_mode}");
-        InvalidateMeshes(_regionMeshes, forceRebuild);
-    }
-
-    private void EnsureVoxelSubscription(TerrainRenderSnapshot terrain)
-    {
-        if (_mode != TerrainRenderMode.Voxel)
-            return;
-
-        if (!ReferenceEquals(_observedVoxelField, terrain.Voxels))
-        {
-            if (_observedVoxelField != null)
-                _observedVoxelField.Changed -= OnVoxelFieldChanged;
-
-            _observedVoxelField = terrain.Voxels;
-            _observedVoxelField.Changed += OnVoxelFieldChanged;
-        }
-
-        _worldTileWidth = terrain.RegionsX;
-        _worldTileDepth = terrain.RegionsY;
-        _storageRegionsX = terrain.StorageRegionsX;
-    }
-
-    private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
-    {
-        const int samplesPerMeter = 10;
-        int minX = Math.Max(0, bounds.MinX);
-        int minZ = Math.Max(0, bounds.MinZ);
-        int maxX = Math.Min(_worldTileWidth * samplesPerMeter, bounds.MaxX);
-        int maxZ = Math.Min(_worldTileDepth * samplesPerMeter, bounds.MaxZ);
-        if (maxX <= minX || maxZ <= minZ)
-            return;
-
-        int firstRegionX = (minX / samplesPerMeter) / TerrainRegion.TilesPerSide;
-        int lastRegionX = ((maxX - 1) / samplesPerMeter) / TerrainRegion.TilesPerSide;
-        int firstRegionZ = (minZ / samplesPerMeter) / TerrainRegion.TilesPerSide;
-        int lastRegionZ = ((maxZ - 1) / samplesPerMeter) / TerrainRegion.TilesPerSide;
-
-        for (int regionZ = firstRegionZ; regionZ <= lastRegionZ; regionZ++)
-        for (int regionX = firstRegionX; regionX <= lastRegionX; regionX++)
-        {
-            int index = regionX + regionZ * _storageRegionsX;
-            if ((uint)index >= (uint)_regionMeshes.Length)
-                continue;
-
-            if (_regionMeshes[index] is RegionGpuMesh region)
-                region.RegionVersion = long.MinValue;
-        }
+        _logger.Write(RenderLogMode.Detailed, "TERRAIN_SYNCHRONIZE",
+            $"forceRebuild={forceRebuild} regionCount={terrain.StorageRegionCount} mode={_mode}");
+        if (_mode == TerrainRenderMode.HeightmapFallback)
+            InvalidateMeshes(_regionMeshes, forceRebuild);
     }
 
     private static void InvalidateMeshes(
@@ -482,47 +332,6 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         _densityVoxelRenderer?.ClearDynamicFragments();
     }
 
-    private void SetVoxelCutShader(bool enabled, float height)
-    {
-        if (!_hasVoxelShader)
-            return;
-
-        int cutEnabled = enabled ? 1 : 0;
-        SetShaderValue(
-            _voxelShader,
-            _cutEnabledLocation,
-            cutEnabled,
-            ShaderUniformDataType.Int);
-        SetShaderValue(
-            _voxelShader,
-            _cutHeightLocation,
-            height,
-            ShaderUniformDataType.Float);
-    }
-
-    private void SetVoxelLighting()
-    {
-        if (!_hasVoxelShader)
-            return;
-
-        Vector3 direction = _palette.GetSunDirection();
-        SetShaderValue(
-            _voxelShader,
-            _sunDirectionLocation,
-            direction,
-            ShaderUniformDataType.Vec3);
-        SetShaderValue(
-            _voxelShader,
-            _ambientLightLocation,
-            _palette.AmbientLight,
-            ShaderUniformDataType.Float);
-        SetShaderValue(
-            _voxelShader,
-            _sunIntensityLocation,
-            _palette.SunIntensity,
-            ShaderUniformDataType.Float);
-    }
-
     private static void GetRegionBounds(
         TerrainRenderSnapshot terrain,
         int index,
@@ -565,15 +374,11 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             return;
 
         _logger.Write(RenderLogMode.ErrorsOnly, "TERRAIN_RENDERER_DISPOSE", $"mode={_mode} draws={DrawCallsLastFrame} visible={VisibleRegionsLastFrame}");
-        if (_observedVoxelField != null)
-            _observedVoxelField.Changed -= OnVoxelFieldChanged;
-        _observedVoxelField = null;
         _densityVoxelRenderer?.Dispose();
         DisposeMeshes(_regionMeshes);
 
-        UnloadMaterial(_material);
-        if (_hasVoxelShader)
-            UnloadShader(_voxelShader);
+        if (_mode == TerrainRenderMode.HeightmapFallback)
+            UnloadMaterial(_material);
         _disposed = true;
         if (_ownsLogger)
             _logger.Dispose();
