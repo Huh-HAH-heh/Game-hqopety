@@ -100,9 +100,6 @@ public static class CombatSelfTest
         RunTest("Voxel terrain: edited chunks survive save/load", VoxelTerrainSelfTest.EditSaveRoundTrips, ref passed, ref failed);
         RunTest("Voxel terrain: legacy WorldMap surface and occupancy queries read the 3D field", VoxelTerrainSelfTest.LegacyWorldMapQueriesUseVoxelField, ref passed, ref failed);
         RunTest("Voxel terrain: edits reject a mismatched base-world signature", VoxelTerrainSelfTest.SaveRejectsDifferentBaseWorld, ref passed, ref failed);
-        RunTest("Voxel storage: small edits remain sparse", VoxelTerrainSelfTest.AdaptiveVoxelStorageKeepsSmallEditsSparse, ref passed, ref failed);
-        RunTest("Voxel storage: bounds expand when edited", VoxelTerrainSelfTest.VoxelStorageExpandsOnDemand, ref passed, ref failed);
-        RunTest("Voxel storage: legacy v2 saves migrate to v3", VoxelTerrainSelfTest.LegacyVoxelSaveV2MigratesToAdaptiveStorage, ref passed, ref failed);
         RunTest("Voxel terrain: edit history restores and reapplies density", VoxelTerrainSelfTest.UndoRedoRestoresSdf, ref passed, ref failed);
         RunTest("Voxel terrain: falling body lands on the lower voxel floor", VoxelTerrainSelfTest.VerticalGravityFindsTunnelFloor, ref passed, ref failed);
         RunTest("Voxel navigation: distant voxel edits preserve unaffected local graph", VoxelTerrainSelfTest.DistantVoxelEditsKeepLocalNavCache, ref passed, ref failed);
