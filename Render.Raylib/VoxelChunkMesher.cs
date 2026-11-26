@@ -422,7 +422,6 @@ internal static class VoxelChunkMesher
         {
             Array.Fill(vertexMap, -1, 0, cellCount);
             int vertexCount = 0;
-            float voxelSize = SparseVoxelField.VoxelSizeMeters * input.Step;
 
             // One Surface Nets vertex per mixed-sign density cell.
             // The sample halo lets boundary quads use neighbouring cell vertices.
