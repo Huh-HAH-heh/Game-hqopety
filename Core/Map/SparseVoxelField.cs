@@ -47,47 +47,387 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         float ClearanceMeters);
 
     private const int SaveMagic = 0x31585652;
-    private const int SaveFormatVersion = 2;
+    private const int SaveFormatVersion = 3;
+    private const int LegacySaveFormatVersion = 2;
 
+    private readonly record struct DensityEntry(ushort Index, short Value);
+    private readonly record struct MaterialEntry(ushort Index, ushort Value);
+
+    /// <summary>
+    /// Adaptive 16³ brick. Low occupancy is stored as immutable sorted entries;
+    /// dense value/mask arrays are allocated only after a channel becomes dense.
+    /// Reads are lock-free. Mutations are single-writer operations on the world thread.
+    /// </summary>
     private sealed class Chunk
     {
-        public readonly short[] Density = new short[SampleCount];
-        public readonly byte[] DensityMask = new byte[SampleCount];
-        public readonly ushort[] Materials = new ushort[CellCount];
-        public readonly byte[] MaterialMask = new byte[CellCount];
+        private const int DensePromotionThreshold = 2048;
+        private const int MaskWords = CellCount / 64;
+
+        private DensityEntry[]? _sparseDensity;
+        private short[]? _denseDensity;
+        private long[]? _denseDensityMask;
+        private MaterialEntry[]? _sparseMaterials;
+        private ushort[]? _denseMaterials;
+        private long[]? _denseMaterialMask;
+        private int _densityCount;
+        private int _materialCount;
+
         public long Revision;
+        public int DensityCount => Volatile.Read(ref _densityCount);
+        public int MaterialCount => Volatile.Read(ref _materialCount);
+        public bool IsEmpty => DensityCount == 0 && MaterialCount == 0;
+        public long EstimatedBytes =>
+            (long)(Volatile.Read(ref _sparseDensity)?.Length ?? 0) * 4 +
+            (long)(Volatile.Read(ref _sparseMaterials)?.Length ?? 0) * 4 +
+            (long)(Volatile.Read(ref _denseDensity)?.Length ?? 0) * sizeof(short) +
+            (long)(Volatile.Read(ref _denseDensityMask)?.Length ?? 0) * sizeof(long) +
+            (long)(Volatile.Read(ref _denseMaterials)?.Length ?? 0) * sizeof(ushort) +
+            (long)(Volatile.Read(ref _denseMaterialMask)?.Length ?? 0) * sizeof(long);
+
+        public bool TryGetDensity(int index, out short value)
+        {
+            short[]? dense = Volatile.Read(ref _denseDensity);
+            if (dense != null)
+            {
+                long[] mask = Volatile.Read(ref _denseDensityMask)!;
+                long bit = 1L << (index & 63);
+                if ((Volatile.Read(ref mask[index >> 6]) & bit) != 0)
+                {
+                    value = Volatile.Read(ref dense[index]);
+                    return true;
+                }
+                value = 0;
+                return false;
+            }
+
+            DensityEntry[]? entries = Volatile.Read(ref _sparseDensity);
+            int found = FindDensity(entries, index);
+            if (found >= 0)
+            {
+                value = entries![found].Value;
+                return true;
+            }
+            value = 0;
+            return false;
+        }
+
+        public bool TryGetMaterial(int index, out ushort value)
+        {
+            ushort[]? dense = Volatile.Read(ref _denseMaterials);
+            if (dense != null)
+            {
+                long[] mask = Volatile.Read(ref _denseMaterialMask)!;
+                long bit = 1L << (index & 63);
+                if ((Volatile.Read(ref mask[index >> 6]) & bit) != 0)
+                {
+                    value = Volatile.Read(ref dense[index]);
+                    return true;
+                }
+                value = 0;
+                return false;
+            }
+
+            MaterialEntry[]? entries = Volatile.Read(ref _sparseMaterials);
+            int found = FindMaterial(entries, index);
+            if (found >= 0)
+            {
+                value = entries![found].Value;
+                return true;
+            }
+            value = 0;
+            return false;
+        }
+
+        public void SetDensity(int index, short value)
+        {
+            short[]? dense = Volatile.Read(ref _denseDensity);
+            if (dense != null)
+            {
+                long[] mask = Volatile.Read(ref _denseDensityMask)!;
+                int word = index >> 6;
+                long bit = 1L << (index & 63);
+                long previous = Volatile.Read(ref mask[word]);
+                if ((previous & bit) != 0)
+                {
+                    if (Volatile.Read(ref dense[index]) != value)
+                        Volatile.Write(ref dense[index], value);
+                    return;
+                }
+
+                Volatile.Write(ref dense[index], value);
+                Interlocked.Or(ref mask[word], bit);
+                Interlocked.Increment(ref _densityCount);
+                return;
+            }
+
+            DensityEntry[] old = Volatile.Read(ref _sparseDensity) ?? Array.Empty<DensityEntry>();
+            int found = FindDensity(old, index);
+            if (found >= 0)
+            {
+                if (old[found].Value == value)
+                    return;
+                DensityEntry[] updated = (DensityEntry[])old.Clone();
+                updated[found] = new DensityEntry((ushort)index, value);
+                Volatile.Write(ref _sparseDensity, updated);
+                return;
+            }
+
+            if (old.Length + 1 >= DensePromotionThreshold)
+            {
+                short[] values = new short[SampleCount];
+                long[] mask = new long[MaskWords];
+                foreach (DensityEntry entry in old)
+                {
+                    values[entry.Index] = entry.Value;
+                    mask[entry.Index >> 6] |= 1L << (entry.Index & 63);
+                }
+                values[index] = value;
+                mask[index >> 6] |= 1L << (index & 63);
+                Volatile.Write(ref _denseDensityMask, mask);
+                Volatile.Write(ref _denseDensity, values);
+                Volatile.Write(ref _sparseDensity, null);
+                Volatile.Write(ref _densityCount, old.Length + 1);
+                return;
+            }
+
+            DensityEntry[] next = new DensityEntry[old.Length + 1];
+            int insertion = ~found;
+            old.AsSpan(0, insertion).CopyTo(next);
+            next[insertion] = new DensityEntry((ushort)index, value);
+            old.AsSpan(insertion).CopyTo(next.AsSpan(insertion + 1));
+            Volatile.Write(ref _sparseDensity, next);
+            Volatile.Write(ref _densityCount, next.Length);
+        }
+
+        public void SetMaterial(int index, ushort value)
+        {
+            ushort[]? dense = Volatile.Read(ref _denseMaterials);
+            if (dense != null)
+            {
+                long[] mask = Volatile.Read(ref _denseMaterialMask)!;
+                int word = index >> 6;
+                long bit = 1L << (index & 63);
+                long previous = Volatile.Read(ref mask[word]);
+                if ((previous & bit) != 0)
+                {
+                    if (Volatile.Read(ref dense[index]) != value)
+                        Volatile.Write(ref dense[index], value);
+                    return;
+                }
+
+                Volatile.Write(ref dense[index], value);
+                Interlocked.Or(ref mask[word], bit);
+                Interlocked.Increment(ref _materialCount);
+                return;
+            }
+
+            MaterialEntry[] old = Volatile.Read(ref _sparseMaterials) ?? Array.Empty<MaterialEntry>();
+            int found = FindMaterial(old, index);
+            if (found >= 0)
+            {
+                if (old[found].Value == value)
+                    return;
+                MaterialEntry[] updated = (MaterialEntry[])old.Clone();
+                updated[found] = new MaterialEntry((ushort)index, value);
+                Volatile.Write(ref _sparseMaterials, updated);
+                return;
+            }
+
+            if (old.Length + 1 >= DensePromotionThreshold)
+            {
+                ushort[] values = new ushort[CellCount];
+                long[] mask = new long[MaskWords];
+                foreach (MaterialEntry entry in old)
+                {
+                    values[entry.Index] = entry.Value;
+                    mask[entry.Index >> 6] |= 1L << (entry.Index & 63);
+                }
+                values[index] = value;
+                mask[index >> 6] |= 1L << (index & 63);
+                Volatile.Write(ref _denseMaterialMask, mask);
+                Volatile.Write(ref _denseMaterials, values);
+                Volatile.Write(ref _sparseMaterials, null);
+                Volatile.Write(ref _materialCount, old.Length + 1);
+                return;
+            }
+
+            MaterialEntry[] next = new MaterialEntry[old.Length + 1];
+            int insertion = ~found;
+            old.AsSpan(0, insertion).CopyTo(next);
+            next[insertion] = new MaterialEntry((ushort)index, value);
+            old.AsSpan(insertion).CopyTo(next.AsSpan(insertion + 1));
+            Volatile.Write(ref _sparseMaterials, next);
+            Volatile.Write(ref _materialCount, next.Length);
+        }
+
+        public bool RemoveDensity(int index)
+        {
+            short[]? dense = Volatile.Read(ref _denseDensity);
+            if (dense != null)
+            {
+                long[] mask = Volatile.Read(ref _denseDensityMask)!;
+                int word = index >> 6;
+                long bit = 1L << (index & 63);
+                long previous = Interlocked.And(ref mask[word], ~bit);
+                if ((previous & bit) == 0)
+                    return false;
+                Volatile.Write(ref dense[index], 0);
+                Interlocked.Decrement(ref _densityCount);
+                return true;
+            }
+
+            DensityEntry[]? old = Volatile.Read(ref _sparseDensity);
+            int found = FindDensity(old, index);
+            if (found < 0)
+                return false;
+            DensityEntry[] next = new DensityEntry[old!.Length - 1];
+            old.AsSpan(0, found).CopyTo(next);
+            old.AsSpan(found + 1).CopyTo(next.AsSpan(found));
+            Volatile.Write(ref _sparseDensity, next.Length == 0 ? null : next);
+            Volatile.Write(ref _densityCount, next.Length);
+            return true;
+        }
+
+        public bool RemoveMaterial(int index)
+        {
+            ushort[]? dense = Volatile.Read(ref _denseMaterials);
+            if (dense != null)
+            {
+                long[] mask = Volatile.Read(ref _denseMaterialMask)!;
+                int word = index >> 6;
+                long bit = 1L << (index & 63);
+                long previous = Interlocked.And(ref mask[word], ~bit);
+                if ((previous & bit) == 0)
+                    return false;
+                Volatile.Write(ref dense[index], 0);
+                Interlocked.Decrement(ref _materialCount);
+                return true;
+            }
+
+            MaterialEntry[]? old = Volatile.Read(ref _sparseMaterials);
+            int found = FindMaterial(old, index);
+            if (found < 0)
+                return false;
+            MaterialEntry[] next = new MaterialEntry[old!.Length - 1];
+            old.AsSpan(0, found).CopyTo(next);
+            old.AsSpan(found + 1).CopyTo(next.AsSpan(found));
+            Volatile.Write(ref _sparseMaterials, next.Length == 0 ? null : next);
+            Volatile.Write(ref _materialCount, next.Length);
+            return true;
+        }
+
+        public DensityEntry[] CopyDensityEntries()
+        {
+            DensityEntry[]? sparse = Volatile.Read(ref _sparseDensity);
+            if (sparse != null)
+                return (DensityEntry[])sparse.Clone();
+
+            short[]? dense = Volatile.Read(ref _denseDensity);
+            if (dense == null)
+                return Array.Empty<DensityEntry>();
+
+            long[] mask = Volatile.Read(ref _denseDensityMask)!;
+            DensityEntry[] result = new DensityEntry[DensityCount];
+            int cursor = 0;
+            for (int word = 0; word < mask.Length; word++)
+            {
+                long bits = Volatile.Read(ref mask[word]);
+                while (bits != 0)
+                {
+                    int bit = System.Numerics.BitOperations.TrailingZeroCount((ulong)bits);
+                    int index = (word << 6) + bit;
+                    result[cursor++] = new DensityEntry((ushort)index, Volatile.Read(ref dense[index]));
+                    bits &= bits - 1;
+                }
+            }
+            return cursor == result.Length ? result : result.AsSpan(0, cursor).ToArray();
+        }
+
+        public MaterialEntry[] CopyMaterialEntries()
+        {
+            MaterialEntry[]? sparse = Volatile.Read(ref _sparseMaterials);
+            if (sparse != null)
+                return (MaterialEntry[])sparse.Clone();
+
+            ushort[]? dense = Volatile.Read(ref _denseMaterials);
+            if (dense == null)
+                return Array.Empty<MaterialEntry>();
+
+            long[] mask = Volatile.Read(ref _denseMaterialMask)!;
+            MaterialEntry[] result = new MaterialEntry[MaterialCount];
+            int cursor = 0;
+            for (int word = 0; word < mask.Length; word++)
+            {
+                long bits = Volatile.Read(ref mask[word]);
+                while (bits != 0)
+                {
+                    int bit = System.Numerics.BitOperations.TrailingZeroCount((ulong)bits);
+                    int index = (word << 6) + bit;
+                    result[cursor++] = new MaterialEntry((ushort)index, Volatile.Read(ref dense[index]));
+                    bits &= bits - 1;
+                }
+            }
+            return cursor == result.Length ? result : result.AsSpan(0, cursor).ToArray();
+        }
+
+        public static int FindDensity(DensityEntry[]? entries, int index)
+        {
+            if (entries == null)
+                return ~0;
+            int low = 0, high = entries.Length - 1;
+            while (low <= high)
+            {
+                int middle = low + ((high - low) >> 1);
+                int current = entries[middle].Index;
+                if (current == index) return middle;
+                if (current < index) low = middle + 1;
+                else high = middle - 1;
+            }
+            return ~low;
+        }
+
+        public static int FindMaterial(MaterialEntry[]? entries, int index)
+        {
+            if (entries == null)
+                return ~0;
+            int low = 0, high = entries.Length - 1;
+            while (low <= high)
+            {
+                int middle = low + ((high - low) >> 1);
+                int current = entries[middle].Index;
+                if (current == index) return middle;
+                if (current < index) low = middle + 1;
+                else high = middle - 1;
+            }
+            return ~low;
+        }
     }
 
     private sealed class ChunkSnapshot
     {
-        public required short[] Density { get; init; }
-        public required byte[] DensityMask { get; init; }
-        public required ushort[] Materials { get; init; }
-        public required byte[] MaterialMask { get; init; }
+        public required DensityEntry[] Density { get; init; }
+        public required MaterialEntry[] Materials { get; init; }
+        public long EstimatedBytes => (long)Density.Length * 4 + (long)Materials.Length * 4;
 
         public static ChunkSnapshot From(Chunk chunk) => new()
         {
-            Density = (short[])chunk.Density.Clone(),
-            DensityMask = (byte[])chunk.DensityMask.Clone(),
-            Materials = (ushort[])chunk.Materials.Clone(),
-            MaterialMask = (byte[])chunk.MaterialMask.Clone()
+            Density = chunk.CopyDensityEntries(),
+            Materials = chunk.CopyMaterialEntries()
         };
 
         public Chunk ToChunk(long revision)
         {
             Chunk chunk = new() { Revision = revision };
-            Density.CopyTo(chunk.Density, 0);
-            DensityMask.CopyTo(chunk.DensityMask, 0);
-            Materials.CopyTo(chunk.Materials, 0);
-            MaterialMask.CopyTo(chunk.MaterialMask, 0);
+            foreach (DensityEntry entry in Density)
+                chunk.SetDensity(entry.Index, entry.Value);
+            foreach (MaterialEntry entry in Materials)
+                chunk.SetMaterial(entry.Index, entry.Value);
             return chunk;
         }
 
         public bool ContentEquals(ChunkSnapshot other) =>
             Density.AsSpan().SequenceEqual(other.Density) &&
-            DensityMask.AsSpan().SequenceEqual(other.DensityMask) &&
-            Materials.AsSpan().SequenceEqual(other.Materials) &&
-            MaterialMask.AsSpan().SequenceEqual(other.MaterialMask);
+            Materials.AsSpan().SequenceEqual(other.Materials);
     }
 
     private sealed class ChunkFieldSnapshot : IVoxelFieldSource
@@ -126,9 +466,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int index = x % ChunkSize +
                 (y % ChunkSize) * DensitySamplesPerAxis +
                 (z % ChunkSize) * SamplePlane;
-            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk) &&
-                chunk.DensityMask[index] != 0)
-                return Volatile.Read(ref chunk.Density[index]) / DensityScale;
+            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+            {
+                int found = Chunk.FindDensity(chunk.Density, index);
+                if (found >= 0)
+                    return chunk.Density[found].Value / DensityScale;
+            }
 
             return _baseDensity(x, y, z);
         }
@@ -144,9 +487,12 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             int index = x % ChunkSize +
                 (y % ChunkSize) * ChunkSize +
                 (z % ChunkSize) * CellPlane;
-            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk) &&
-                chunk.MaterialMask[index] != 0)
-                return chunk.Materials[index];
+            if (_chunks.TryGetValue(key, out ChunkSnapshot? chunk))
+            {
+                int found = Chunk.FindMaterial(chunk.Materials, index);
+                if (found >= 0)
+                    return chunk.Materials[found].Value;
+            }
 
             return _baseMaterial(x, y, z);
         }
@@ -168,16 +514,16 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                     localY * DensitySamplesPerAxis +
                     localZ * SamplePlane;
 
-                if (chunk.DensityMask[densityIndex] != 0 &&
-                    chunk.Density[densityIndex] <= 0)
+                int densityFound = Chunk.FindDensity(chunk.Density, densityIndex);
+                if (densityFound >= 0 && chunk.Density[densityFound].Value <= 0)
                     return 0;
 
                 int materialIndex = localX +
                     localY * ChunkSize +
                     localZ * CellPlane;
-
-                if (chunk.MaterialMask[materialIndex] != 0)
-                    return checked((byte)chunk.Materials[materialIndex]);
+                int materialFound = Chunk.FindMaterial(chunk.Materials, materialIndex);
+                if (materialFound >= 0)
+                    return checked((byte)chunk.Materials[materialFound].Value);
             }
 
             return checked((byte)_baseMaterial(x, y, z));
@@ -454,8 +800,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? chunk) &&
-            Volatile.Read(ref chunk.DensityMask[index]) != 0)
-            return Volatile.Read(ref chunk.Density[index]) / DensityScale;
+            chunk.TryGetDensity(index, out short density))
+            return density / DensityScale;
 
         return _baseDensity(x, y, z);
     }
@@ -498,8 +844,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
 
         ChunkCoordinate key = GetCellChunk(x, y, z, out int index);
         if (_chunks.TryGetValue(key, out Chunk? chunk) &&
-            Volatile.Read(ref chunk.MaterialMask[index]) != 0)
-            return Volatile.Read(ref chunk.Materials[index]);
+            chunk.TryGetMaterial(index, out ushort material))
+            return material;
 
         return _baseMaterial(x, y, z);
     }
@@ -516,11 +862,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         ChunkCoordinate key = GetSampleChunk(x, y, z, out int densityIndex);
         if (_chunks.TryGetValue(key, out Chunk? chunk))
         {
-            if (Volatile.Read(ref chunk.DensityMask[densityIndex]) != 0 &&
-                Volatile.Read(ref chunk.Density[densityIndex]) <= 0)
-            {
+            if (chunk.TryGetDensity(densityIndex, out short density) && density <= 0)
                 return 0;
-            }
 
             int localX = x % ChunkSize;
             int localY = y % ChunkSize;
@@ -529,10 +872,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
                 localY * ChunkSize +
                 localZ * CellPlane;
 
-            if (Volatile.Read(ref chunk.MaterialMask[materialIndex]) != 0)
-            {
-                return checked((byte)Volatile.Read(ref chunk.Materials[materialIndex]));
-            }
+            if (chunk.TryGetMaterial(materialIndex, out ushort material))
+                return checked((byte)material;
         }
 
         return checked((byte)_baseMaterial(x, y, z));
