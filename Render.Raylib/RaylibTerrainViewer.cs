@@ -110,8 +110,8 @@ public static class RaylibTerrainViewer
 
         OrbitCameraController camera = new(terrain);
         camera.ApplySettings(settings);
-        RaylibPauseMenu menu = new(settings, renderLogger);
-        RaylibLayerSlicePanel layerPanel = new(renderLogger);
+        RaylibPauseMenu menu = new(settings);
+        RaylibLayerSlicePanel layerPanel = new();
         RaylibTerrainRenderer? renderer = null;
         bool cutawayMode = settings.CutawayEnabled;
         float maximumCutHeight = Math.Max(
@@ -185,13 +185,6 @@ public static class RaylibTerrainViewer
                     menu.SaveSettings();
                 }
 
-                if (renderLogger.IsEnabled(RenderLogMode.Trace))
-                {
-                    Vector2 pointer = GetMousePosition();
-                    Camera3D frameCamera = camera.Camera;
-                    renderLogger.Write(RenderLogMode.Trace, "FRAME_INPUT",
-                        $"mouse=({pointer.X:0.0},{pointer.Y:0.0}) wheel={GetMouseWheelMove():0.00} camera=({frameCamera.Position.X:0.0},{frameCamera.Position.Y:0.0},{frameCamera.Position.Z:0.0}) target=({frameCamera.Target.X:0.0},{frameCamera.Target.Y:0.0},{frameCamera.Target.Z:0.0}) menu={menu.IsOpen} cutaway={cutawayMode}");
-                }
 
                 RaylibMenuAction menuAction = menu.Update();
                 if (menuAction != RaylibMenuAction.None)
@@ -680,8 +673,6 @@ public static class RaylibTerrainViewer
                 }
 
                 BeginDrawing();
-                if (renderLogger.IsEnabled(RenderLogMode.Trace))
-                    renderLogger.Write(RenderLogMode.Trace, "RAYLIB_PASS_BEGIN", "name=BeginDrawing");
                 ClearBackground(menu.Settings.Palette.Background.ToRaylibColor());
 
                 long terrainDrawStarted = Stopwatch.GetTimestamp();
@@ -711,8 +702,7 @@ public static class RaylibTerrainViewer
                         GetVoxelToolStatus(
                             voxelEditMode,
                             voxelBrushRadiusMeters,
-                            voxelBrushMaterial),
-                        renderLogger);
+                            voxelBrushMaterial));
                     hudMs = Stopwatch.GetElapsedTime(hudStarted).TotalMilliseconds;
                     if (renderLogger.IsEnabled(RenderLogMode.Detailed))
                         renderLogger.Write(RenderLogMode.Detailed, "RENDER_PASS", $"name=hud elapsedMs={hudMs:0.000}");
@@ -734,8 +724,6 @@ public static class RaylibTerrainViewer
                 if (menu.IsOpen && renderLogger.IsEnabled(RenderLogMode.Detailed))
                     renderLogger.Write(RenderLogMode.Detailed, "RENDER_PASS", $"name=pause-menu elapsedMs={menuMs:0.000}");
 
-                if (renderLogger.IsEnabled(RenderLogMode.Trace))
-                    renderLogger.Write(RenderLogMode.Trace, "RAYLIB_PASS_END", "name=EndDrawing");
                 EndDrawing();
 
                 double frameMs = Stopwatch.GetElapsedTime(frameStarted).TotalMilliseconds;
@@ -1061,8 +1049,6 @@ public static class RaylibTerrainViewer
             (int)panelWidth,
             (int)panelHeight,
             new Color(8, 12, 18, 224));
-        if (logger.IsEnabled(RenderLogMode.Trace))
-            logger.Write(RenderLogMode.Trace, "UI_RECT", $"surface=HUD bounds=({margin:0.0},{margin:0.0},{panelWidth:0.0},{panelHeight:0.0}) textLines={lines.Count}");
 
         DrawRectangle(
             (int)margin,
@@ -1131,8 +1117,6 @@ public static class RaylibTerrainViewer
             fontSize,
             0f,
             color);
-        if (logger.IsEnabled(RenderLogMode.Trace))
-            logger.Write(RenderLogMode.Trace, "UI_TEXT", $"surface=HUD text=\"{fittedText}\" position=({x:0.0},{y:0.0}) size={fontSize:0.0}");
     }
 
     private static bool UpdateCutawayInput(
