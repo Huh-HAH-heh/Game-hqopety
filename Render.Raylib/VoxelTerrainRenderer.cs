@@ -247,6 +247,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ChunkCells * _activeStep * SparseVoxelField.VoxelSizeMeters;
     public bool IsUsingCoarseLod => _activeStep > 1;
     public int Step1ChunksLastFrame { get; private set; }
+    public int Step2ChunksLastFrame { get; private set; }
     public int Step4ChunksLastFrame { get; private set; }
     public int Step16ChunksLastFrame => 0;
     public int DrawCallsLastFrame { get; private set; }
@@ -406,6 +407,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         VisibleMacroRegionsLastFrame = visibleMacroRegions;
         CandidateOverflowLastFrame = 0;
         Step1ChunksLastFrame = _activeStep == 1 ? candidates.Count : 0;
+        Step2ChunksLastFrame = _activeStep == 2 ? candidates.Count : 0;
         Step4ChunksLastFrame = _activeStep == 4 ? candidates.Count : 0;
         _visibleCandidateKeys.Clear();
 
