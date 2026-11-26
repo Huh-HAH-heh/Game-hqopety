@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Core.Map;
 using System.Numerics;
 using Raylib_cs;
 using static Raylib_cs.Raylib;
@@ -89,6 +90,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
     private TerrainPalette _palette;
     private int _paletteVersion;
+    private SparseVoxelField? _observedVoxelField;
+    private int _worldTileWidth;
+    private int _worldTileDepth;
     private bool _disposed;
 
     public int DrawCallsLastFrame { get; private set; }
@@ -236,9 +240,55 @@ internal sealed class RaylibTerrainRenderer : IDisposable
         bool forceRebuild = false)
     {
         ThrowIfDisposed();
+        EnsureVoxelSubscription(terrain);
         _logger.Write(RenderLogMode.Detailed, "TERRAIN_SYNCHRONIZE", $"forceRebuild={forceRebuild} regionCount={terrain.StorageRegionCount} mode={_mode}");
         InvalidateMeshes(_regionMeshes, forceRebuild);
+    }
 
+    private void EnsureVoxelSubscription(TerrainRenderSnapshot terrain)
+    {
+        if (_mode != TerrainRenderMode.Voxel)
+            return;
+
+        if (!ReferenceEquals(_observedVoxelField, terrain.Voxels))
+        {
+            if (_observedVoxelField != null)
+                _observedVoxelField.Changed -= OnVoxelFieldChanged;
+
+            _observedVoxelField = terrain.Voxels;
+            _observedVoxelField.Changed += OnVoxelFieldChanged;
+        }
+
+        _worldTileWidth = terrain.RegionsX;
+        _worldTileDepth = terrain.RegionsY;
+    }
+
+    private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
+    {
+        const int samplesPerMeter = 10;
+        int minX = Math.Max(0, bounds.MinX);
+        int minZ = Math.Max(0, bounds.MinZ);
+        int maxX = Math.Min(_worldTileWidth * samplesPerMeter, bounds.MaxX);
+        int maxZ = Math.Min(_worldTileDepth * samplesPerMeter, bounds.MaxZ);
+        if (maxX <= minX || maxZ <= minZ)
+            return;
+
+        int firstRegionX = (minX / samplesPerMeter) / TerrainRegion.TilesPerSide;
+        int lastRegionX = ((maxX - 1) / samplesPerMeter) / TerrainRegion.TilesPerSide;
+        int firstRegionZ = (minZ / samplesPerMeter) / TerrainRegion.TilesPerSide;
+        int lastRegionZ = ((maxZ - 1) / samplesPerMeter) / TerrainRegion.TilesPerSide;
+
+        for (int regionZ = firstRegionZ; regionZ <= lastRegionZ; regionZ++)
+        for (int regionX = firstRegionX; regionX <= lastRegionX; regionX++)
+        {
+            int index = regionX + regionZ * (int)Math.Ceiling(
+                _worldTileWidth / (double)TerrainRegion.TilesPerSide);
+            if ((uint)index >= (uint)_regionMeshes.Length)
+                continue;
+
+            if (_regionMeshes[index] is RegionGpuMesh region)
+                region.RegionVersion = long.MinValue;
+        }
     }
 
     private static void InvalidateMeshes(
@@ -597,6 +647,9 @@ internal sealed class RaylibTerrainRenderer : IDisposable
             return;
 
         _logger.Write(RenderLogMode.ErrorsOnly, "TERRAIN_RENDERER_DISPOSE", $"mode={_mode} draws={DrawCallsLastFrame} visible={VisibleRegionsLastFrame}");
+        if (_observedVoxelField != null)
+            _observedVoxelField.Changed -= OnVoxelFieldChanged;
+        _observedVoxelField = null;
         _densityVoxelRenderer?.Dispose();
         DisposeMeshes(_regionMeshes);
 
