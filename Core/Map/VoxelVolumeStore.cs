@@ -502,6 +502,10 @@ public sealed partial class VoxelVolumeStore
         for (int by = bounds.MinY / BrickSize; by <= (bounds.MaxY - 1) / BrickSize; by++)
         for (int bx = bounds.MinX / BrickSize; bx <= (bounds.MaxX - 1) / BrickSize; bx++)
         {
+            BrickKey key = new(bx, by, bz);
+            _editBricks.TryGetValue(key, out EditBrick? edit);
+            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
+
             int ox = bx * BrickSize;
             int oy = by * BrickSize;
             int oz = bz * BrickSize;
@@ -511,11 +515,8 @@ public sealed partial class VoxelVolumeStore
             int x1 = Math.Min(bounds.MaxX, ox + BrickSize);
             int y1 = Math.Min(bounds.MaxY, oy + BrickSize);
             int z1 = Math.Min(bounds.MaxZ, oz + BrickSize);
-
-            BrickKey key = new(bx, by, bz);
-            _editBricks.TryGetValue(key, out EditBrick? edit);
-            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
             int rowLength = x1 - x0;
+            short[]? density = edit?.Density ?? baseBrick?.Density;
             List<int>? candidates = baseBrick == null
                 ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
                 : null;
@@ -527,15 +528,22 @@ public sealed partial class VoxelVolumeStore
                     sx * ((y - bounds.MinY) + sy * (z - bounds.MinZ));
                 int src = GetLocalIndex(ox, oy, oz, x0, y, z);
 
-                short[]? dense = edit?.Density ?? baseBrick?.Density;
-                if (dense != null)
+                if (density != null)
                 {
-                    dense.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
+                    density.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
+                    continue;
+                }
+
+                if (baseBrick?.IsUniform == true && edit?.Density == null)
+                {
+                    destination.Slice(dst, rowLength).Fill(baseBrick.UniformSample.Density);
                     continue;
                 }
 
                 for (int x = x0; x < x1; x++)
-                    destination[dst++] = EvaluateBaseDensity(x, y, z, candidates);
+                    destination[dst++] = baseBrick?.IsUniform == true
+                        ? baseBrick.UniformSample.Density
+                        : EvaluateBaseDensity(x, y, z, candidates);
             }
         }
     }
@@ -578,12 +586,12 @@ public sealed partial class VoxelVolumeStore
             int z1 = Math.Min(bounds.MaxZ, oz + BrickSize);
             int rowLength = x1 - x0;
 
-            short[]? densityData = edit?.Density ?? baseBrick?.Density;
-            ushort[]? materialData = edit?.Material ?? baseBrick?.Material;
-            List<int>? geometryCandidates = densityData == null || materialData == null
+            short[]? editDensity = edit?.Density;
+            ushort[]? editMaterial = edit?.Material;
+            List<int>? geometryCandidates = baseBrick == null
                 ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
                 : null;
-            List<int>? materialCandidates = materialData == null
+            List<int>? materialCandidates = baseBrick == null && editMaterial == null
                 ? GetBucketCandidates(_materialBuckets, ox, oy, oz)
                 : null;
 
@@ -594,12 +602,28 @@ public sealed partial class VoxelVolumeStore
                     sx * ((y - bounds.MinY) + sy * (z - bounds.MinZ));
                 int src = GetLocalIndex(ox, oy, oz, x0, y, z);
 
-                if (densityData != null && materialData != null)
+                if (editDensity == null && editMaterial == null && baseBrick?.IsUniform == true)
                 {
-                    materialData.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
+                    ushort material = baseBrick.UniformSample.IsSolid
+                        ? baseBrick.UniformSample.MaterialId
+                        : (ushort)0;
+                    destination.Slice(dst, rowLength).Fill(material);
+                    continue;
+                }
+
+                if (editDensity != null && editMaterial != null)
+                {
+                    editMaterial.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
                     for (int i = 0; i < rowLength; i++)
-                        if (densityData[src + i] <= 0)
+                        if (editDensity[src + i] <= 0)
                             destination[dst + i] = 0;
+                    continue;
+                }
+
+                if (baseBrick?.IsUniform == true && editDensity == null && editMaterial != null &&
+                    baseBrick.UniformSample.Density <= 0)
+                {
+                    destination.Slice(dst, rowLength).Clear();
                     continue;
                 }
 
@@ -609,30 +633,18 @@ public sealed partial class VoxelVolumeStore
                     VoxelSample baseSample = baseBrick != null
                         ? baseBrick.IsUniform
                             ? baseBrick.UniformSample
-                            : new VoxelSample(
-                                baseBrick.Density![local],
-                                baseBrick.Material![local])
-                        : densityData == null || materialData == null
-                            ? EvaluateBaseVoxel(x, y, z, geometryCandidates, materialCandidates)
-                            : default;
+                            : new VoxelSample(baseBrick.Density![local], baseBrick.Material![local])
+                        : EvaluateBaseVoxel(x, y, z, geometryCandidates, materialCandidates);
 
-                    short density = edit?.Density != null
-                        ? edit.Density[local]
-                        : baseBrick != null
-                            ? baseBrick.IsUniform
-                                ? baseBrick.UniformSample.Density
-                                : baseBrick.Density![local]
-                            : baseSample.Density;
+                    short density = editDensity != null
+                        ? editDensity[local]
+                        : baseSample.Density;
 
                     ushort material = density <= 0
                         ? (ushort)0
-                        : edit?.Material != null
-                            ? edit.Material[local]
-                            : baseBrick != null
-                                ? baseBrick.IsUniform
-                                    ? baseBrick.UniformSample.MaterialId
-                                    : baseBrick.Material![local]
-                                : baseSample.MaterialId;
+                        : editMaterial != null
+                            ? editMaterial[local]
+                            : baseSample.MaterialId;
 
                     destination[dst++] = material;
                 }
@@ -687,12 +699,12 @@ public sealed partial class VoxelVolumeStore
             int z1 = Math.Min(bounds.MaxZ, oz + BrickSize);
             int rowLength = x1 - x0;
 
-            short[]? densityData = edit?.Density ?? baseBrick?.Density;
-            ushort[]? materialData = edit?.Material ?? baseBrick?.Material;
-            List<int>? geometryCandidates = densityData == null || materialData == null
+            short[]? editDensity = edit?.Density;
+            ushort[]? editMaterial = edit?.Material;
+            List<int>? geometryCandidates = baseBrick == null
                 ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
                 : null;
-            List<int>? materialCandidates = materialData == null
+            List<int>? materialCandidates = baseBrick == null && editMaterial == null
                 ? GetBucketCandidates(_materialBuckets, ox, oy, oz)
                 : null;
 
@@ -704,10 +716,20 @@ public sealed partial class VoxelVolumeStore
                     (x0 - bounds.MinX) +
                     sizeX * ((y - bounds.MinY) + sizeY * (z - bounds.MinZ));
 
-                if (densityData != null && materialData != null)
+                if (editDensity == null && editMaterial == null && baseBrick?.IsUniform == true)
                 {
-                    densityData.AsSpan(src, rowLength).CopyTo(densityDestination.Slice(dst, rowLength));
-                    materialData.AsSpan(src, rowLength).CopyTo(materialDestination.Slice(dst, rowLength));
+                    densityDestination.Slice(dst, rowLength).Fill(baseBrick.UniformSample.Density);
+                    ushort material = baseBrick.UniformSample.IsSolid
+                        ? baseBrick.UniformSample.MaterialId
+                        : (ushort)0;
+                    materialDestination.Slice(dst, rowLength).Fill(material);
+                    continue;
+                }
+
+                if (editDensity != null && editMaterial != null)
+                {
+                    editDensity.AsSpan(src, rowLength).CopyTo(densityDestination.Slice(dst, rowLength));
+                    editMaterial.AsSpan(src, rowLength).CopyTo(materialDestination.Slice(dst, rowLength));
                     for (int i = 0; i < rowLength; i++)
                         if (densityDestination[dst + i] <= 0)
                             materialDestination[dst + i] = 0;
@@ -720,24 +742,17 @@ public sealed partial class VoxelVolumeStore
                     VoxelSample baseSample = baseBrick != null
                         ? baseBrick.IsUniform
                             ? baseBrick.UniformSample
-                            : new VoxelSample(
-                                baseBrick.Density![local],
-                                baseBrick.Material![local])
+                            : new VoxelSample(baseBrick.Density![local], baseBrick.Material![local])
                         : EvaluateBaseVoxel(x, y, z, geometryCandidates, materialCandidates);
 
-                    short density = edit?.Density != null
-                        ? edit.Density[local]
-                        : baseBrick != null
-                            ? baseBrick.Density[local]
-                            : baseSample.Density;
-
+                    short density = editDensity != null
+                        ? editDensity[local]
+                        : baseSample.Density;
                     ushort material = density <= 0
                         ? (ushort)0
-                        : edit?.Material != null
-                            ? edit.Material[local]
-                            : baseBrick != null
-                                ? baseBrick.Material[local]
-                                : baseSample.MaterialId;
+                        : editMaterial != null
+                            ? editMaterial[local]
+                            : baseSample.MaterialId;
 
                     densityDestination[dst] = density;
                     materialDestination[dst] = material;
