@@ -17,8 +17,7 @@ public sealed class VoxelVolumeStore
     public const int DensityUnitsPerMeter = 256;
     public const int SurfaceBandVoxels = 4;
 
-    private const float MaxDensityMeters =
-        short.MaxValue / (float)DensityUnitsPerMeter;
+    private float DensityClampMeters => SurfaceBandVoxels * VoxelSizeMeters;
 
     private readonly Dictionary<BucketKey, List<int>> _geometryBuckets = new();
     private readonly Dictionary<BucketKey, List<int>> _materialBuckets = new();
@@ -286,8 +285,11 @@ public sealed class VoxelVolumeStore
         short[] densityCopy = density.ToArray();
         ushort[] materialCopy = material.ToArray();
         for (int i = 0; i < BrickCellCount; i++)
+        {
+            densityCopy[i] = Quantize(Dequantize(densityCopy[i]));
             if (densityCopy[i] <= 0)
                 materialCopy[i] = 0;
+        }
 
         _baseBricks[new BrickKey(brickX, brickY, brickZ)] = new BaseBrick
         {
@@ -908,7 +910,7 @@ public sealed class VoxelVolumeStore
         List<int>? geometryCandidates,
         List<int>? materialCandidates)
     {
-        float density = -MaxDensityMeters;
+        float density = -DensityClampMeters;
         ushort materialId = 0;
         Vector3 position = VoxelCenter(x, y, z);
 
@@ -1212,13 +1214,13 @@ public sealed class VoxelVolumeStore
             (y + 0.5f) * VoxelSizeMeters,
             (z + 0.5f) * VoxelSizeMeters);
 
-    private static short Quantize(float densityMeters)
+    private short Quantize(float densityMeters)
     {
-        float scaled = Math.Clamp(
-            densityMeters * DensityUnitsPerMeter,
-            short.MinValue,
-            short.MaxValue);
-        return (short)MathF.Round(scaled);
+        float clamped = Math.Clamp(
+            densityMeters,
+            -DensityClampMeters,
+            DensityClampMeters);
+        return (short)MathF.Round(clamped * DensityUnitsPerMeter);
     }
 
     private static float Dequantize(short density) =>
