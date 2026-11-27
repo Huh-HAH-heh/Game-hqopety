@@ -307,8 +307,7 @@ public sealed class VoxelVolumeStore
 
         return EvaluateBaseDensity(
             x, y, z,
-            GetBucketCandidates(_geometryBuckets, x, y, z),
-            out _);
+            GetBucketCandidates(_geometryBuckets, x, y, z));
     }
 
     public ushort GetMaterialId(int x, int y, int z) =>
@@ -631,8 +630,7 @@ public sealed class VoxelVolumeStore
                 short density = brick.Density == null
                     ? EvaluateBaseDensity(
                         x, y, z,
-                        GetBucketCandidates(_geometryBuckets, x, y, z),
-                        out _)
+                        GetBucketCandidates(_geometryBuckets, x, y, z))
                     : brick.Density[GetLocalIndex(ox, oy, oz, x, y, z)];
 
                 if (density > 0)
@@ -757,15 +755,29 @@ public sealed class VoxelVolumeStore
         int x,
         int y,
         int z,
-        List<int>? geometryCandidates,
-        out ushort materialId)
+        List<int>? geometryCandidates)
     {
-        VoxelSample sample = EvaluateBaseVoxel(
-            x, y, z,
-            geometryCandidates,
-            GetBucketCandidates(_materialBuckets, x, y, z));
-        materialId = sample.MaterialId;
-        return sample.Density;
+        float density = -MaxDensityMeters;
+        Vector3 position = VoxelCenter(x, y, z);
+
+        if (geometryCandidates != null)
+        {
+            for (int i = 0; i < geometryCandidates.Count; i++)
+            {
+                GeometryOperation operation = _geometry[geometryCandidates[i]];
+                if (!operation.Bounds.Contains(x, y, z)) continue;
+
+                float shapeDistance = EvaluateInsideDistance(
+                    operation.Shape, position,
+                    operation.A, operation.B, operation.Radius);
+
+                density = operation.Operation == GeometryOperationKind.Union
+                    ? MathF.Max(density, shapeDistance)
+                    : MathF.Min(density, -shapeDistance);
+            }
+        }
+
+        return Quantize(density);
     }
 
     private void EnsureDensity(EditBrick brick, BrickKey key)
@@ -786,7 +798,7 @@ public sealed class VoxelVolumeStore
             int wz = oz + z;
             values[x + BrickSize * (y + BrickSize * z)] =
                 IsInside(wx, wy, wz)
-                    ? EvaluateBaseDensity(wx, wy, wz, candidates, out _)
+                    ? EvaluateBaseDensity(wx, wy, wz, candidates)
                     : short.MinValue;
         }
 
