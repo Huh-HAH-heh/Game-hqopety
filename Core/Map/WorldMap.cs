@@ -43,6 +43,7 @@ public sealed class WorldMap
     public WaterLayer Water { get; }
     public BlockTerrain Blocks { get; }
     public SparseVoxelField Voxels { get; }
+    public VoxelVolumeStore VoxelVolume { get; private set; }
     public bool UsesDiscreteBlockTerrain { get; private set; }
 
     private readonly TerrainTileRegion?[] _tileRegions;
@@ -126,6 +127,11 @@ public sealed class WorldMap
         _baseVoxelDepth = checked(height * 10);
 
         Water = new WaterLayer(width, height);
+        VoxelVolume = new VoxelVolumeStore(
+            _baseVoxelWidth,
+            _baseVoxelHeight,
+            _baseVoxelDepth,
+            voxelSizeMeters: SparseVoxelField.VoxelSizeMeters);
         Voxels = new SparseVoxelField(
             _baseVoxelWidth,
             _baseVoxelHeight,
@@ -135,6 +141,26 @@ public sealed class WorldMap
             GetBaseVoxelSurfaceRange,
             SampleBaseVoxelDensityColumn);
         Voxels.Changed += OnVoxelFieldChanged;
+    }
+
+    /// <summary>
+    /// Captures the generated height/material anchors as an immutable 3D base.
+    /// Call after SetSurfaceHeightPatches and before adding static geology.
+    /// </summary>
+    public void InitializeVoxelVolumeBase()
+    {
+        VoxelVolume = new VoxelVolumeStore(
+            _baseVoxelWidth,
+            _baseVoxelHeight,
+            _baseVoxelDepth,
+            voxelSizeMeters: SparseVoxelField.VoxelSizeMeters);
+        VoxelVolume.SetBaseSource(new WorldMapVoxelBaseSource(
+            TileWidth,
+            TileHeight,
+            _baseVoxelHeight,
+            _surfaceHeights,
+            _columnMaterialIds,
+            ComputeVoxelBaseSignature()));
     }
 
     public long GetRegionTerrainVersion(int regionX, int regionY)
@@ -326,6 +352,7 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLayer * 0.1f, y);
         Vector3 maximum = new(x + width, (zLayer + heightLayers) * 0.1f, y + depth);
+        MirrorVoxelBox(minimum, maximum, materialId);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -379,6 +406,7 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLevel, y);
         Vector3 maximum = new(x + width, zLevel + heightInMeters, y + depth);
+        MirrorVoxelBox(minimum, maximum, materialId);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -410,6 +438,7 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLevel, y);
         Vector3 maximum = new(x + width, zLevel + heightInMeters, y + depth);
+        MirrorVoxelBox(minimum, maximum, materialId, baseOperation: true);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -475,6 +504,7 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLevel, y);
         Vector3 maximum = minimum + Vector3.One;
+        MirrorVoxelBox(minimum, maximum, materialId);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -492,6 +522,7 @@ public sealed class WorldMap
             throw new ArgumentOutOfRangeException(nameof(zLevel));
 
         Vector3 minimum = new(x, zLevel, y);
+        MirrorVoxelBox(minimum, minimum + Vector3.One, materialId: 0);
         Voxels.CarveBox(minimum, minimum + Vector3.One);
     }
 
@@ -630,6 +661,7 @@ public sealed class WorldMap
             int index = GetColumnIndex(x, y);
             Vector3 minimum = new(x, z * 0.1f, y);
             Vector3 maximum = new(x + 1f, (z + 1) * 0.1f, y + 1f);
+            MirrorVoxelBox(minimum, maximum, materialId);
             if (materialId == 0)
                 Voxels.CarveBox(minimum, maximum);
             else
@@ -1590,6 +1622,48 @@ public sealed class WorldMap
         Voxels.IsCapsuleClear(
             xMeters, feetHeightMeters, yMeters, radiusMeters, bodyHeightMeters);
 
+    public void SaveVoxelVolume(Stream destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (!VoxelVolume.HasBaseSource)
+            throw new InvalidOperationException("Voxel volume base has not been initialized.");
+        VoxelVolume.Save(destination);
+    }
+
+    public void LoadVoxelVolume(Stream source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        VoxelVolume = VoxelVolumeStore.Load(source, ResolveVoxelBaseSource);
+    }
+
+    private IVoxelBaseSource ResolveVoxelBaseSource(
+        string typeId,
+        ushort dataVersion,
+        int width,
+        int height,
+        int depth,
+        float voxelSizeMeters,
+        BinaryReader reader)
+    {
+        if (typeId != WorldMapVoxelBaseSource.SourceTypeId || dataVersion != 1 ||
+            width != _baseVoxelWidth || height != _baseVoxelHeight ||
+            depth != _baseVoxelDepth ||
+            MathF.Abs(voxelSizeMeters - SparseVoxelField.VoxelSizeMeters) > 1e-6f)
+            throw new InvalidDataException("Voxel volume base descriptor does not match this WorldMap.");
+
+        ulong signature = reader.ReadUInt64();
+        if (signature != ComputeVoxelBaseSignature())
+            throw new InvalidDataException("Voxel volume was saved for a different generated base terrain.");
+
+        return new WorldMapVoxelBaseSource(
+            TileWidth,
+            TileHeight,
+            _baseVoxelHeight,
+            _surfaceHeights,
+            _columnMaterialIds,
+            signature);
+    }
+
     /// <summary>
     /// Saves locally edited voxel chunks only. The base world remains compact
     /// and must be regenerated with the same world seed before loading this file.
@@ -1619,6 +1693,32 @@ public sealed class WorldMap
         {
             if (File.Exists(temporaryPath))
                 File.Delete(temporaryPath);
+        }
+    }
+
+    private void MirrorVoxelBox(
+        Vector3 minimum,
+        Vector3 maximum,
+        ushort materialId,
+        bool baseOperation = false)
+    {
+        if (!VoxelVolume.HasBaseSource)
+            return;
+
+        bool writeBase = baseOperation && !VoxelVolume.IsBaseSealed;
+        if (materialId == 0)
+        {
+            if (writeBase)
+                VoxelVolume.SubtractBaseBox(minimum, maximum);
+            else
+                VoxelVolume.CarveBox(minimum, maximum);
+        }
+        else
+        {
+            if (writeBase)
+                VoxelVolume.AddSolidBox(minimum, maximum, materialId);
+            else
+                VoxelVolume.AddBox(minimum, maximum, materialId);
         }
     }
 
@@ -1668,14 +1768,20 @@ public sealed class WorldMap
     }
 
 
-    public void CarveVoxelBox(Vector3 minimumMeters, Vector3 maximumMeters) =>
+    public void CarveVoxelBox(Vector3 minimumMeters, Vector3 maximumMeters)
+    {
+        MirrorVoxelBox(minimumMeters, maximumMeters, materialId: 0);
         Voxels.CarveBox(minimumMeters, maximumMeters);
+    }
 
     public void AddVoxelBox(
         Vector3 minimumMeters,
         Vector3 maximumMeters,
-        ushort materialId) =>
+        ushort materialId)
+    {
+        MirrorVoxelBox(minimumMeters, maximumMeters, materialId);
         Voxels.FillBox(minimumMeters, maximumMeters, materialId);
+    }
 
     public void AddVoxelRamp(
         Vector3 startMeters,
@@ -2064,4 +2170,116 @@ public sealed class WorldMap
             x < TileWidth &&
             y < TileHeight;
     }
+
+    private sealed class WorldMapVoxelBaseSource : IVoxelBaseSource
+    {
+        public const string SourceTypeId = "rimclone.worldmap-heightfield";
+
+        private const float VoxelSize = SparseVoxelField.VoxelSizeMeters;
+        private const float DensityClamp = VoxelVolumeStore.SurfaceBandVoxels * VoxelSize;
+
+        private readonly int _tileWidth;
+        private readonly int _tileHeight;
+        private readonly ushort[] _surfaceHeights;
+        private readonly ushort[] _materials;
+        private readonly ulong _signature;
+
+        public string TypeId => SourceTypeId;
+        public ushort DataVersion => 1;
+        public int Width => _tileWidth * 10;
+        public int Height { get; }
+        public int Depth => _tileHeight * 10;
+        public float VoxelSizeMeters => VoxelSize;
+
+        public WorldMapVoxelBaseSource(
+            int tileWidth,
+            int tileHeight,
+            int height,
+            ushort[] surfaceHeights,
+            ushort[] materials,
+            ulong signature)
+        {
+            if (tileWidth <= 0 || tileHeight <= 0 || height <= 0)
+                throw new ArgumentOutOfRangeException(nameof(tileWidth));
+            if (surfaceHeights.Length != checked(tileWidth * tileHeight) ||
+                materials.Length != surfaceHeights.Length)
+                throw new ArgumentException("WorldMap base arrays do not match their dimensions.");
+
+            _tileWidth = tileWidth;
+            _tileHeight = tileHeight;
+            Height = height;
+            _surfaceHeights = (ushort[])surfaceHeights.Clone();
+            _materials = (ushort[])materials.Clone();
+            _signature = signature;
+        }
+
+        public VoxelVolumeStore.VoxelSample Sample(int x, int y, int z)
+        {
+            if ((uint)x >= (uint)Width ||
+                (uint)y >= (uint)Height ||
+                (uint)z >= (uint)Depth)
+                return new VoxelVolumeStore.VoxelSample(short.MinValue, 0);
+
+            float surfaceHeight = SampleSurfaceHeight(x, z, out float slopeX, out float slopeZ);
+            float gradient = MathF.Sqrt(1f + slopeX * slopeX + slopeZ * slopeZ);
+            float distanceVoxels = ComposeBaseVoxelDensity(
+                x, y, z, surfaceHeight, gradient);
+            float distanceMeters = Math.Clamp(
+                distanceVoxels * VoxelSize,
+                -DensityClamp,
+                DensityClamp);
+            short density = (short)MathF.Round(
+                distanceMeters * VoxelVolumeStore.DensityUnitsPerMeter);
+
+            if (density <= 0)
+                return new VoxelVolumeStore.VoxelSample(density, 0);
+
+            int tileX = Math.Clamp(x / 10, 0, _tileWidth - 1);
+            int tileZ = Math.Clamp(z / 10, 0, _tileHeight - 1);
+            ushort material = _materials[tileX + tileZ * _tileWidth];
+            return new VoxelVolumeStore.VoxelSample(
+                density,
+                material == 0 ? (ushort)1 : material);
+        }
+
+        public void WriteState(BinaryWriter writer) => writer.Write(_signature);
+
+        private float SampleSurfaceHeight(
+            int voxelX,
+            int voxelZ,
+            out float slopeX,
+            out float slopeZ)
+        {
+            float gridX = (voxelX + 0.5f) * VoxelSize - 0.5f;
+            float gridZ = (voxelZ + 0.5f) * VoxelSize - 0.5f;
+            int rawX = (int)MathF.Floor(gridX);
+            int rawZ = (int)MathF.Floor(gridZ);
+            float tx = gridX - rawX;
+            float tz = gridZ - rawZ;
+
+            int x0 = Math.Clamp(rawX, 0, _tileWidth - 1);
+            int x1 = Math.Clamp(rawX + 1, 0, _tileWidth - 1);
+            int z0 = Math.Clamp(rawZ, 0, _tileHeight - 1);
+            int z1 = Math.Clamp(rawZ + 1, 0, _tileHeight - 1);
+
+            float h00 = _surfaceHeights[x0 + z0 * _tileWidth];
+            float h10 = _surfaceHeights[x1 + z0 * _tileWidth];
+            float h01 = _surfaceHeights[x0 + z1 * _tileWidth];
+            float h11 = _surfaceHeights[x1 + z1 * _tileWidth];
+
+            float row0 = h00 + (h10 - h00) * tx;
+            float row1 = h01 + (h11 - h01) * tx;
+            float height = row0 + (row1 - row0) * tz;
+
+            float derivativeX = (h10 - h00) * (1f - tz) +
+                (h11 - h01) * tz;
+            float derivativeZ = (h01 - h00) * (1f - tx) +
+                (h11 - h10) * tx;
+
+            slopeX = derivativeX * VoxelSize;
+            slopeZ = derivativeZ * VoxelSize;
+            return height;
+        }
+    }
+
 }
