@@ -25,6 +25,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumPendingMeshJobs = 4096;
     private const int MaximumWorldSamplesPerAxis = 4096;
     private const int MaximumWorldMeshVertices = 96_000_000;
+    private const int MaximumTotalGpuPageVertices = 140_000_000;
     private const int GpuPageBufferVertices = 2_000_000;
     private const int FallbackLodStep = MaximumRenderStep;
     // Use the available physical cores for density capture and Surface Nets builds.
@@ -392,6 +393,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _totalGpuUploads;
     private long _totalGpuUnloads;
     private long _totalGpuUploadFailures;
+    private long _gpuCapacityVersion;
     private long _totalIdenticalSurfaceSkips;
     private long _totalIdenticalCutSkips;
     private long _totalEmptyChunks;
@@ -724,7 +726,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _coarseVisiblePages.Clear();
         GpuPageKey coarsePageKey = new(FallbackLodStep);
-        if (coarseCoverageReady &&
+        bool basePageReady = baseCoverageReady &&
+            _gpuPages.TryGetValue(new GpuPageKey(BaseLodStep), out GpuMeshPage? basePage) &&
+            basePage.HasMesh && !basePage.Dirty;
+        if (coarseCoverageReady && !basePageReady &&
             _gpuPages.TryGetValue(coarsePageKey, out GpuMeshPage? coarsePage) &&
             coarsePage.HasMesh && !coarsePage.Dirty)
             _coarseVisiblePages.Add((coarsePageKey, coarsePage));
@@ -742,8 +747,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach ((GpuPageKey key, GpuMeshPage page) in _visiblePages)
         {
-            if (key.Step == FallbackLodStep ||
-                (key.Step == BaseLodStep && !baseCoverageReady))
+            if ((!coarseCoverageReady && !basePageReady) ||
+                key.Step == FallbackLodStep ||
+                (key.Step == BaseLodStep && !basePageReady))
                 continue;
 
             SetLodDepthBias(GetLodDepthBias(key.Step, cameraDistance, nearPlane));
@@ -1164,14 +1170,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
 
         int remaining = MaximumWorldMeshVertices - page.AllocatedVertexCount;
-        int bufferCapacity = Math.Min(Math.Max(GpuPageBufferVertices, capacity), remaining);
+        GetGpuVertexUsage(out long totalPhysicalVertices, out _);
+        int globalRemaining = (int)Math.Max(0L, MaximumTotalGpuPageVertices - totalPhysicalVertices);
+        int bufferCapacity = Math.Min(
+            Math.Min(Math.Max(GpuPageBufferVertices, capacity), remaining),
+            globalRemaining);
         if (bufferCapacity < capacity)
-            throw new InvalidOperationException("No reusable GPU page range or physical capacity remains.");
+            throw new InvalidOperationException(
+                remaining < capacity
+                    ? "No reusable GPU page range or physical capacity remains."
+                    : "No global GPU page capacity remains.");
 
         GpuMeshBuffer nextBuffer = CreateGpuBuffer(bufferCapacity);
         page.Buffers.Add(nextBuffer);
         page.AllocatedVertexCount += bufferCapacity;
         page.CapacityVersion++;
+        _gpuCapacityVersion++;
         nextBuffer.ReservedVertexCount = capacity;
         page.ReservedVertexCount += capacity;
         GpuUploadsLastFrame++;
@@ -1212,7 +1226,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
-    private static void ReleaseGpuRegion(GpuMeshPage page, GpuMeshRegion region)
+    private void ReleaseGpuRegion(GpuMeshPage page, GpuMeshRegion region)
     {
         if (region.Capacity <= 0 ||
             (uint)region.BufferIndex >= (uint)page.Buffers.Count)
@@ -1250,6 +1264,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ranges.Insert(insert, new GpuFreeRange(offset, capacity));
         page.ReservedVertexCount -= region.Capacity;
         page.CapacityVersion++;
+        _gpuCapacityVersion++;
 
         while (ranges.Count > 0)
         {
@@ -1262,7 +1277,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
-    private static void ClearAndReleaseGpuRegion(GpuMeshPage page, GpuMeshRegion region)
+    private void ClearAndReleaseGpuRegion(GpuMeshPage page, GpuMeshRegion region)
     {
         if (region.Capacity <= 0 ||
             (uint)region.BufferIndex >= (uint)page.Buffers.Count)
@@ -1402,10 +1417,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     // capacity pressure must not permanently poison this chunk revision.
                     bool capacityBlocked = exception is InvalidOperationException &&
                         (exception.Message.StartsWith("No reusable GPU page range", StringComparison.Ordinal) ||
+                         exception.Message.StartsWith("No global GPU page capacity", StringComparison.Ordinal) ||
                          exception.Message.StartsWith("LOD page exceeds", StringComparison.Ordinal));
                     entry.GpuUploadRetryFrame = capacityBlocked ? long.MaxValue : _frame + 60;
                     entry.GpuUploadRetryVersion = capacityBlocked
-                        ? page.CapacityVersion
+                        ? _gpuCapacityVersion
                         : long.MinValue;
                     entry.SurfaceDirty = true;
                     _totalGpuUploadFailures++;
@@ -1430,8 +1446,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             if (entry.GpuUploadRetryVersion != long.MinValue)
             {
-                if (!_gpuPages.TryGetValue(GetGpuPageKey(key), out GpuMeshPage? page) ||
-                    page.CapacityVersion == entry.GpuUploadRetryVersion)
+                if (_gpuCapacityVersion == entry.GpuUploadRetryVersion)
                     continue;
 
                 entry.GpuUploadRetryVersion = long.MinValue;
@@ -2440,8 +2455,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static float GetLodDepthBias(int step, float cameraDistance, float nearPlane)
     {
-        float detail = (FallbackLodStep - step) / (float)(FallbackLodStep - 1);
-        float depthOffsetMeters = 0.025f * detail;
+        float detailLevels = MathF.Log2(FallbackLodStep / (float)step);
+        float depthOffsetMeters = detailLevels * 0.08f;
         float distanceSquared = MathF.Max(1f, cameraDistance * cameraDistance);
         return 2f * nearPlane * depthOffsetMeters / distanceSquared;
     }
