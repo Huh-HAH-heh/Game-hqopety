@@ -1,0 +1,23 @@
+name: Voxel storage core
+
+on:
+  push:
+    branches:
+      - feature/voxel-storage-core
+  pull_request:
+    paths:
+      - "Core/Map/VoxelVolumeStore.cs"
+      - "Core.Tests/**"
+      - "Core/Core.csproj"
+      - ".github/workflows/voxel-storage-core.yml"
+
+jobs:
+  storage-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Run storage tests
+        run: dotnet run --project Core.Tests/Core.Tests.csproj --configuration Release
