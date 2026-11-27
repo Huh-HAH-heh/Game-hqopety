@@ -9,6 +9,7 @@ namespace Core.Map;
 
 public sealed partial class VoxelVolumeStore
 {
+    /// <summary>Saves the base volume and edit bricks as a compressed binary stream.</summary>
     public void Save(Stream destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
@@ -77,6 +78,7 @@ public sealed partial class VoxelVolumeStore
         }
     }
 
+    /// <summary>Restores a complete storage snapshot written by <see cref="Save"/>.</summary>
     public static VoxelVolumeStore Load(Stream source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -97,6 +99,8 @@ public sealed partial class VoxelVolumeStore
         float voxelSize = reader.ReadSingle();
         bool sealedBase = reader.ReadBoolean();
         long revision = reader.ReadInt64();
+        if (revision < 0)
+            throw new InvalidDataException("Invalid voxel volume revision.");
 
         VoxelVolumeStore store = new(width, height, depth, voxelSize);
         long maxBrickCount =
@@ -120,6 +124,8 @@ public sealed partial class VoxelVolumeStore
             float radius = reader.ReadSingle();
             ushort materialId = reader.ReadUInt16();
             ValidateShape(shape, a, b, radius);
+            if (operation == GeometryOperationKind.Union)
+                ValidateMaterial(materialId);
 
             int id = store._geometry.Count;
             store._geometry.Add(new GeometryOperation(
