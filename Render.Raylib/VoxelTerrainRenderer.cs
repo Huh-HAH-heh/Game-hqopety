@@ -25,6 +25,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumPendingMeshJobs = 4096;
     private const int MaximumWorldSamplesPerAxis = 4096;
     private const int MaximumWorldMeshVertices = 64_000_000;
+    private const int GpuPageBufferVertices = 2_000_000;
+    private const int FallbackLodStep = MaximumRenderStep;
     // Use the available physical cores for density capture and Surface Nets builds.
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
     private const double GpuUploadBudgetMilliseconds = 3.0;
@@ -106,27 +108,54 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private readonly record struct ChunkKey(int X, int Y, int Z, int Step);
     private readonly record struct GpuPageKey(int Step);
-    private readonly record struct GpuMeshRegion(int Offset, int Capacity, int VertexCount);
+    private readonly record struct GpuMeshRegion(
+        int BufferIndex,
+        int Offset,
+        int Capacity,
+        int VertexCount);
 
-    private sealed class GpuMeshPage : IDisposable
+    private sealed class GpuMeshBuffer : IDisposable
     {
         public Mesh Mesh;
-        public bool HasMesh;
-        public bool Initialized;
-        public bool Dirty;
-        public readonly Dictionary<ChunkKey, VoxelMeshData[]> CpuMeshes = new();
-        public readonly Dictionary<ChunkKey, GpuMeshRegion> Regions = new();
+        public readonly int Capacity;
+        public int ReservedVertexCount;
+        public int DrawVertexCount;
+
+        public GpuMeshBuffer(Mesh mesh, int capacity)
+        {
+            Mesh = mesh;
+            Capacity = capacity;
+        }
 
         public void Dispose()
         {
-            if (HasMesh) UnloadMesh(Mesh);
-            foreach (VoxelMeshData[] data in CpuMeshes.Values)
-                ReturnMeshData(data);
-            CpuMeshes.Clear();
-            Regions.Clear();
+            if (Mesh.VaoId != 0)
+                UnloadMesh(Mesh);
             Mesh = default;
-            HasMesh = false;
-            Initialized = false;
+            ReservedVertexCount = 0;
+            DrawVertexCount = 0;
+        }
+    }
+
+    // One logical world page per LOD, split into append-only GPU buffers.
+    // New chunks append to free ranges; existing chunks update only their own
+    // VBO range. A new result never forces an unchanged chunk to be re-uploaded.
+    private sealed class GpuMeshPage : IDisposable
+    {
+        public readonly List<GpuMeshBuffer> Buffers = new(4);
+        public readonly Dictionary<ChunkKey, GpuMeshRegion> Regions = new();
+        public int ReservedVertexCount;
+        public bool Dirty;
+        public bool HasMesh => Buffers.Count > 0;
+
+        public void Dispose()
+        {
+            foreach (GpuMeshBuffer buffer in Buffers)
+                buffer.Dispose();
+            Buffers.Clear();
+            Regions.Clear();
+            ReservedVertexCount = 0;
+            Dirty = false;
         }
     }
 
@@ -247,8 +276,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly List<(GpuPageKey Key, GpuMeshPage Page)> _transitionVisiblePages = new();
     private readonly HashSet<GpuPageKey> _visiblePageKeys = new();
     private readonly HashSet<GpuPageKey> _transitionVisiblePageKeys = new();
-    private readonly List<(ChunkKey Key, VoxelMeshData[] Data, int VertexCount, int Capacity, bool HasPending)> _worldRegionScratch = new();
     private readonly List<ChunkKey> _inactiveLodChunkScratch = new();
+    private readonly List<Candidate> _coarseCandidateScratch = new();
+    private readonly List<(Candidate Candidate, ChunkEntry Entry)> _coarseCandidateEntriesScratch = new();
+    private readonly List<(ChunkKey Key, ChunkEntry Entry)> _coarseVisible = new();
+    private readonly List<(GpuPageKey Key, GpuMeshPage Page)> _coarseVisiblePages = new();
+    private readonly HashSet<ChunkKey> _coarseCandidateKeys = new();
+    private readonly HashSet<GpuPageKey> _coarseVisiblePageKeys = new();
     private readonly List<GpuPageKey> _inactiveLodPageScratch = new();
     // One immutable snapshot represents the entire sparse voxel field and is reused
     // until the field version changes. Per-chunk density buffers are created by workers.
