@@ -1786,17 +1786,33 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _gpuMeshHashCache.Remove(key);
         GpuPageKey pageKey = GetGpuPageKey(key);
-        if (_gpuPages.TryGetValue(pageKey, out GpuMeshPage? page) &&
-            page.Regions.TryGetValue(key, out GpuMeshRegion region))
+        if (_gpuPages.TryGetValue(pageKey, out GpuMeshPage? page))
         {
-            if (region.Capacity > 0 &&
-                (uint)region.BufferIndex < (uint)page.Buffers.Count)
+            if (page.Regions.TryGetValue(key, out GpuMeshRegion region))
             {
-                ClearAndReleaseGpuRegion(page, region);
+                if (region.Capacity > 0 &&
+                    (uint)region.BufferIndex < (uint)page.Buffers.Count)
+                {
+                    ClearAndReleaseGpuRegion(page, region);
+                    GpuUploadsLastFrame++;
+                    _totalGpuUploads++;
+                }
+
                 page.Regions.Remove(key);
                 RecalculateGpuDrawCounts(page);
-                GpuUploadsLastFrame++;
-                _totalGpuUploads++;
+            }
+
+            // A fully unused detail page must return its physical VBO allocation
+            // to the global budget so another LOD can claim it.
+            if (page.Regions.Count == 0 &&
+                pageKey.Step != BaseLodStep &&
+                pageKey.Step != FallbackLodStep)
+            {
+                _gpuPages.Remove(pageKey);
+                _dirtyGpuPageKeys.RemoveAll(dirtyKey => dirtyKey.Equals(pageKey));
+                _totalGpuUnloads += page.Buffers.Count;
+                page.Dispose();
+                _gpuCapacityVersion++;
             }
         }
 
