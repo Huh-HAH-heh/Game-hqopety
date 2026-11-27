@@ -783,7 +783,7 @@ public sealed class VoxelVolumeStore
             (maxMeters - minMeters) * 0.5f,
             0f,
             add: true,
-            materialId);
+            materialId: materialId);
     }
 
     public void PaintSphere(Vector3 centerMeters, float radiusMeters, ushort materialId)
