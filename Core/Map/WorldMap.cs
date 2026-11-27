@@ -1750,58 +1750,156 @@ public sealed class WorldMap
     /// on the shared 0.1 m voxel lattice. Positive values are solid; negative are air.
     /// Density is measured in voxel units, matching SparseVoxelField's edit scale.
     /// </summary>
-    private (float SurfaceHeight, float GradientLength) SampleBaseVoxelDensityColumn(
+    private void SampleBaseVoxelDensityColumn(
         int voxelX,
-        int voxelZ)
+        int voxelZ,
+        int startY,
+        int step,
+        Span<float> destination)
     {
-        if (voxelX < 0 || voxelZ < 0 ||
-            voxelX >= _baseVoxelWidth || voxelZ >= _baseVoxelDepth)
-            return (float.NaN, 1f);
+        if ((uint)voxelX >= (uint)_baseVoxelWidth ||
+            (uint)voxelZ >= (uint)_baseVoxelDepth)
+        {
+            destination.Fill(-1f);
+            return;
+        }
 
         float surfaceHeight = SampleBaseSurfaceHeight(
             voxelX, voxelZ,
             out float slopeX,
             out float slopeZ);
-
         float gradientLength = MathF.Sqrt(
             1f + slopeX * slopeX + slopeZ * slopeZ);
-        return (surfaceHeight, gradientLength);
+
+        for (int i = 0; i < destination.Length; i++)
+        {
+            int voxelY = startY + i * step;
+            destination[i] = voxelY < 0 || voxelY >= _baseVoxelHeight
+                ? -1f
+                : ComposeBaseVoxelDensity(
+                    voxelX, voxelY, voxelZ,
+                    surfaceHeight, gradientLength);
+        }
     }
 
     private float SampleBaseVoxelDensity(int voxelX, int voxelY, int voxelZ)
     {
-        if (voxelY < 0 || voxelY >= _baseVoxelHeight)
+        if ((uint)voxelX >= (uint)_baseVoxelWidth ||
+            (uint)voxelZ >= (uint)_baseVoxelDepth ||
+            voxelY < 0 ||
+            voxelY >= _baseVoxelHeight)
             return -1f;
 
-        (float surfaceHeight, float gradientLength) =
-            SampleBaseVoxelDensityColumn(voxelX, voxelZ);
-        if (!float.IsFinite(surfaceHeight))
-            return -1f;
+        float surfaceHeight = SampleBaseSurfaceHeight(
+            voxelX, voxelZ,
+            out float slopeX,
+            out float slopeZ);
+        float gradientLength = MathF.Sqrt(
+            1f + slopeX * slopeX + slopeZ * slopeZ);
 
-        return (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
+        return ComposeBaseVoxelDensity(
+            voxelX, voxelY, voxelZ,
+            surfaceHeight, gradientLength);
+    }
+
+    private static float ComposeBaseVoxelDensity(
+        int voxelX,
+        int voxelY,
+        int voxelZ,
+        float surfaceHeight,
+        float gradientLength)
+    {
+        float baseDistance =
+            (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
+
+        // Displace only the near-surface band; Y variation allows overhangs.
+        if (baseDistance >= -24f && baseDistance <= 24f)
+        {
+            float displacement = SampleBaseVolumeNoise(
+                voxelX * 0.045f,
+                voxelY * 0.070f,
+                voxelZ * 0.045f);
+            return baseDistance + displacement * 22f;
+        }
+
+        // Subsurface cave network, limited to 12.8 m beneath the base surface.
+        if (baseDistance > 24f &&
+            baseDistance < SparseVoxelField.ProceduralCaveDepthVoxels)
+        {
+            float tunnelA = SampleBaseVolumeNoise(
+                voxelX * 0.022f,
+                voxelY * 0.037f,
+                voxelZ * 0.022f);
+            float tunnelB = SampleBaseVolumeNoise(
+                voxelX * 0.022f + 19.1f,
+                voxelY * 0.037f - 31.7f,
+                voxelZ * 0.022f + 7.3f);
+            float tunnelField = MathF.Abs(tunnelA) +
+                MathF.Abs(tunnelB) * 0.72f;
+            return MathF.Min(baseDistance, (tunnelField - 0.24f) * 24f);
+        }
+
+        return baseDistance;
+    }
+
+    private static float SampleBaseVolumeNoise(float x, float y, float z)
+    {
+        int x0 = (int)MathF.Floor(x);
+        int y0 = (int)MathF.Floor(y);
+        int z0 = (int)MathF.Floor(z);
+
+        float tx = SmoothNoise(x - x0);
+        float ty = SmoothNoise(y - y0);
+        float tz = SmoothNoise(z - z0);
+
+        float x00 = LerpNoise(NoiseHash3D(x0, y0, z0), NoiseHash3D(x0 + 1, y0, z0), tx);
+        float x10 = LerpNoise(NoiseHash3D(x0, y0 + 1, z0), NoiseHash3D(x0 + 1, y0 + 1, z0), tx);
+        float x01 = LerpNoise(NoiseHash3D(x0, y0, z0 + 1), NoiseHash3D(x0 + 1, y0, z0 + 1), tx);
+        float x11 = LerpNoise(NoiseHash3D(x0, y0 + 1, z0 + 1), NoiseHash3D(x0 + 1, y0 + 1, z0 + 1), tx);
+
+        return LerpNoise(
+            LerpNoise(x00, x10, ty),
+            LerpNoise(x01, x11, ty),
+            tz);
+    }
+
+    private static float SmoothNoise(float value) =>
+        value * value * (3f - 2f * value);
+
+    private static float LerpNoise(float a, float b, float t) =>
+        a + (b - a) * t;
+
+    private static float NoiseHash3D(int x, int y, int z)
+    {
+        unchecked
+        {
+            uint hash = (uint)x * 0x8DA6B343u ^
+                (uint)y * 0xD8163841u ^
+                (uint)z * 0xCB1AB31Fu;
+            hash ^= hash >> 16;
+            hash *= 0x7FEB352Du;
+            hash ^= hash >> 15;
+            hash *= 0x846CA68Bu;
+            hash ^= hash >> 16;
+            return (hash & 0x00FFFFFFu) * (2f / 16777215f) - 1f;
+        }
     }
 
     private ushort SampleBaseVoxelMaterial(int voxelX, int voxelY, int voxelZ)
     {
-        if (voxelX < 0 || voxelY < 0 || voxelZ < 0 ||
-            voxelX >= _baseVoxelWidth ||
+        if ((uint)voxelX >= (uint)_baseVoxelWidth ||
+            voxelY < 0 ||
             voxelY >= _baseVoxelHeight ||
-            voxelZ >= _baseVoxelDepth)
+            (uint)voxelZ >= (uint)_baseVoxelDepth)
             return 0;
 
         int tileX = Math.Clamp(voxelX / 10, 0, MaxTileX);
         int tileZ = Math.Clamp(voxelZ / 10, 0, MaxTileY);
-        int column = GetColumnIndex(tileX, tileZ);
-        ushort materialId = Volatile.Read(ref _columnMaterialIds[column]);
-        if (materialId == 0)
-            return 0;
+        ushort materialId = Volatile.Read(
+            ref _columnMaterialIds[GetColumnIndex(tileX, tileZ)]);
 
-        float surfaceHeight = SampleBaseSurfaceHeight(
-            voxelX, voxelZ,
-            out _, out _);
-        return voxelY + 0.5f < surfaceHeight
-            ? materialId
-            : (ushort)0;
+        // Volumetric overhangs can be solid outside the 2D material column.
+        return materialId == 0 ? (ushort)1 : materialId;
     }
 
     /// <summary>

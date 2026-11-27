@@ -33,6 +33,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private const int SamplePlane = DensitySamplesPerAxis * DensitySamplesPerAxis;
     private const int CellPlane = ChunkSize * ChunkSize;
     private const long MaximumEditSampleCount = 20_000_000;
+    public const int ProceduralCaveDepthVoxels = 128;
+    public const int ProceduralOverhangHeightVoxels = 32;
 
     public readonly record struct ChunkCoordinate(int X, int Y, int Z);
 
@@ -611,7 +613,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     {
         private readonly Func<int, int, int, float> _baseDensity;
         private readonly Func<int, int, int, ushort> _baseMaterial;
-        private readonly Func<int, int, (float SurfaceHeight, float GradientLength)>? _baseDensityColumn;
+        private readonly VoxelDensityColumnSampler? _baseDensityColumn;
         private readonly Dictionary<ChunkCoordinate, ChunkSnapshot>? _chunks;
 
         public int Width { get; }
@@ -625,7 +627,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             Func<int, int, int, float> baseDensity,
             Func<int, int, int, ushort> baseMaterial,
             Dictionary<ChunkCoordinate, ChunkSnapshot>? chunks,
-            Func<int, int, (float SurfaceHeight, float GradientLength)>? baseDensityColumn)
+            VoxelDensityColumnSampler? baseDensityColumn)
         {
             Width = width;
             Height = height;
@@ -646,50 +648,47 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             if (_baseDensityColumn == null || step <= 0 || destination.IsEmpty)
                 return false;
 
-            bool insideColumn = (uint)x < (uint)Width && (uint)z < (uint)Depth;
-            (float surfaceHeight, float gradientLength) = insideColumn
-                ? _baseDensityColumn(x, z)
-                : (float.NaN, 1f);
-            bool hasBase = float.IsFinite(surfaceHeight) &&
-                float.IsFinite(gradientLength) &&
-                gradientLength > 0.000001f;
+            bool insideColumn =
+                (uint)x < (uint)Width &&
+                (uint)z < (uint)Depth;
+
+            if (insideColumn)
+                _baseDensityColumn(x, z, startY, step, destination);
+            else
+                destination.Fill(-1f);
 
             int cachedStorageY = int.MinValue;
             ChunkSnapshot? columnChunk = null;
+
             for (int i = 0; i < destination.Length; i++)
             {
                 int worldY = startY + i * step;
-                float density = insideColumn && hasBase &&
-                    worldY >= 0 && worldY < Height
-                        ? (surfaceHeight - (worldY + 0.5f)) / gradientLength
-                        : -1f;
+                if (!insideColumn ||
+                    worldY < 0 ||
+                    worldY > Height ||
+                    _chunks == null)
+                    continue;
 
-                if (insideColumn && worldY >= 0 && worldY <= Height &&
-                    _chunks != null)
+                int storageY = worldY / ChunkSize;
+                if (storageY != cachedStorageY)
                 {
-                    int storageY = worldY / ChunkSize;
-                    if (storageY != cachedStorageY)
-                    {
-                        cachedStorageY = storageY;
-                        columnChunk = null;
-                        _chunks.TryGetValue(
-                            new ChunkCoordinate(x / ChunkSize, storageY, z / ChunkSize),
-                            out columnChunk);
-                    }
-
-                    if (columnChunk != null)
-                    {
-                        int index = x % ChunkSize +
-                            (worldY % ChunkSize) * DensitySamplesPerAxis +
-                            (z % ChunkSize) * SamplePlane;
-                        int found = Chunk.FindDensity(
-                            columnChunk.Density, columnChunk.Density.Length, index);
-                        if (found >= 0)
-                            density = columnChunk.Density[found].Value / DensityScale;
-                    }
+                    cachedStorageY = storageY;
+                    columnChunk = null;
+                    _chunks.TryGetValue(
+                        new ChunkCoordinate(x / ChunkSize, storageY, z / ChunkSize),
+                        out columnChunk);
                 }
 
-                destination[i] = density;
+                if (columnChunk == null)
+                    continue;
+
+                int index = x % ChunkSize +
+                    (worldY % ChunkSize) * DensitySamplesPerAxis +
+                    (z % ChunkSize) * SamplePlane;
+                int found = Chunk.FindDensity(
+                    columnChunk.Density, columnChunk.Density.Length, index);
+                if (found >= 0)
+                    destination[i] = columnChunk.Density[found].Value / DensityScale;
             }
 
             return true;
@@ -867,7 +866,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
     private readonly List<EditHistoryEntry> _redoHistory = new();
     private readonly Func<int, int, int, float> _baseDensity;
     private readonly Func<int, int, int, ushort> _baseMaterial;
-    private readonly Func<int, int, (float SurfaceHeight, float GradientLength)>? _baseDensityColumn;
+    private readonly VoxelDensityColumnSampler? _baseDensityColumn;
     private EditHistoryCapture? _historyCapture;
     private long _undoHistoryBytes;
     private bool _isRestoringHistory;
@@ -943,7 +942,7 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         Func<int, int, int, float> baseDensity,
         Func<int, int, int, ushort> baseMaterial,
         Func<int, int, int, int, (int Min, int Max)>? baseSurfaceRange = null,
-        Func<int, int, (float SurfaceHeight, float GradientLength)>? baseDensityColumn = null)
+        VoxelDensityColumnSampler? baseDensityColumn = null)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
@@ -1805,8 +1804,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
         if (minSurface < 0 || maxSurface < minSurface)
             return false;
 
-        int firstChunkY = Math.Max(0, (minSurface - 1) / ChunkSize);
-        int lastChunkY = Math.Max(firstChunkY, (maxSurface + 1) / ChunkSize);
+        int firstChunkY = Math.Max(0, (minSurface - ProceduralCaveDepthVoxels - 1) / ChunkSize);
+        int lastChunkY = Math.Max(firstChunkY, (maxSurface + ProceduralOverhangHeightVoxels + 1) / ChunkSize);
         return chunkY == 0 || (chunkY >= firstChunkY && chunkY <= lastChunkY);
     }
     public ulong GetPotentialVerticalChunkMask(int macroX, int macroZ, int macroCells)
@@ -1828,8 +1827,8 @@ public sealed class SparseVoxelField : IVoxelFieldSource
             // surface bands representable by this mask; higher bands are
             // checked exactly through HasPotentialVerticalChunk.
             mask |= 1UL;
-            int firstChunkY = Math.Max(0, (minSurface - 1) / ChunkSize);
-            int lastChunkY = Math.Max(firstChunkY, (maxSurface + 1) / ChunkSize);
+            int firstChunkY = Math.Max(0, (minSurface - ProceduralCaveDepthVoxels - 1) / ChunkSize);
+            int lastChunkY = Math.Max(firstChunkY, (maxSurface + ProceduralOverhangHeightVoxels + 1) / ChunkSize);
             int lastMaskY = Math.Min(lastChunkY, 63);
             for (int y = firstChunkY; y <= lastMaskY; y++)
                 mask |= 1UL << y;
