@@ -16,45 +16,64 @@ internal sealed class VoxelMeshData
     private readonly Vector3[] _normals;
     private readonly byte[] _colors;
     private readonly ushort[] _indices;
+    private readonly int _vertexOffset;
+    private readonly int _indexOffset;
+    private readonly int _indexBase;
+    private readonly bool _ownsArrays;
 
-    public ReadOnlySpan<Vector3> Vertices => _vertices.AsSpan(0, VertexCount);
-    public ReadOnlySpan<Vector3> Normals => _normals.AsSpan(0, VertexCount);
-    public ReadOnlySpan<byte> Colors => _colors.AsSpan(0, VertexCount * 4);
-    public ReadOnlySpan<ushort> Indices => _indices.AsSpan(0, IndexCount);
+    public ReadOnlySpan<Vector3> Vertices => _vertices.AsSpan(_vertexOffset, VertexCount);
+    public ReadOnlySpan<Vector3> Normals => _normals.AsSpan(_vertexOffset, VertexCount);
+    public ReadOnlySpan<byte> Colors => _colors.AsSpan(_vertexOffset * 4, VertexCount * 4);
+    public ReadOnlySpan<ushort> Indices => _indices.AsSpan(_indexOffset, IndexCount);
+    internal int IndexBase => _indexBase;
 
     public int VertexCount { get; }
     public int IndexCount { get; }
     public int TriangleCount => IndexCount / 3;
 
     public VoxelMeshData(
-        Vector3[] vertices,
-        Vector3[] normals,
-        byte[] colors,
-        ushort[] indices,
-        int vertexCount,
-        int indexCount)
+        Vector3[] vertices, Vector3[] normals, byte[] colors, ushort[] indices,
+        int vertexCount, int indexCount)
+        : this(vertices, normals, colors, indices, 0, vertexCount, 0, indexCount, 0, true)
     {
-        if (vertexCount <= 0 ||
-            indexCount <= 0 ||
-            vertexCount > vertices.Length ||
-            vertexCount > normals.Length ||
-            vertexCount * 4 > colors.Length ||
-            indexCount > indices.Length)
-        {
+    }
+
+    private VoxelMeshData(
+        Vector3[] vertices, Vector3[] normals, byte[] colors, ushort[] indices,
+        int vertexOffset, int vertexCount, int indexOffset, int indexCount,
+        int indexBase, bool ownsArrays)
+    {
+        if (vertexCount <= 0 || indexCount <= 0 ||
+            vertexOffset < 0 || indexOffset < 0 ||
+            vertexOffset + vertexCount > vertices.Length ||
+            vertexOffset + vertexCount > normals.Length ||
+            (vertexOffset + vertexCount) * 4 > colors.Length ||
+            indexOffset + indexCount > indices.Length)
             throw new ArgumentOutOfRangeException(nameof(vertexCount));
-        }
 
         _vertices = vertices;
         _normals = normals;
         _colors = colors;
         _indices = indices;
+        _vertexOffset = vertexOffset;
+        _indexOffset = indexOffset;
+        _indexBase = indexBase;
+        _ownsArrays = ownsArrays;
         VertexCount = vertexCount;
         IndexCount = indexCount;
     }
 
+    internal VoxelMeshData CreateView(
+        int vertexOffset, int vertexCount, int indexOffset, int indexCount) =>
+        new(
+            _vertices, _normals, _colors, _indices,
+            _vertexOffset + vertexOffset, vertexCount,
+            _indexOffset + indexOffset, indexCount,
+            _indexBase + vertexOffset, false);
+
     public void ReturnCpuArrays()
     {
-        if (Interlocked.Exchange(ref _returned, 1) != 0)
+        if (!_ownsArrays || Interlocked.Exchange(ref _returned, 1) != 0)
             return;
 
         ArrayPool<Vector3>.Shared.Return(_vertices);
@@ -231,10 +250,13 @@ internal readonly record struct VoxelMeshBuildResult(
     VoxelMeshData[] Surface,
     VoxelMeshData[] CutCap);
 
+internal readonly record struct VoxelRegionMeshRange(
+    int PageIndex, int VertexOffset, int VertexCount, int IndexOffset, int IndexCount);
+
 internal static class VoxelChunkMesher
 {
-    private const int MaximumVerticesPerMesh = 60_000;
-    private const int MaximumIndicesPerMesh = 90_000;
+    internal const int MaximumVerticesPerMesh = 60_000;
+    internal const int MaximumIndicesPerMesh = 90_000;
 
 
     private sealed class MeshBatch : IDisposable
@@ -455,6 +477,119 @@ internal static class VoxelChunkMesher
         source.Indices.CopyTo(mesh.IndicesAs<ushort>());
         UploadMesh(ref mesh, false);
         return mesh;
+    }
+
+    public static VoxelMeshData[] CombineSurfaceData(
+        IReadOnlyList<VoxelMeshData> sources,
+        IReadOnlyList<int> owners,
+        int regionCount,
+        out VoxelRegionMeshRange[][] rangesByRegion)
+    {
+        if (sources.Count != owners.Count)
+            throw new ArgumentException("Source and owner counts differ.");
+
+        List<VoxelMeshData> output = new(Math.Max(1, sources.Count));
+        List<VoxelRegionMeshRange>[] ranges = new List<VoxelRegionMeshRange>[regionCount];
+        for (int i = 0; i < ranges.Length; i++) ranges[i] = new();
+
+        Vector3[]? v = null, n = null;
+        byte[]? c = null;
+        ushort[]? ix = null;
+        int vc = 0, ic = 0, pageIndex = 0;
+
+        void Rent()
+        {
+            if (v != null) return;
+            v = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
+            n = ArrayPool<Vector3>.Shared.Rent(MaximumVerticesPerMesh);
+            c = ArrayPool<byte>.Shared.Rent(MaximumVerticesPerMesh * 4);
+            ix = ArrayPool<ushort>.Shared.Rent(MaximumIndicesPerMesh);
+        }
+
+        void Flush()
+        {
+            if (vc == 0) return;
+            output.Add(new VoxelMeshData(v!, n!, c!, ix!, vc, ic));
+            v = null; n = null; c = null; ix = null;
+            vc = 0; ic = 0; pageIndex++;
+        }
+
+        try
+        {
+            for (int s = 0; s < sources.Count; s++)
+            {
+                VoxelMeshData source = sources[s];
+                if (source.VertexCount == 0 || source.IndexCount == 0) continue;
+                if (source.VertexCount > MaximumVerticesPerMesh ||
+                    source.IndexCount > MaximumIndicesPerMesh)
+                    throw new InvalidOperationException("Source mesh exceeds page limits.");
+
+                if (vc > 0 &&
+                    (vc + source.VertexCount > MaximumVerticesPerMesh ||
+                     ic + source.IndexCount > MaximumIndicesPerMesh))
+                    Flush();
+
+                Rent();
+                int owner = owners[s];
+                if ((uint)owner >= (uint)regionCount)
+                    throw new ArgumentOutOfRangeException(nameof(owners));
+
+                ranges[owner].Add(new VoxelRegionMeshRange(
+                    pageIndex, vc, source.VertexCount, ic, source.IndexCount));
+                source.Vertices.CopyTo(v!.AsSpan(vc));
+                source.Normals.CopyTo(n!.AsSpan(vc));
+                source.Colors.CopyTo(c!.AsSpan(vc * 4));
+
+                ReadOnlySpan<ushort> sourceIndices = source.Indices;
+                for (int i = 0; i < sourceIndices.Length; i++)
+                    ix![ic + i] = checked((ushort)(
+                        sourceIndices[i] - source.IndexBase + vc));
+
+                vc += source.VertexCount;
+                ic += source.IndexCount;
+            }
+
+            Flush();
+            rangesByRegion = new VoxelRegionMeshRange[regionCount][];
+            for (int i = 0; i < regionCount; i++) rangesByRegion[i] = ranges[i].ToArray();
+            return output.ToArray();
+        }
+        catch
+        {
+            foreach (VoxelMeshData mesh in output) mesh.ReturnCpuArrays();
+            if (v != null) ArrayPool<Vector3>.Shared.Return(v);
+            if (n != null) ArrayPool<Vector3>.Shared.Return(n);
+            if (c != null) ArrayPool<byte>.Shared.Return(c);
+            if (ix != null) ArrayPool<ushort>.Shared.Return(ix);
+            throw;
+        }
+    }
+
+    public static unsafe bool TryUpdateUploaded(
+        ref Mesh mesh, int vertexCapacity, int triangleCapacity, VoxelMeshData source)
+    {
+        if (mesh.VaoId == 0 || mesh.VboId == null ||
+            source.VertexCount > vertexCapacity ||
+            source.TriangleCount > triangleCapacity)
+            return false;
+
+        ReadOnlySpan<Vector3> vertices = source.Vertices;
+        ReadOnlySpan<Vector3> normals = source.Normals;
+        ReadOnlySpan<byte> colors = source.Colors;
+        ReadOnlySpan<ushort> indices = source.Indices;
+
+        fixed (Vector3* p = vertices)
+            UpdateMeshBuffer(mesh, Mesh.VboIdIndexVertices, p, vertices.Length * sizeof(Vector3), 0);
+        fixed (Vector3* p = normals)
+            UpdateMeshBuffer(mesh, Mesh.VboIdIndexNormals, p, normals.Length * sizeof(Vector3), 0);
+        fixed (byte* p = colors)
+            UpdateMeshBuffer(mesh, Mesh.VboIdIndexColors, p, colors.Length, 0);
+        fixed (ushort* p = indices)
+            UpdateMeshBuffer(mesh, Mesh.VboIdIndexIndices, p, indices.Length * sizeof(ushort), 0);
+
+        mesh.VertexCount = source.VertexCount;
+        mesh.TriangleCount = source.TriangleCount;
+        return true;
     }
 
     public static Mesh[] Upload(VoxelMeshData[] data)
