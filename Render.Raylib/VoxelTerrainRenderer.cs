@@ -790,7 +790,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME",
                 $"elapsedMs={Stopwatch.GetElapsedTime(voxelFrameStarted).TotalMilliseconds:0.000} displayStep={_displayStep} buildStep={_renderStep} " +
                 $"surfaceCandidates={VisibleCandidatesLastFrame} visibleChunks={VisibleChunksLastFrame} draws={DrawCallsLastFrame} " +
-                $"chunkCache={CachedChunks} rebuilt={RebuiltChunks} cutRebuilt={RebuiltCutCaps} completed={BuildsCompletedLastFrame} " +
+                $"chunkCache={CachedChunks} rebuilt={RebuiltChunks} sectionSlabs={RebuiltCutCaps} completed={BuildsCompletedLastFrame} " +
                 $"uploads={GpuUploadsLastFrame} workers={_workerTasks.Length} buildQueue={PendingMeshJobs} results={CompletedMeshResultsPending} " +
                 $"uploadQueue={_readyUploadQueue.Count} captureMs={CpuCaptureMillisecondsLastFrame:0.000} " +
                 $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
@@ -1114,6 +1114,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     ReturnMeshData(pending);
 
                     RebuiltChunks++;
+                    if (entry.PendingSurfaceCutLayer != int.MinValue)
+                        RebuiltCutCaps++;
                     GpuUploadsLastFrame++;
                     _totalGpuUploads++;
                 }
