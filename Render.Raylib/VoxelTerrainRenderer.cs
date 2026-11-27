@@ -803,15 +803,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     }
 
     private void CollectVisiblePages(
-        List<(Candidate Candidate, ChunkEntry Entry)> chunks,
+        List<(ChunkKey Key, ChunkEntry Entry)> chunks,
         List<(GpuPageKey Key, GpuMeshPage Page)> pages,
         HashSet<GpuPageKey> keys)
     {
         pages.Clear();
         keys.Clear();
-        foreach ((Candidate candidate, ChunkEntry entry) in chunks)
+        foreach ((ChunkKey chunkKey, ChunkEntry _) in chunks)
         {
-            GpuPageKey key = GetGpuPageKey(candidate.Key);
+            GpuPageKey key = GetGpuPageKey(chunkKey);
             if (!_gpuPages.TryGetValue(key, out GpuMeshPage? page) ||
                 page.Dirty || page.Meshes.Length == 0 || !keys.Add(key))
                 continue;
@@ -1445,6 +1445,7 @@ private void PrepareCandidateEntries(
         if (_gpuPages.ContainsKey(pageKey)) MarkGpuPageDirty(key);
 
         int residentMeshes = entry.CutCap.Length;
+        int partialMeshes = entry.UploadingCutCap.Count;
         InvalidatePendingBuild(entry);
         _totalGpuUnloads += residentMeshes;
 
