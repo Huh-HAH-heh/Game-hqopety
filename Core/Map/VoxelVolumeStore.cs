@@ -711,9 +711,18 @@ public sealed class VoxelVolumeStore
     {
         ValidateVoxelCoordinate(x, y, z);
         SealBase();
-        EditBrick brick = GetOrCreateBrick(GetBrickKey(x, y, z));
-        EnsureDensity(brick, GetBrickKey(x, y, z));
-        brick.Density![GetLocalIndex(x, y, z)] = density;
+
+        BrickKey key = GetBrickKey(x, y, z);
+        EditBrick brick = GetOrCreateBrick(key);
+        EnsureDensity(brick, key);
+
+        int index = GetLocalIndex(x, y, z);
+        density = Quantize(Dequantize(density));
+        brick.Density![index] = density;
+
+        if (density <= 0 && brick.Material != null)
+            brick.Material[index] = 0;
+
         Revision++;
     }
 
@@ -721,9 +730,20 @@ public sealed class VoxelVolumeStore
     {
         ValidateVoxelCoordinate(x, y, z);
         SealBase();
-        EditBrick brick = GetOrCreateBrick(GetBrickKey(x, y, z));
-        EnsureMaterial(brick, GetBrickKey(x, y, z));
-        brick.Material![GetLocalIndex(x, y, z)] = materialId;
+
+        BrickKey key = GetBrickKey(x, y, z);
+        EditBrick brick = GetOrCreateBrick(key);
+        int index = GetLocalIndex(x, y, z);
+        short density = brick.Density != null
+            ? brick.Density[index]
+            : _baseBricks.TryGetValue(key, out BaseBrick? baseBrick)
+                ? baseBrick.Density[index]
+                : EvaluateBaseDensity(
+                    x, y, z,
+                    GetBucketCandidates(_geometryBuckets, x, y, z));
+
+        EnsureMaterial(brick, key);
+        brick.Material![index] = density > 0 ? materialId : (ushort)0;
         Revision++;
     }
 
@@ -779,9 +799,18 @@ public sealed class VoxelVolumeStore
                     ? MathF.Max(current, sdf)
                     : MathF.Min(current, -sdf);
 
-                brick.Density[index] = Quantize(next);
-                if (add && sdf > 0f && sdf > current)
+                short updatedDensity = Quantize(next);
+                brick.Density[index] = updatedDensity;
+
+                if (updatedDensity <= 0)
+                {
+                    if (brick.Material != null)
+                        brick.Material[index] = 0;
+                }
+                else if (add && sdf > 0f && sdf > current)
+                {
                     brick.Material![index] = materialId;
+                }
             }
         }
 
