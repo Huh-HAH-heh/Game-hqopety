@@ -622,19 +622,33 @@ public sealed partial class VoxelVolumeStore
                     continue;
                 }
 
-                if (editDensity != null && editMaterial != null)
+                if (baseBrick?.IsUniform == true && editDensity == null && editMaterial != null)
                 {
-                    editMaterial.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
+                    if (baseBrick.UniformSample.IsSolid)
+                        editMaterial.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
+                    else
+                        destination.Slice(dst, rowLength).Clear();
+                    continue;
+                }
+
+                if (baseBrick?.IsUniform == true && editDensity != null && editMaterial == null)
+                {
+                    if (baseBrick.UniformSample.IsSolid)
+                        destination.Slice(dst, rowLength).Fill(baseBrick.UniformSample.MaterialId);
+                    else
+                        destination.Slice(dst, rowLength).Clear();
                     for (int i = 0; i < rowLength; i++)
                         if (editDensity[src + i] <= 0)
                             destination[dst + i] = 0;
                     continue;
                 }
 
-                if (baseBrick?.IsUniform == true && editDensity == null && editMaterial != null &&
-                    baseBrick.UniformSample.Density <= 0)
+                if (editDensity != null && editMaterial != null)
                 {
-                    destination.Slice(dst, rowLength).Clear();
+                    editMaterial.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
+                    for (int i = 0; i < rowLength; i++)
+                        if (editDensity[src + i] <= 0)
+                            destination[dst + i] = 0;
                     continue;
                 }
 
@@ -744,6 +758,29 @@ public sealed partial class VoxelVolumeStore
                         .CopyTo(densityDestination.Slice(dst, rowLength));
                     baseBrick.Material!.AsSpan(src, rowLength)
                         .CopyTo(materialDestination.Slice(dst, rowLength));
+                    for (int i = 0; i < rowLength; i++)
+                        if (densityDestination[dst + i] <= 0)
+                            materialDestination[dst + i] = 0;
+                    continue;
+                }
+
+                if (baseBrick?.IsUniform == true && editDensity == null && editMaterial != null)
+                {
+                    densityDestination.Slice(dst, rowLength).Fill(baseBrick.UniformSample.Density);
+                    if (baseBrick.UniformSample.IsSolid)
+                        editMaterial.AsSpan(src, rowLength).CopyTo(materialDestination.Slice(dst, rowLength));
+                    else
+                        materialDestination.Slice(dst, rowLength).Clear();
+                    continue;
+                }
+
+                if (baseBrick?.IsUniform == true && editDensity != null && editMaterial == null)
+                {
+                    editDensity.AsSpan(src, rowLength).CopyTo(densityDestination.Slice(dst, rowLength));
+                    if (baseBrick.UniformSample.IsSolid)
+                        materialDestination.Slice(dst, rowLength).Fill(baseBrick.UniformSample.MaterialId);
+                    else
+                        materialDestination.Slice(dst, rowLength).Clear();
                     for (int i = 0; i < rowLength; i++)
                         if (densityDestination[dst + i] <= 0)
                             materialDestination[dst + i] = 0;
