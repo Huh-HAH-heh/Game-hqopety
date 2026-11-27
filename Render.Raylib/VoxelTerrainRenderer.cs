@@ -520,6 +520,34 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             ? stableCutLayer
             : int.MinValue;
 
+        // Step 64 is the permanent coarse world representation. Queue it first
+        // so it appears before the camera-selected detail level is complete.
+        _coarseCandidateScratch.Clear();
+        _coarseCandidateEntriesScratch.Clear();
+        _coarseCandidateKeys.Clear();
+        bool coarseIsPrimary = _displayStep == FallbackLodStep ||
+            _renderStep == FallbackLodStep;
+        if (!coarseIsPrimary)
+        {
+            int coarseFrustumTests = 0;
+            int coarseMacroTests = 0;
+            int coarseRegions = 0;
+            CollectVisibleCandidates(
+                field, camera, FallbackLodStep,
+                _coarseCandidateScratch,
+                ref coarseFrustumTests,
+                ref coarseMacroTests,
+                ref coarseRegions);
+            _coarseCandidateScratch.Sort(static (a, b) =>
+                a.DistanceSquared.CompareTo(b.DistanceSquared));
+            PrepareCandidateEntries(
+                field,
+                _coarseCandidateScratch,
+                int.MinValue,
+                _coarseCandidateEntriesScratch,
+                _coarseCandidateKeys);
+        }
+
         List<Candidate> displayCandidates = _candidateScratch;
         displayCandidates.Clear();
         int frustumTests = 0;
@@ -543,8 +571,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 a.DistanceSquared.CompareTo(b.DistanceSquared));
 
             PrepareCandidateEntries(
-                field, displayCandidates, targetCutLayer,
-                _candidateEntriesScratch, _visibleCandidateKeys);
+                field,
+                displayCandidates,
+                _displayStep == FallbackLodStep ? int.MinValue : targetCutLayer,
+                _candidateEntriesScratch,
+                _visibleCandidateKeys);
         }
         else
         {
@@ -565,8 +596,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 a.DistanceSquared.CompareTo(b.DistanceSquared));
 
             PrepareCandidateEntries(
-                field, transitionCandidates, targetCutLayer,
-                transitionEntries, _transitionCandidateKeys);
+                field,
+                transitionCandidates,
+                _renderStep == FallbackLodStep ? int.MinValue : targetCutLayer,
+                transitionEntries,
+                _transitionCandidateKeys);
         }
 
         // Retire invalid work before waking workers. Full-world candidates stay requested.
@@ -595,13 +629,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         UploadDirtyGpuPages();
         if (_renderStep != _displayStep &&
             !_lodTransitionActive &&
-            AreCandidateEntriesReady(transitionEntries, field, targetCutLayer))
+            HasRenderableLodPage(_renderStep))
         {
+            // Switch as soon as the first target chunk reaches the GPU.
+            // The remaining chunks continue building without blocking this page.
             _lodTransitionActive = true;
-            _lodFade = 0f;
+            _lodFade = 1f;
             _logger.Write(
-                "VOXEL_LOD_FADE_START",
-                $"display={_displayStep} target={_renderStep} chunks={transitionEntries.Count}");
+                "VOXEL_LOD_PARTIAL_SWITCH",
+                $"display={_displayStep} target={_renderStep} ready={_transitionVisible.Count} requested={transitionEntries.Count}");
         }
 
         if (_lodTransitionActive)
@@ -674,32 +710,41 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         CollectVisiblePages(_visible, _visiblePages, _visiblePageKeys);
         CollectVisiblePages(_transitionVisible, _transitionVisiblePages, _transitionVisiblePageKeys);
 
+        _coarseVisiblePages.Clear();
+        _coarseVisiblePageKeys.Clear();
+        bool hasCurrentLodMesh = _visiblePages.Count > 0 ||
+            (_lodTransitionActive && _transitionVisiblePages.Count > 0);
+        if (!hasCurrentLodMesh &&
+            _displayStep != FallbackLodStep &&
+            _renderStep != FallbackLodStep &&
+            _gpuPages.TryGetValue(new GpuPageKey(FallbackLodStep), out GpuMeshPage? coarsePage) &&
+            coarsePage.HasMesh && !coarsePage.Dirty)
+        {
+            _coarseVisiblePages.Add((new GpuPageKey(FallbackLodStep), coarsePage));
+        }
+
         BeginMode3D(camera);
         int draws = 0;
         if (_lodTransitionActive)
         {
             SetLodShader(0, _lodFade);
             foreach ((GpuPageKey key, GpuMeshPage page) in _visiblePages)
-            {
-                DrawMesh(page.Mesh, _material, Matrix4x4.Identity);
-                draws++;
-            }
+                draws += DrawGpuPage(page, _material);
 
             SetLodShader(1, _lodFade);
             foreach ((GpuPageKey key, GpuMeshPage page) in _transitionVisiblePages)
-            {
-                DrawMesh(page.Mesh, _material, Matrix4x4.Identity);
-                draws++;
-            }
+                draws += DrawGpuPage(page, _material);
         }
         else
         {
             SetLodShader(-1, 0f);
             foreach ((GpuPageKey key, GpuMeshPage page) in _visiblePages)
-            {
-                DrawMesh(page.Mesh, _material, Matrix4x4.Identity);
-                draws++;
-            }
+                draws += DrawGpuPage(page, _material);
+
+            // Until any camera-selected chunk is ready, keep drawing the
+            // permanent coarse LOD instead of presenting a black world.
+            foreach ((GpuPageKey key, GpuMeshPage page) in _coarseVisiblePages)
+                draws += DrawGpuPage(page, _material);
         }
 
         SetLodShader(-1, 0f);
