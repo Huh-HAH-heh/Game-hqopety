@@ -423,6 +423,8 @@ public static class RaylibTerrainViewer
                             !layerPanel.IsPointerOverPanel(GetMousePosition()))
                         {
                             Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
+                            Vector3 hitPosition;
+                            Vector3 hitNormal;
                             bool hasEditHit = cutawayMode
                                 ? TryRaycastCutaway(
                                     worldMap.Voxels,
@@ -430,8 +432,8 @@ public static class RaylibTerrainViewer
                                     editRay.Direction,
                                     menu.Settings.RenderDistanceMeters,
                                     menu.Settings.CutawayHeightMeters,
-                                    out Vector3 hitPosition,
-                                    out Vector3 hitNormal)
+                                    out hitPosition,
+                                    out hitNormal)
                                 : worldMap.Voxels.TryRaycast(
                                     editRay.Position,
                                     editRay.Direction,
@@ -474,6 +476,8 @@ public static class RaylibTerrainViewer
                             IsMouseButtonReleased(MouseButton.Left))
                         {
                             Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
+                            Vector3 hitPosition;
+                            Vector3 hitNormal;
                             bool hasEditHit = cutawayMode
                                 ? TryRaycastCutaway(
                                     worldMap.Voxels,
@@ -481,8 +485,8 @@ public static class RaylibTerrainViewer
                                     editRay.Direction,
                                     menu.Settings.RenderDistanceMeters,
                                     menu.Settings.CutawayHeightMeters,
-                                    out Vector3 hitPosition,
-                                    out Vector3 hitNormal)
+                                    out hitPosition,
+                                    out hitNormal)
                                 : worldMap.Voxels.TryRaycast(
                                     editRay.Position,
                                     editRay.Direction,
@@ -856,12 +860,18 @@ public static class RaylibTerrainViewer
         hitPosition = default;
         hitNormal = Vector3.UnitY;
 
-        if (!float.IsFinite(cutHeight) ||
+        if (!float.IsFinite(origin.X) || !float.IsFinite(origin.Y) ||
+            !float.IsFinite(origin.Z) ||
+            !float.IsFinite(direction.X) || !float.IsFinite(direction.Y) ||
+            !float.IsFinite(direction.Z) ||
+            !float.IsFinite(maximumDistance) || maximumDistance <= 0f ||
+            !float.IsFinite(cutHeight) ||
             direction.LengthSquared() < 0.000001f)
             return false;
 
-        direction = Vector3.Normalize(direction);
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        cutHeight = MathF.Round(cutHeight / voxelSize) * voxelSize;
+        direction = Vector3.Normalize(direction);
         const float parallelEpsilon = 0.00001f;
         const float planeEpsilon = 0.0001f;
 
@@ -1073,7 +1083,7 @@ public static class RaylibTerrainViewer
                 16f,
                 Color.RayWhite));
             lines.Add((
-                "Wheel zoom | Q/E faster slice | PgUp/PgDn 0.1m | Shift+Wheel 0.1m",
+                $"Wheel zoom | Q/E faster slice | PgUp/PgDn {settings.CutawayStepMeters:0.0}m | Ctrl=1m",
                 16f,
                 Color.RayWhite));
 
