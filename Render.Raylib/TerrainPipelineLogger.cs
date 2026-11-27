@@ -16,8 +16,11 @@ internal sealed class TerrainPipelineLogger : IDisposable
     private const int NormalMessageLimit = 2048;
     private const int ErrorMessageLimit = 8192;
 
-    private readonly Channel<string> _messages =
-        Channel.CreateBounded<string>(new BoundedChannelOptions(QueueCapacity)
+    private enum LogTarget : byte { Summary, Detail, Error }
+    private readonly record struct LogRecord(LogTarget Target, string Line);
+
+    private readonly Channel<LogRecord> _messages =
+        Channel.CreateBounded<LogRecord>(new BoundedChannelOptions(QueueCapacity)
         {
             SingleReader = true,
             SingleWriter = false,
@@ -25,7 +28,12 @@ internal sealed class TerrainPipelineLogger : IDisposable
             AllowSynchronousContinuations = false
         });
 
-    private readonly ConcurrentQueue<string> _critical = new();
+    private readonly ConcurrentQueue<LogRecord> _critical = new();
+    private readonly ConcurrentDictionary<string, byte> _reportedCapacityErrors = new(StringComparer.Ordinal);
+    private int _suppressedCapacityErrors;
+    private StreamWriter? _summaryWriter;
+    private StreamWriter? _detailWriter;
+    private StreamWriter? _errorWriter;
     private readonly ConcurrentDictionary<string, RateState> _rates = new(StringComparer.Ordinal);
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly Task _writerTask;
@@ -44,6 +52,8 @@ internal sealed class TerrainPipelineLogger : IDisposable
     }
 
     public string LogPath { get; }
+    public string DetailLogPath { get; }
+    public string ErrorLogPath { get; }
     public bool Enabled => Volatile.Read(ref _enabled) != 0;
     public RenderLogMode Mode => (RenderLogMode)Volatile.Read(ref _mode);
 
@@ -55,13 +65,14 @@ internal sealed class TerrainPipelineLogger : IDisposable
         string root = ResolveProjectRoot();
         string directory = Path.Combine(root, "Logs");
         string fileName = "render-" +
-            DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture) +
-            ".log";
-        LogPath = Path.Combine(directory, fileName);
+            DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
+        LogPath = Path.Combine(directory, fileName + "-summary.log");
+        DetailLogPath = Path.Combine(directory, fileName + "-detail.log");
+        ErrorLogPath = Path.Combine(directory, fileName + "-errors.log");
 
         _writerTask = Task.Run(WriteLoopAsync);
         if (enabled)
-            Enqueue("SESSION_START", $"utc={DateTimeOffset.UtcNow:O} mode={Mode} cwd=\"{Environment.CurrentDirectory}\"", critical: true);
+            Enqueue("SESSION_START", $"utc={DateTimeOffset.UtcNow:O} mode={Mode} summary=\"{LogPath}\" detail=\"{DetailLogPath}\" errors=\"{ErrorLogPath}\"", critical: true);
     }
 
     public void SetFrame(long frame) => Interlocked.Exchange(ref _frame, frame);
@@ -82,7 +93,7 @@ internal sealed class TerrainPipelineLogger : IDisposable
         Enqueue(enabled
             ? "LOGGING_ENABLED"
             : "LOGGING_DISABLED",
-            $"mode={Mode} path=\"{LogPath}\"",
+            $"mode={Mode} summary=\"{LogPath}\" detail=\"{DetailLogPath}\" errors=\"{ErrorLogPath}\"",
             critical: !enabled);
     }
 
@@ -115,7 +126,35 @@ internal sealed class TerrainPipelineLogger : IDisposable
     {
         if (!Enabled || Volatile.Read(ref _disposed) != 0)
             return;
-        Enqueue(category, message, critical: true);
+
+        message ??= string.Empty;
+        if (message.Contains("No reusable GPU page range", StringComparison.Ordinal))
+        {
+            int end = message.IndexOf(" retryFrame=", StringComparison.Ordinal);
+            if (end < 0) end = message.IndexOf(" error=", StringComparison.Ordinal);
+            if (end < 0) end = message.Length;
+            string signature = category + "|" + message[..end];
+            if (!_reportedCapacityErrors.TryAdd(signature, 0))
+            {
+                Interlocked.Increment(ref _suppressedCapacityErrors);
+                return;
+            }
+        }
+
+        string shortMessage = StripStackTrace(message);
+        Enqueue(category, shortMessage, critical: true, LogTarget.Error);
+        if (shortMessage.Length < message.Length)
+            Enqueue(category + "_TRACE", message, critical: false, LogTarget.Detail);
+    }
+
+    private static string StripStackTrace(string message)
+    {
+        int stackStart = message.IndexOf("     at ", StringComparison.Ordinal);
+        if (stackStart < 0)
+            stackStart = message.IndexOf("\r\n", StringComparison.Ordinal);
+        if (stackStart < 0)
+            stackStart = message.IndexOf('\n');
+        return stackStart > 0 ? message[..stackStart] : message;
     }
 
     private bool ShouldWrite(RenderLogMode minimumMode, string category)
@@ -181,7 +220,10 @@ internal sealed class TerrainPipelineLogger : IDisposable
         _ => false
     };
 
-    private void Enqueue(string category, string message, bool critical)
+    private void Enqueue(string category, string message, bool critical) =>
+        Enqueue(category, message, critical, GetTarget(category));
+
+    private void Enqueue(string category, string message, bool critical, LogTarget target)
     {
         int maxLength = critical ? ErrorMessageLimit : NormalMessageLimit;
         string safeMessage = (message ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ');
@@ -194,79 +236,96 @@ internal sealed class TerrainPipelineLogger : IDisposable
             CultureInfo.InvariantCulture,
             $"{_clock.ElapsedMilliseconds,8}ms f{frame:D7} t{Environment.CurrentManagedThreadId:D2} #{sequence:D7} {category} {safeMessage}");
 
-        if (!_messages.Writer.TryWrite(line))
+        LogRecord record = new(target, line);
+        if (!_messages.Writer.TryWrite(record))
         {
             if (critical)
-                _critical.Enqueue(line);
+                _critical.Enqueue(record);
             else
                 Interlocked.Increment(ref _dropped);
 
             if (critical)
-                _messages.Writer.TryWrite(string.Empty);
+                _messages.Writer.TryWrite(new LogRecord(LogTarget.Summary, string.Empty));
         }
     }
 
+    private static LogTarget GetTarget(string category) => category switch
+    {
+        "SESSION_START" or "SESSION_END" or "LOGGING_ENABLED" or "LOGGING_DISABLED" or
+        "LOG_MODE" or "VIEWER_START" or "WORLD_SNAPSHOT_READY" or "WINDOW_CONFIG" or
+        "WINDOW_READY" or "RENDERER_START" or "VOXEL_RENDERER_READY" or
+        "TERRAIN_SYNCHRONIZE" or "TERRAIN_RENDERER_CREATED" or "VOXEL_WORLD_SNAPSHOT" or
+        "VOXEL_LOD_INITIAL" or "VOXEL_LOD_PREPARE" or "VOXEL_LOD_READY_SWITCH" or
+        "VOXEL_LOD_SWITCHED" or "VOXEL_LOD_CANCEL" or "FRAME" or "VOXEL_FRAME" or
+        "FRAME_PHASES" or "TERRAIN_DRAW_END" or "RENDER_PASS" or "FRAME_SUMMARY" or
+        "WORLD_SYNC" => LogTarget.Summary,
+        _ => LogTarget.Detail
+    };
+
     private async Task WriteLoopAsync()
     {
-        StreamWriter? writer = null;
         int written = 0;
-
         try
         {
-            await foreach (string line in _messages.Reader.ReadAllAsync())
+            await foreach (LogRecord record in _messages.Reader.ReadAllAsync())
             {
-                writer ??= CreateWriter();
-
-                while (_critical.TryDequeue(out string? criticalLine))
+                while (_critical.TryDequeue(out LogRecord criticalRecord))
                 {
-                    await writer.WriteLineAsync(criticalLine);
+                    await GetWriter(criticalRecord.Target).WriteLineAsync(criticalRecord.Line);
                     written++;
                 }
 
-                if (line.Length > 0)
+                if (record.Line.Length > 0)
                 {
-                    await writer.WriteLineAsync(line);
+                    await GetWriter(record.Target).WriteLineAsync(record.Line);
                     written++;
                 }
 
-                WriteDroppedSummary(writer, ref written);
+                written += await WriteDroppedSummaryAsync();
                 if ((written & 127) == 0)
-                    await writer.FlushAsync();
+                    await FlushWritersAsync();
             }
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"[RENDER-LOG] Could not write '{LogPath}': {exception}");
+            Console.Error.WriteLine($"[RENDER-LOG] Could not write logs: {exception}");
         }
         finally
         {
-            if (writer != null)
+            try
             {
-                try
-                {
-                    while (_critical.TryDequeue(out string? criticalLine))
-                        await writer.WriteLineAsync(criticalLine);
+                while (_critical.TryDequeue(out LogRecord criticalRecord))
+                    await GetWriter(criticalRecord.Target).WriteLineAsync(criticalRecord.Line);
 
-                    WriteDroppedSummary(writer, ref written);
-                    await writer.FlushAsync();
-                    await writer.DisposeAsync();
-                }
-                catch (Exception exception)
-                {
-                    Console.Error.WriteLine($"[RENDER-LOG] Flush failed: {exception}");
-                }
+                written += await WriteDroppedSummaryAsync();
+                await FlushWritersAsync();
+                await DisposeWritersAsync();
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"[RENDER-LOG] Flush failed: {exception}");
             }
         }
     }
 
-    private StreamWriter CreateWriter()
+    private StreamWriter GetWriter(LogTarget target)
     {
-        string? directory = Path.GetDirectoryName(LogPath);
+        return target switch
+        {
+            LogTarget.Summary => _summaryWriter ??= CreateWriter(LogPath),
+            LogTarget.Detail => _detailWriter ??= CreateWriter(DetailLogPath),
+            _ => _errorWriter ??= CreateWriter(ErrorLogPath)
+        };
+    }
+
+    private static StreamWriter CreateWriter(string path)
+    {
+        string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
 
         FileStream stream = new(
-            LogPath,
+            path,
             FileMode.Append,
             FileAccess.Write,
             FileShare.ReadWrite,
@@ -276,16 +335,33 @@ internal sealed class TerrainPipelineLogger : IDisposable
         return new StreamWriter(stream, new UTF8Encoding(false), 64 * 1024);
     }
 
-    private void WriteDroppedSummary(StreamWriter writer, ref int written)
+    private async Task<int> WriteDroppedSummaryAsync()
     {
         int dropped = Interlocked.Exchange(ref _dropped, 0);
         if (dropped <= 0)
-            return;
+            return 0;
 
         long sequence = Interlocked.Increment(ref _sequence);
         string line = $"{_clock.ElapsedMilliseconds,8}ms f{Interlocked.Read(ref _frame):D7} t{Environment.CurrentManagedThreadId:D2} #{sequence:D7} LOG_DROPPED count={dropped}";
-        writer.WriteLine(line);
-        written++;
+        await GetWriter(LogTarget.Summary).WriteLineAsync(line);
+        return 1;
+    }
+
+    private async Task FlushWritersAsync()
+    {
+        if (_summaryWriter != null) await _summaryWriter.FlushAsync();
+        if (_detailWriter != null) await _detailWriter.FlushAsync();
+        if (_errorWriter != null) await _errorWriter.FlushAsync();
+    }
+
+    private async Task DisposeWritersAsync()
+    {
+        if (_summaryWriter != null) await _summaryWriter.DisposeAsync();
+        if (_detailWriter != null) await _detailWriter.DisposeAsync();
+        if (_errorWriter != null) await _errorWriter.DisposeAsync();
+        _summaryWriter = null;
+        _detailWriter = null;
+        _errorWriter = null;
     }
 
     private void FlushSuppressed()
@@ -325,8 +401,11 @@ internal sealed class TerrainPipelineLogger : IDisposable
             return;
 
         FlushSuppressed();
+        int suppressedCapacityErrors = Interlocked.Exchange(ref _suppressedCapacityErrors, 0);
+        if (suppressedCapacityErrors > 0)
+            Enqueue("ERRORS_SUPPRESSED", $"gpuPageCapacity duplicateRetries={suppressedCapacityErrors}", critical: true, LogTarget.Error);
         if (Enabled)
-            Enqueue("SESSION_END", $"frame={Interlocked.Read(ref _frame)}", critical: true);
+            Enqueue("SESSION_END", $"frame={Interlocked.Read(ref _frame)}", critical: true, LogTarget.Summary);
 
         _messages.Writer.TryComplete();
         try
