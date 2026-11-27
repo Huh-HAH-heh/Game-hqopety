@@ -1812,14 +1812,17 @@ public sealed class WorldMap
         float baseDistance =
             (surfaceHeight - (voxelY + 0.5f)) / gradientLength;
 
-        // Displace only the near-surface band; Y variation allows overhangs.
+        // Keep the untouched surface gently irregular. The old 2.2 m,
+        // high-frequency displacement dominated the 1 m base relief and
+        // produced a cratered / lunar appearance at coarse render LODs.
+        // Density is measured in 0.1 m voxels: 4 samples = 0.4 m maximum.
         if (baseDistance >= -24f && baseDistance <= 24f)
         {
             float displacement = SampleBaseVolumeNoise(
-                voxelX * 0.045f,
-                voxelY * 0.070f,
-                voxelZ * 0.045f);
-            return baseDistance + displacement * 22f;
+                voxelX * 0.014f,
+                voxelY * 0.020f,
+                voxelZ * 0.014f);
+            return baseDistance + displacement * 4f;
         }
 
         // Subsurface cave network, limited to 12.8 m beneath the base surface.
