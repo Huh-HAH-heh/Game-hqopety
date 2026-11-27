@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "Core/Map/VoxelVolumeStore.cs"
+      - "Core/Map/VoxelVolumeStore.Serialization.cs"
       - "Core.Tests/**"
       - "Core/Core.csproj"
       - ".github/workflows/voxel-storage-core.yml"
