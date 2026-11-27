@@ -867,13 +867,16 @@ public sealed partial class VoxelVolumeStore
         EnsureDensity(brick, key);
 
         int index = GetLocalIndex(x, y, z);
+        short previousDensity = brick.Density![index];
         density = Quantize(Dequantize(density));
-        brick.Density![index] = density;
+        brick.Density[index] = density;
 
         if (density <= 0)
         {
-            EnsureMaterial(brick, key);
-            brick.Material![index] = 0;
+            if (previousDensity > 0 && brick.Material == null)
+                EnsureMaterial(brick, key);
+            if (brick.Material != null)
+                brick.Material[index] = 0;
         }
 
         Revision++;
@@ -975,15 +978,16 @@ public sealed partial class VoxelVolumeStore
 
                 if (updatedDensity <= 0)
                 {
-                    if (brick.Material == null)
+                    if (current > 0f && brick.Material == null)
                         EnsureMaterial(brick, key);
-                    brick.Material![index] = 0;
+                    if (brick.Material != null)
+                        brick.Material[index] = 0;
                 }
                 else if (add && sdf > 0f && sdf > current)
                 {
                     if (brick.Material == null)
                         EnsureMaterial(brick, key);
-                    brick.Material![index] = materialId;
+                    brick.Material[index] = materialId;
                 }
             }
         }
@@ -1031,8 +1035,6 @@ public sealed partial class VoxelVolumeStore
                 !HasSolidBaseCandidate(geometryCandidates))
                 continue;
 
-            EditBrick brick = existingEdit ?? GetOrCreateBrick(key);
-            EnsureMaterial(brick, key);
             int x0 = Math.Max(bounds.MinX, ox);
             int y0 = Math.Max(bounds.MinY, oy);
             int z0 = Math.Max(bounds.MinZ, oz);
@@ -1040,6 +1042,7 @@ public sealed partial class VoxelVolumeStore
             int y1 = Math.Min(bounds.MaxY, oy + BrickSize);
             int z1 = Math.Min(bounds.MaxZ, oz + BrickSize);
 
+            EditBrick? brick = existingEdit;
             for (int z = z0; z < z1; z++)
             for (int y = y0; y < y1; y++)
             for (int x = x0; x < x1; x++)
@@ -1049,7 +1052,7 @@ public sealed partial class VoxelVolumeStore
                     continue;
 
                 int localIndex = GetLocalIndex(ox, oy, oz, x, y, z);
-                short density = brick.Density != null
+                short density = brick?.Density != null
                     ? brick.Density[localIndex]
                     : baseBrick != null
                         ? baseBrick.IsUniform
@@ -1057,8 +1060,13 @@ public sealed partial class VoxelVolumeStore
                             : baseBrick.Density![localIndex]
                         : EvaluateBaseDensity(x, y, z, geometryCandidates);
 
-                if (density > 0)
-                    brick.Material![localIndex] = materialId;
+                if (density <= 0)
+                    continue;
+
+                brick ??= GetOrCreateBrick(key);
+                if (brick.Material == null)
+                    EnsureMaterial(brick, key);
+                brick.Material![localIndex] = materialId;
             }
         }
 
