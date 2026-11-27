@@ -32,7 +32,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumRenderStep = 64;
     private const int CacheEvictionScanBudget = 4096;
     private const int MaximumCachedChunks = 4096;
-    // Keep the visibility hierarchy's world-space group width near 51.2 m.
     private const float LodFadeDurationSeconds = 0.25f;
     private const double LodTargetSettleMilliseconds = 350d;
 
@@ -427,7 +426,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=0.1m;scope=full-visible-density-field;chunkCells={ChunkCells};chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={workerCount};build=background-worker-pool;pendingLimit={MaximumPendingMeshJobs};gpuUploadBudgetMs={GpuUploadBudgetMilliseconds:0.0};mesher=surface-nets-density");
+            $"resolution=0.1m;scope=full-world-density-field;gpuMesh=single-global-per-lod;cameraCulling=false;chunkCells={ChunkCells};chunkMeters={RenderChunkSizeMeters:0.0};storageChunkCells={SparseVoxelField.ChunkSize};workers={workerCount};build=background-worker-pool;pendingLimit={MaximumPendingMeshJobs};mesher=surface-nets-density");
         _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_READY", $"logPath=\"{_logger.LogPath}\" workers={workerCount} build=background");
     }
 
@@ -536,8 +535,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 transitionEntries, _transitionCandidateKeys);
         }
 
-        // Cancel requests that have fallen out of the live view before waking workers.
-        // Their queue records are discarded by workers without allocating density buffers.
+        // Retire invalid work before waking workers. Full-world candidates stay requested.
+        // Worker queue records remain lightweight until a worker captures density data.
         CancelUnseenBuilds();
 
         // All world-region requests are queued before waking workers.
@@ -820,7 +819,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         MarkGpuPageDirty(key);
     }
 
-        private bool AreStepCandidatesReady(int step)
+    private bool AreStepCandidatesReady(int step)
     {
         List<(Candidate Candidate, ChunkEntry Entry)> entries =
             step == _displayStep ? _candidateEntriesScratch : _transitionEntriesScratch;
@@ -1184,7 +1183,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _stableCutLayer = cutLayer;
     }
 
-            private void CollectVisibleCandidates(
+    private void CollectVisibleCandidates(
         SparseVoxelField field,
         Camera3D camera,
         int renderStep,
