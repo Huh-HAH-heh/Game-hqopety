@@ -8,6 +8,7 @@ on:
     paths:
       - "Core/Map/VoxelVolumeStore.cs"
       - "Core/Map/VoxelVolumeStore.Serialization.cs"
+      - "Core/Map/IVoxelBaseSource.cs"
       - "Core.Tests/**"
       - "Core/Core.csproj"
       - ".github/workflows/voxel-storage-core.yml"
