@@ -24,6 +24,7 @@ public sealed class VoxelVolumeStore
     private readonly Dictionary<BucketKey, List<int>> _materialBuckets = new();
     private readonly List<GeometryOperation> _geometry = new();
     private readonly List<MaterialOperation> _materials = new();
+    private readonly Dictionary<BrickKey, BaseBrick> _baseBricks = new();
     private readonly Dictionary<BrickKey, EditBrick> _editBricks = new();
     private bool _baseSealed;
 
@@ -35,7 +36,9 @@ public sealed class VoxelVolumeStore
     public bool IsBaseSealed => _baseSealed;
     public int BaseGeometryRegionCount => _geometry.Count;
     public int BaseMaterialRegionCount => _materials.Count;
+    public int BaseDenseBrickCount => _baseBricks.Count;
     public int EditBrickCount => _editBricks.Count;
+    public long BaseDenseBytes => (long)_baseBricks.Count * BrickCellCount * (sizeof(short) + sizeof(ushort));
 
     public long EditBytes
     {
@@ -104,6 +107,12 @@ public sealed class VoxelVolumeStore
         Vector3 B,
         float Radius,
         ushort MaterialId);
+
+    private sealed class BaseBrick
+    {
+        public required short[] Density { get; init; }
+        public required ushort[] Material { get; init; }
+    }
 
     private sealed class EditBrick
     {
@@ -254,6 +263,44 @@ public sealed class VoxelVolumeStore
     /// Freezes the compact base description. Subsequent changes materialize only
     /// the touched 16^3 edit bricks.
     /// </summary>
+    /// <summary>
+    /// Imports one exact 16^3 base brick. This is the path for arbitrary generated
+    /// voxel data that cannot be represented by a small set of simple primitives.
+    /// The arrays are copied and the material channel is normalized for air cells.
+    /// An imported brick overrides primitive base operations in the same brick.
+    /// </summary>
+    public void WriteBaseBrick(
+        int brickX,
+        int brickY,
+        int brickZ,
+        ReadOnlySpan<short> density,
+        ReadOnlySpan<ushort> material)
+    {
+        ValidateBaseMutable();
+        if (brickX < 0 || brickY < 0 || brickZ < 0 ||
+            (long)brickX * BrickSize >= Width ||
+            (long)brickY * BrickSize >= Height ||
+            (long)brickZ * BrickSize >= Depth)
+            throw new ArgumentOutOfRangeException(nameof(brickX));
+        if (density.Length != BrickCellCount)
+            throw new ArgumentException("Density brick must contain exactly 16^3 values.", nameof(density));
+        if (material.Length != BrickCellCount)
+            throw new ArgumentException("Material brick must contain exactly 16^3 values.", nameof(material));
+
+        short[] densityCopy = density.ToArray();
+        ushort[] materialCopy = material.ToArray();
+        for (int i = 0; i < BrickCellCount; i++)
+            if (densityCopy[i] <= 0)
+                materialCopy[i] = 0;
+
+        _baseBricks[new BrickKey(brickX, brickY, brickZ)] = new BaseBrick
+        {
+            Density = densityCopy,
+            Material = materialCopy
+        };
+        Revision++;
+    }
+
     public void SealBase()
     {
         _baseSealed = true;
