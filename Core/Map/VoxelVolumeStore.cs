@@ -1055,7 +1055,8 @@ public sealed partial class VoxelVolumeStore
                     bz * BrickSize)
                 : null;
 
-            if (!add &&
+            if (_baseSource == null &&
+                !add &&
                 existingEdit?.Density == null &&
                 (baseBrick == null || baseBrick.IsUniform && !baseBrick.UniformSample.IsSolid) &&
                 !HasSolidBaseCandidate(baseCandidates))
@@ -1144,7 +1145,8 @@ public sealed partial class VoxelVolumeStore
                 ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
                 : null;
 
-            if (existingEdit?.Density == null &&
+            if (_baseSource == null &&
+                existingEdit?.Density == null &&
                 (baseBrick == null || baseBrick.IsUniform && !baseBrick.UniformSample.IsSolid) &&
                 !HasSolidBaseCandidate(geometryCandidates))
                 continue;
