@@ -175,6 +175,7 @@ internal sealed class RaylibViewerSettings
 
     public bool CutawayEnabled { get; set; }
     public float CutawayHeightMeters { get; set; } = 17f;
+    public float CutawayStepMeters { get; set; } = 0.1f;
     public TerrainRenderMode TerrainMode { get; set; } = TerrainRenderMode.Voxel;
 
     public bool ShowHud { get; set; } = true;
@@ -287,6 +288,11 @@ internal sealed class RaylibViewerSettings
         if (!float.IsFinite(CutawayHeightMeters))
             CutawayHeightMeters = 17f;
         CutawayHeightMeters = Math.Clamp(CutawayHeightMeters, 0f, 49.9f);
+
+        CutawayStepMeters = float.IsFinite(CutawayStepMeters) &&
+            CutawayStepMeters >= 0.5f
+                ? 1f
+                : 0.1f;
 
         Palette ??= new TerrainPalette();
         Palette.Normalize();
