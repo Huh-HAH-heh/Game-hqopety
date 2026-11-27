@@ -11,6 +11,7 @@ internal static class Program
         Run("Capsule excavation creates a tunnel only in touched bricks", TestTunnelEdit, ref failures);
         Run("Batch reads match point reads for both channels", TestBatchReads, ref failures);
         Run("Imported dense base bricks support arbitrary generated voxels", TestDenseBaseBrick, ref failures);
+        Run("Removed material does not reappear after local carve and refill", TestMaterialDoesNotResurrect, ref failures);
         Run("Large world does not allocate edit bricks until changed", TestLargeWorldStaysSparse, ref failures);
 
         Console.WriteLine();
@@ -180,6 +181,37 @@ internal static class Program
         return (
             correct,
             $"solid=({solid.Density},{solid.MaterialId}) air=({air.Density},{air.MaterialId}) painted=({painted.Density},{painted.MaterialId}) carved=({carved.Density},{carved.MaterialId}) baseBricks={store.BaseDenseBrickCount} editBricks={store.EditBrickCount}");
+    }
+
+    private static (bool Passed, string Detail) TestMaterialDoesNotResurrect()
+    {
+        VoxelVolumeStore store = CreateTestStore();
+        store.AddSolidBox(
+            new Vector3(0.8f, 0.8f, 0.8f),
+            new Vector3(5.6f, 5.6f, 5.6f),
+            materialId: 1);
+        store.PaintSphere(new Vector3(3.2f), 0.3f, materialId: 2);
+
+        store.CarveSphere(new Vector3(3.2f), 0.4f);
+        VoxelVolumeStore.VoxelSample carved = store.GetVoxel(32, 32, 32);
+
+        store.AddSphere(new Vector3(3.2f), 0.2f, materialId: 3);
+        VoxelVolumeStore.VoxelSample refilled = store.GetVoxel(32, 32, 32);
+
+        store.SetDensity(32, 32, 32, short.MinValue);
+        VoxelVolumeStore.VoxelSample emptied = store.GetVoxel(32, 32, 32);
+        store.SetDensity(32, 32, 32, short.MaxValue);
+        VoxelVolumeStore.VoxelSample restored = store.GetVoxel(32, 32, 32);
+
+        bool correct =
+            !carved.IsSolid && carved.MaterialId == 0 &&
+            refilled.IsSolid && refilled.MaterialId == 3 &&
+            !emptied.IsSolid && emptied.MaterialId == 0 &&
+            restored.IsSolid && restored.MaterialId == 0;
+
+        return (
+            correct,
+            $"carved=({carved.Density},{carved.MaterialId}) refilled=({refilled.Density},{refilled.MaterialId}) emptied=({emptied.Density},{emptied.MaterialId}) restored=({restored.Density},{restored.MaterialId})");
     }
 
     private static (bool Passed, string Detail) TestLargeWorldStaysSparse()
