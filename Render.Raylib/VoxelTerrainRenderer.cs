@@ -803,11 +803,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         EndMode3D();
 
         DrawCallsLastFrame = draws;
-        VisibleChunksLastFrame = _visible.Count +
-            (_lodTransitionActive ? _transitionVisible.Count : 0) +
-            (_coarseVisiblePages.Count > 0
-                ? _coarseVisiblePages[0].Page.Regions.Values.Count(static r => r.VertexCount > 0)
-                : 0);
+        int coarseVisibleChunkCount = _coarseVisiblePages.Count > 0
+            ? _coarseVisiblePages[0].Page.Regions.Values.Count(static r => r.VertexCount > 0)
+            : 0;
+        VisibleChunksLastFrame = _lodTransitionActive
+            ? (displayCoverageReady ? _visible.Count :
+                _renderStep != FallbackLodStep && _coarseVisiblePages.Count > 0
+                    ? coarseVisibleChunkCount : 0) + _transitionVisible.Count
+            : (!displayCoverageReady && _displayStep != FallbackLodStep &&
+                _coarseVisiblePages.Count > 0
+                    ? coarseVisibleChunkCount : _visible.Count);
         if (_lodTransitionActive && _lodFade >= 1f)
         {
             int previousDisplayStep = _displayStep;
@@ -1294,14 +1299,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     }
                     else
                     {
-                        // Allocate and upload the replacement first. The old
-                        // region remains valid if allocation or upload fails.
+                        // Commit the replacement only after it uploads and the old
+                        // region can be safely retired. Keep the dictionary pointing
+                        // at the old mesh if either operation fails.
                         GpuMeshRegion nextRegion = AppendGpuRegion(
                             page, pending, vertexCount);
+                        try
+                        {
+                            if (hadRegion && oldRegion.Capacity > 0)
+                                ClearAndReleaseGpuRegion(page, oldRegion);
+                        }
+                        catch
+                        {
+                            ClearAndReleaseGpuRegion(page, nextRegion);
+                            throw;
+                        }
                         page.Regions[key] = nextRegion;
-
-                        if (hadRegion && oldRegion.Capacity > 0)
-                            ClearAndReleaseGpuRegion(page, oldRegion);
                     }
 
                     entry.PendingSurface = Array.Empty<VoxelMeshData>();
@@ -1517,14 +1530,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (_displayStep == 0)
         {
-            _displayStep = desiredStep;
-            _renderStep = desiredStep;
+            // Start from one coarse world representation. Detail is prepared
+            // in the background and replaces it only after full map coverage.
+            _displayStep = FallbackLodStep;
+            _renderStep = FallbackLodStep;
             _pendingRenderStep = 0;
             _pendingRenderStepTimestamp = 0;
             _lastLodSwitchTimestamp = Stopwatch.GetTimestamp();
             _logger.Write(
                 "VOXEL_LOD_INITIAL",
-                $"display={_displayStep} voxelMeters={ActiveVoxelSizeMeters:0.0} distance={distance:0.0} pixelsPerVoxel={pixelsPerVoxel:0.000}");
+                $"display={_displayStep} desired={desiredStep} voxelMeters={ActiveVoxelSizeMeters:0.0} distance={distance:0.0} pixelsPerVoxel={pixelsPerVoxel:0.000}");
             return;
         }
 
@@ -1541,6 +1556,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             desiredStep = _displayStep;
 
         int nextTargetStep = desiredStep;
+
+        // Do not abandon an expensive world build for another nearby LOD target.
+        // The only allowed retarget is a return to the currently displayed level.
+        if (_renderStep != _displayStep && nextTargetStep != _displayStep)
+            return;
 
         if (nextTargetStep == _renderStep)
         {
@@ -1624,7 +1644,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
 
         _dirtyGpuPageKeys.RemoveAll(key =>
-            key.Step != _displayStep && key.Step != FallbackLodStep);
+            key.Step != _displayStep && key.Step != _previousDisplayStep &&
+            key.Step != FallbackLodStep);
         _inactiveLodChunkScratch.Clear();
         _inactiveLodPageScratch.Clear();
     }
