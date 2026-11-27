@@ -379,7 +379,6 @@ public sealed class VoxelVolumeStore
                 {
                     int localIndex = sourceIndex + (x - x0);
                     bool needBase = edit == null ||
-                        (edit.Density == null && edit.Material == null) ||
                         edit.Density == null ||
                         edit.Material == null;
 
@@ -553,6 +552,7 @@ public sealed class VoxelVolumeStore
             int ox = bx * BrickSize;
             int oy = by * BrickSize;
             int oz = bz * BrickSize;
+            List<int>? geometryCandidates = GetBucketCandidates(_geometryBuckets, ox, oy, oz);
             int x0 = Math.Max(bounds.MinX, ox);
             int y0 = Math.Max(bounds.MinY, oy);
             int z0 = Math.Max(bounds.MinZ, oz);
@@ -628,9 +628,7 @@ public sealed class VoxelVolumeStore
                     continue;
 
                 short density = brick.Density == null
-                    ? EvaluateBaseDensity(
-                        x, y, z,
-                        GetBucketCandidates(_geometryBuckets, x, y, z))
+                    ? EvaluateBaseDensity(x, y, z, geometryCandidates)
                     : brick.Density[GetLocalIndex(ox, oy, oz, x, y, z)];
 
                 if (density > 0)
