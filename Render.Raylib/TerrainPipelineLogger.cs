@@ -128,7 +128,8 @@ internal sealed class TerrainPipelineLogger : IDisposable
             return;
 
         message ??= string.Empty;
-        if (message.Contains("No reusable GPU page range", StringComparison.Ordinal))
+        if (message.Contains("No reusable GPU page range", StringComparison.Ordinal) ||
+            message.Contains("No global GPU page capacity", StringComparison.Ordinal))
         {
             int end = message.IndexOf(" retryFrame=", StringComparison.Ordinal);
             if (end < 0) end = message.IndexOf(" error=", StringComparison.Ordinal);
