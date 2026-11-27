@@ -119,15 +119,15 @@ public static class RaylibTerrainViewer
             0f,
             maximumCutHeight);
         bool cutHeightKeyWasHeld = false;
-        string focusName = cutawayMode ? "LOWER TUNNEL" : "SURFACE";
+        string focusName = cutawayMode ? "HORIZONTAL SECTION" : "SURFACE";
         VoxelEditMode voxelEditMode = VoxelEditMode.Off;
         float voxelBrushRadiusMeters = 1.5f;
         ushort voxelBrushMaterial = 1;
         bool voxelStrokeActive = false;
         Vector3 voxelStrokeStart = default;
 
-        if (cutawayMode)
-            FocusLowerTunnel(camera, terrain);
+        // A saved section never forces the camera to a preset. The camera
+        // starts in its normal overview and remains independently controlled.
 
         try
         {
@@ -226,13 +226,8 @@ public static class RaylibTerrainViewer
                         break;
 
                     case RaylibMenuAction.ResetCamera:
-                        cutawayMode = false;
-                        menu.CutawayEnabled = false;
-                        menu.SaveSettings();
-                        focusName = "SURFACE";
-                        terrain.DisableCutaway();
-                        renderer.Synchronize(terrain);
                         camera.ResetTopDownView();
+                        focusName = cutawayMode ? "HORIZONTAL SECTION" : "SURFACE";
                         break;
 
                     case RaylibMenuAction.FocusLowerTunnel:
@@ -291,22 +286,10 @@ public static class RaylibTerrainViewer
 
                     case RaylibMenuAction.ToggleCutaway:
                         cutawayMode = menu.CutawayEnabled;
+                        focusName = cutawayMode ? "HORIZONTAL SECTION" : "SURFACE";
                         menu.SaveSettings();
-
-                        if (cutawayMode)
-                        {
-                            menu.Settings.CutawayHeightMeters = 17f;
-                            menu.SaveSettings();
-                            focusName = "LOWER TUNNEL";
-                            FocusLowerTunnel(camera, terrain);
-                        }
-                        else
-                        {
-                            focusName = "SURFACE";
+                        if (!cutawayMode)
                             terrain.DisableCutaway();
-                            renderer.Synchronize(terrain);
-                            camera.ResetTopDownView();
-                        }
                         break;
                 }
 
@@ -354,27 +337,18 @@ public static class RaylibTerrainViewer
                     {
                         cutawayMode = !cutawayMode;
                         menu.CutawayEnabled = cutawayMode;
+                        focusName = cutawayMode ? "HORIZONTAL SECTION" : "SURFACE";
                         menu.SaveSettings();
-
-                        if (cutawayMode)
-                        {
-                            menu.Settings.CutawayHeightMeters = 17f;
-                            menu.SaveSettings();
-                            focusName = "LOWER TUNNEL";
-                            FocusLowerTunnel(camera, terrain);
-                        }
-                        else
-                        {
-                            focusName = "SURFACE";
+                        if (!cutawayMode)
                             terrain.DisableCutaway();
-                            renderer.Synchronize(terrain);
-                            camera.ResetTopDownView();
-                        }
                     }
 
                     bool shiftDown =
                         IsKeyDown(KeyboardKey.LeftShift) ||
                         IsKeyDown(KeyboardKey.RightShift);
+                    bool coarseSliceStep =
+                        IsKeyDown(KeyboardKey.LeftControl) ||
+                        IsKeyDown(KeyboardKey.RightControl);
                     bool sliceKeysDown =
                         IsKeyDown(KeyboardKey.Q) ||
                         IsKeyDown(KeyboardKey.E);
@@ -384,6 +358,7 @@ public static class RaylibTerrainViewer
                         deltaTime,
                         mouseWheel,
                         shiftDown,
+                        coarseSliceStep,
                         maximumCutHeight);
 
                     if (sliceChanged && !sliceKeysDown)
@@ -399,7 +374,7 @@ public static class RaylibTerrainViewer
                         cutHeightKeyWasHeld = false;
                     }
 
-                    float cameraWheel = cutawayMode && shiftDown
+                    float cameraWheel = cutawayMode && (shiftDown || coarseSliceStep)
                         ? 0f
                         : mouseWheel;
                     camera.Update(
@@ -448,12 +423,22 @@ public static class RaylibTerrainViewer
                             !layerPanel.IsPointerOverPanel(GetMousePosition()))
                         {
                             Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
-                            if (worldMap.Voxels.TryRaycast(
-                                editRay.Position,
-                                editRay.Direction,
-                                menu.Settings.RenderDistanceMeters,
-                                out Vector3 hitPosition,
-                                out Vector3 hitNormal))
+                            bool hasEditHit = cutawayMode
+                                ? TryRaycastCutaway(
+                                    worldMap.Voxels,
+                                    editRay.Position,
+                                    editRay.Direction,
+                                    menu.Settings.RenderDistanceMeters,
+                                    menu.Settings.CutawayHeightMeters,
+                                    out Vector3 hitPosition,
+                                    out Vector3 hitNormal)
+                                : worldMap.Voxels.TryRaycast(
+                                    editRay.Position,
+                                    editRay.Direction,
+                                    menu.Settings.RenderDistanceMeters,
+                                    out hitPosition,
+                                    out hitNormal);
+                            if (hasEditHit)
                             {
                                 if (voxelEditMode is VoxelEditMode.CarveCapsule or VoxelEditMode.AddCapsule)
                                 {
@@ -489,12 +474,22 @@ public static class RaylibTerrainViewer
                             IsMouseButtonReleased(MouseButton.Left))
                         {
                             Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
-                            if (worldMap.Voxels.TryRaycast(
-                                editRay.Position,
-                                editRay.Direction,
-                                menu.Settings.RenderDistanceMeters,
-                                out Vector3 hitPosition,
-                                out Vector3 hitNormal))
+                            bool hasEditHit = cutawayMode
+                                ? TryRaycastCutaway(
+                                    worldMap.Voxels,
+                                    editRay.Position,
+                                    editRay.Direction,
+                                    menu.Settings.RenderDistanceMeters,
+                                    menu.Settings.CutawayHeightMeters,
+                                    out Vector3 hitPosition,
+                                    out Vector3 hitNormal)
+                                : worldMap.Voxels.TryRaycast(
+                                    editRay.Position,
+                                    editRay.Direction,
+                                    menu.Settings.RenderDistanceMeters,
+                                    out hitPosition,
+                                    out hitNormal);
+                            if (hasEditHit)
                             {
                                 Vector3 end = hitPosition -
                                     hitNormal * voxelBrushRadiusMeters * 0.2f;
@@ -849,6 +844,78 @@ public static class RaylibTerrainViewer
         }
     }
 
+    private static bool TryRaycastCutaway(
+        SparseVoxelField field,
+        Vector3 origin,
+        Vector3 direction,
+        float maximumDistance,
+        float cutHeight,
+        out Vector3 hitPosition,
+        out Vector3 hitNormal)
+    {
+        hitPosition = default;
+        hitNormal = Vector3.UnitY;
+
+        if (!float.IsFinite(cutHeight) ||
+            direction.LengthSquared() < 0.000001f)
+            return false;
+
+        direction = Vector3.Normalize(direction);
+        float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        const float parallelEpsilon = 0.00001f;
+        const float planeEpsilon = 0.0001f;
+
+        if (MathF.Abs(direction.Y) <= parallelEpsilon)
+            return origin.Y <= cutHeight + planeEpsilon &&
+                field.TryRaycast(origin, direction, maximumDistance,
+                    out hitPosition, out hitNormal);
+
+        // Rays moving down inside the visible volume need no special handling.
+        if (origin.Y <= cutHeight + planeEpsilon && direction.Y < 0f)
+            return field.TryRaycast(origin, direction, maximumDistance,
+                out hitPosition, out hitNormal);
+
+        float planeDistance = (cutHeight - origin.Y) / direction.Y;
+        if (planeDistance < 0f || planeDistance > maximumDistance)
+            return origin.Y <= cutHeight + planeEpsilon &&
+                field.TryRaycast(origin, direction, maximumDistance,
+                    out hitPosition, out hitNormal);
+
+        if (origin.Y > cutHeight + planeEpsilon && direction.Y > 0f)
+            return false;
+
+        if (origin.Y <= cutHeight + planeEpsilon &&
+            field.TryRaycast(origin, direction, planeDistance,
+                out hitPosition, out hitNormal))
+            return true;
+
+        Vector3 planePosition = origin + direction * planeDistance;
+        Vector3 planeSample = planePosition / voxelSize - new Vector3(0.5f);
+        if (field.SampleDensity(
+                planeSample.X, planeSample.Y, planeSample.Z) >= 0f)
+        {
+            hitPosition = planePosition;
+            hitNormal = direction.Y < 0f ? Vector3.UnitY : -Vector3.UnitY;
+            return true;
+        }
+
+        // An opening at the plane lets the ray continue into visible underground geometry.
+        if (origin.Y > cutHeight + planeEpsilon && direction.Y < 0f)
+        {
+            const float offset = 0.025f;
+            float remaining = maximumDistance - planeDistance - offset;
+            if (remaining <= 0f)
+                return false;
+
+            Vector3 start = planePosition + direction * offset;
+            return field.TryRaycast(
+                start, direction, remaining,
+                out hitPosition, out hitNormal);
+        }
+
+        return false;
+    }
+
     private static void FocusLowerTunnel(
         OrbitCameraController camera,
         TerrainRenderSnapshot terrain)
@@ -1103,18 +1170,19 @@ public static class RaylibTerrainViewer
         float deltaTime,
         float mouseWheel,
         bool shiftDown,
+        bool coarseStepDown,
         float maximumCutHeight)
     {
-        const float layerStepMeters = WorldMap.LayerHeightUnits * 0.1f;
+        float stepMeters = coarseStepDown ? 1f : settings.CutawayStepMeters;
         float change = 0f;
 
         if (IsKeyPressed(KeyboardKey.PageUp))
-            change += layerStepMeters;
+            change += stepMeters;
         if (IsKeyPressed(KeyboardKey.PageDown))
-            change -= layerStepMeters;
+            change -= stepMeters;
 
-        if (shiftDown && mouseWheel != 0f)
-            change += mouseWheel * layerStepMeters;
+        if ((shiftDown || coarseStepDown) && mouseWheel != 0f)
+            change += mouseWheel * stepMeters;
 
         float verticalInput = 0f;
         if (IsKeyDown(KeyboardKey.E))
