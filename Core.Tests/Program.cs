@@ -394,7 +394,11 @@ internal static class Program
         VoxelVolumeStore.VoxelBounds bounds = new(28, 28, 8, 36, 36, 56);
         short[] density = new short[(int)bounds.Volume];
         ushort[] material = new ushort[density.Length];
+        short[] densityOnly = new short[density.Length];
+        ushort[] materialOnly = new ushort[density.Length];
         store.ReadRegion(bounds, density, material);
+        store.ReadDensityRegion(bounds, densityOnly);
+        store.ReadMaterialRegion(bounds, materialOnly);
 
         int mismatches = 0;
         int index = 0;
@@ -403,7 +407,10 @@ internal static class Program
         for (int x = bounds.MinX; x < bounds.MaxX; x++)
         {
             VoxelVolumeStore.VoxelSample point = store.GetVoxel(x, y, z);
-            if (density[index] != point.Density || material[index] != point.MaterialId)
+            if (density[index] != point.Density ||
+                material[index] != point.MaterialId ||
+                densityOnly[index] != point.Density ||
+                materialOnly[index] != point.MaterialId)
                 mismatches++;
             index++;
         }
