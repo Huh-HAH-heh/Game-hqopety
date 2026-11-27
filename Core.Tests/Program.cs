@@ -10,6 +10,7 @@ internal static class Program
         Run("Uniform plateau stays compact and material vein is independent", TestPlateauAndVein, ref failures);
         Run("Capsule excavation creates a tunnel only in touched bricks", TestTunnelEdit, ref failures);
         Run("Batch reads match point reads for both channels", TestBatchReads, ref failures);
+        Run("Imported dense base bricks support arbitrary generated voxels", TestDenseBaseBrick, ref failures);
         Run("Large world does not allocate edit bricks until changed", TestLargeWorldStaysSparse, ref failures);
 
         Console.WriteLine();
@@ -131,6 +132,46 @@ internal static class Program
         }
 
         return (mismatches == 0, $"samples={count} mismatches={mismatches}");
+    }
+
+    private static (bool Passed, string Detail) TestDenseBaseBrick()
+    {
+        VoxelVolumeStore store = CreateTestStore();
+        short[] density = new short[VoxelVolumeStore.BrickCellCount];
+        ushort[] materials = new ushort[VoxelVolumeStore.BrickCellCount];
+
+        for (int z = 0; z < VoxelVolumeStore.BrickSize; z++)
+        for (int y = 0; y < VoxelVolumeStore.BrickSize; y++)
+        for (int x = 0; x < VoxelVolumeStore.BrickSize; x++)
+        {
+            int index = x + VoxelVolumeStore.BrickSize *
+                (y + VoxelVolumeStore.BrickSize * z);
+            density[index] = (short)((y - 8) * 256);
+            materials[index] = 3;
+        }
+
+        store.WriteBaseBrick(1, 1, 1, density, materials);
+        store.SealBase();
+
+        VoxelVolumeStore.VoxelSample solid = store.GetVoxel(24, 25, 24);
+        VoxelVolumeStore.VoxelSample air = store.GetVoxel(24, 23, 24);
+
+        VoxelVolumeStore.VoxelBounds bounds = new(16, 16, 16, 32, 32, 32);
+        short[] batchDensity = new short[VoxelVolumeStore.BrickCellCount];
+        ushort[] batchMaterial = new ushort[VoxelVolumeStore.BrickCellCount];
+        store.ReadRegion(bounds, batchDensity, batchMaterial);
+
+        bool correct =
+            solid.IsSolid && solid.MaterialId == 3 &&
+            !air.IsSolid && air.MaterialId == 0 &&
+            batchDensity[8 + 16 * (9 + 16 * 8)] == density[8 + 16 * (9 + 16 * 8)] &&
+            batchMaterial[8 + 16 * (9 + 16 * 8)] == 3 &&
+            store.BaseDenseBrickCount == 1 &&
+            store.BaseDenseBytes == VoxelVolumeStore.BrickCellCount * 4L;
+
+        return (
+            correct,
+            $"solid=({solid.Density},{solid.MaterialId}) air=({air.Density},{air.MaterialId}) baseBricks={store.BaseDenseBrickCount} bytes={store.BaseDenseBytes}");
     }
 
     private static (bool Passed, string Detail) TestLargeWorldStaysSparse()
