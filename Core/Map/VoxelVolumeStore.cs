@@ -568,7 +568,7 @@ public sealed class VoxelVolumeStore
         ValidateMaterial(materialId);
         ApplyGeometryBrush(
             ShapeKind.Sphere, centerMeters, default, radiusMeters,
-            add: true, materialId);
+            add: true, materialId: materialId);
     }
 
     public void CarveCapsule(
