@@ -422,7 +422,7 @@ public static class RaylibTerrainViewer
                             IsMouseButtonPressed(MouseButton.Left) &&
                             !layerPanel.IsPointerOverPanel(GetMousePosition()))
                         {
-                            Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
+                            Ray editRay = GetScreenToWorldRay(GetMousePosition(), camera.Camera);
                             Vector3 hitPosition;
                             Vector3 hitNormal;
                             bool hasEditHit = cutawayMode
@@ -475,7 +475,7 @@ public static class RaylibTerrainViewer
                             !renderer.IsMergingFragments &&
                             IsMouseButtonReleased(MouseButton.Left))
                         {
-                            Ray editRay = GetMouseRay(GetMousePosition(), camera.Camera);
+                            Ray editRay = GetScreenToWorldRay(GetMousePosition(), camera.Camera);
                             Vector3 hitPosition;
                             Vector3 hitNormal;
                             bool hasEditHit = cutawayMode
@@ -607,7 +607,7 @@ public static class RaylibTerrainViewer
 
                 long syncStarted = Stopwatch.GetTimestamp();
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
-                                    if (cutawayMode)
+                if (cutawayMode)
                 {
                     const float layerHeightMeters =
                         WorldMap.LayerHeightUnits * 0.1f;
