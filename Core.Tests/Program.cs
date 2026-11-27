@@ -16,6 +16,7 @@ internal static class Program
         Run("Batch reads match point reads for both channels", TestBatchReads, ref failures);
         Run("Imported dense base bricks support arbitrary generated voxels", TestDenseBaseBrick, ref failures);
         Run("Uniform base bricks support independent channel reads and paint edits", TestUniformBaseBrickChannels, ref failures);
+        Run("Procedural 3D source supports tunnels, batch reads and save/load", TestProceduralBaseSource, ref failures);
         Run("Removed material does not reappear after local carve and refill", TestMaterialDoesNotResurrect, ref failures);
         Run("Save/load preserves base regions, dense bricks and local edits", TestSaveLoadRoundTrip, ref failures);
         Run("Uniform and empty regions are described without voxel expansion", TestUniformRegionFastPath, ref failures);
@@ -378,6 +379,127 @@ internal static class Program
         return (
             correct,
             $"uniformBaseBytes={store.BaseDenseBytes} editBricks={store.EditBrickCount} painted={painted} centerMaterial={materialAll[center]} mismatches={mismatches}");
+    }
+
+    private static (bool Passed, string Detail) TestProceduralBaseSource()
+    {
+        VoxelVolumeStore store = CreateTestStore();
+        store.SetBaseSource(new TestProceduralSource(64, 64, 64, 0.1f, seed: 1));
+        store.SealBase();
+
+        VoxelVolumeStore.VoxelSample solid = store.GetVoxel(24, 24, 24);
+        VoxelVolumeStore.VoxelSample tunnel = store.GetVoxel(32, 32, 24);
+        VoxelVolumeStore.VoxelSample tunnelWall = store.GetVoxel(32, 24, 24);
+
+        VoxelVolumeStore.VoxelBounds bounds = new(28, 28, 8, 36, 36, 56);
+        short[] density = new short[(int)bounds.Volume];
+        ushort[] material = new ushort[density.Length];
+        store.ReadRegion(bounds, density, material);
+
+        int mismatches = 0;
+        int index = 0;
+        for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
+        for (int y = bounds.MinY; y < bounds.MaxY; y++)
+        for (int x = bounds.MinX; x < bounds.MaxX; x++)
+        {
+            VoxelVolumeStore.VoxelSample point = store.GetVoxel(x, y, z);
+            if (density[index] != point.Density || material[index] != point.MaterialId)
+                mismatches++;
+            index++;
+        }
+
+        store.CarveSphere(new Vector3(2.4f), 0.25f);
+        VoxelVolumeStore.VoxelSample carved = store.GetVoxel(24, 24, 24);
+
+        using MemoryStream stream = new();
+        store.Save(stream);
+        stream.Position = 0;
+        VoxelVolumeStore loaded = VoxelVolumeStore.Load(stream, ResolveTestBaseSource);
+
+        VoxelVolumeStore.VoxelSample restoredCarve = loaded.GetVoxel(24, 24, 24);
+        VoxelVolumeStore.VoxelSample restoredSolid = loaded.GetVoxel(24, 24, 40);
+        VoxelVolumeStore.VoxelSample restoredTunnel = loaded.GetVoxel(32, 32, 24);
+
+        bool correct =
+            store.HasBaseSource &&
+            solid.IsSolid && solid.MaterialId == 7 &&
+            !tunnel.IsSolid && tunnel.MaterialId == 0 &&
+            tunnelWall.IsSolid && tunnelWall.MaterialId == 7 &&
+            mismatches == 0 &&
+            !carved.IsSolid &&
+            loaded.HasBaseSource &&
+            restoredCarve == carved &&
+            restoredSolid.IsSolid && restoredSolid.MaterialId == 7 &&
+            !restoredTunnel.IsSolid && restoredTunnel.MaterialId == 0;
+
+        return (
+            correct,
+            $"solid={solid.IsSolid} tunnel={tunnel.IsSolid} wall={tunnelWall.IsSolid} batchMismatches={mismatches} sourceRestored={loaded.HasBaseSource} editRestored={!restoredCarve.IsSolid}");
+    }
+
+    private static IVoxelBaseSource ResolveTestBaseSource(
+        string typeId,
+        ushort dataVersion,
+        int width,
+        int height,
+        int depth,
+        float voxelSizeMeters,
+        BinaryReader reader)
+    {
+        if (typeId != TestProceduralSource.SourceId || dataVersion != 1)
+            throw new InvalidDataException("Unknown test voxel source.");
+        int seed = reader.ReadInt32();
+        return new TestProceduralSource(
+            width, height, depth, voxelSizeMeters, seed);
+    }
+
+    private sealed class TestProceduralSource : IVoxelBaseSource
+    {
+        public const string SourceId = "tests.voxel-cavern";
+
+        public string TypeId => SourceId;
+        public ushort DataVersion => 1;
+        public int Width { get; }
+        public int Height { get; }
+        public int Depth { get; }
+        public float VoxelSizeMeters { get; }
+        private int Seed { get; }
+
+        public TestProceduralSource(
+            int width,
+            int height,
+            int depth,
+            float voxelSizeMeters,
+            int seed)
+        {
+            Width = width;
+            Height = height;
+            Depth = depth;
+            VoxelSizeMeters = voxelSizeMeters;
+            Seed = seed;
+        }
+
+        public VoxelVolumeStore.VoxelSample Sample(int x, int y, int z)
+        {
+            bool inMass =
+                x >= 8 && x < 56 &&
+                y >= 8 && y < 56 &&
+                z >= 8 && z < 56;
+
+            int tunnelX = 31 + (Seed & 1);
+            bool inTunnel =
+                Math.Abs(x - tunnelX) <= 2 &&
+                Math.Abs(y - 32) <= 2 &&
+                z >= 8 && z < 56;
+
+            bool solid = inMass && !inTunnel;
+            return new VoxelVolumeStore.VoxelSample(
+                solid ? (short)96 : (short)-96,
+                solid ? (ushort)7 : (ushort)0);
+        }
+
+        public void WriteState(BinaryWriter writer) =>
+            writer.Write(Seed);
     }
 
     private static (bool Passed, string Detail) TestMaterialDoesNotResurrect()
