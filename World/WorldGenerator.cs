@@ -167,6 +167,7 @@ public static class WorldGenerator
         }
 
         worldMap.SetSurfaceHeightPatches(heights, patchSize, BaseMaterialId);
+        worldMap.InitializeVoxelVolumeBase();
 
         // Keep the complete cave system directly beneath the map centre.
         int caveCenterX = centerX;
@@ -368,6 +369,8 @@ public static class WorldGenerator
                 $"upperEndsSealed={upperEndsSealed}, lowerStratum={lowerStratum}, " +
                 $"upperStratum={upperStratum}, surfaceSealed={surfaceSealed}.");
         }
+
+        worldMap.VoxelVolume.SealBase();
 
         if (writeLog)
         {
