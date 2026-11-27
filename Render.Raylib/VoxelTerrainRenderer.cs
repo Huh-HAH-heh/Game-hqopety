@@ -853,183 +853,103 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         MarkGpuPageDirty(key);
     }
 
-    private bool AreStepCandidatesReady(int step)
+    private static GpuMeshBuffer CreateGpuBuffer(int capacity)
     {
-        List<(Candidate Candidate, ChunkEntry Entry)> entries =
-            step == _displayStep ? _candidateEntriesScratch : _transitionEntriesScratch;
-
-        if (!_gpuPages.TryGetValue(new GpuPageKey(step), out GpuMeshPage? page))
-            return false;
-
-        foreach ((Candidate candidate, ChunkEntry entry) in entries)
-        {
-            if (candidate.Key.Step != step) continue;
-            if (!entry.Built || entry.SurfaceDirty || entry.CutDirty ||
-                entry.BaseVersion != _snapshotField?.BaseVersion ||
-                entry.PaletteVersion != _paletteVersion ||
-                !page.CpuMeshes.ContainsKey(candidate.Key))
-                return false;
-        }
-
-        return true;
-    }
-
-    private bool RebuildGlobalGpuPage(GpuPageKey pageKey, GpuMeshPage page)
-    {
-        _worldRegionScratch.Clear();
-        int totalCapacity = 0;
-
-        foreach ((ChunkKey key, GpuMeshRegion oldRegion) in page.Regions)
-        {
-            if (key.Step != pageKey.Step ||
-                !_chunks.TryGetValue(key, out ChunkEntry? entry) ||
-                !entry.Built)
-                continue;
-
-            bool hasPending = page.CpuMeshes.TryGetValue(key, out VoxelMeshData[]? pending);
-            VoxelMeshData[] data = pending ?? Array.Empty<VoxelMeshData>();
-            int vertexCount = hasPending
-                ? VoxelChunkMesher.CountTriangleVertices(data)
-                : oldRegion.VertexCount;
-            int capacity = oldRegion.Capacity;
-            if (vertexCount > capacity)
-                capacity = GetGpuRegionCapacity(vertexCount);
-
-            totalCapacity = checked(totalCapacity + capacity);
-            if (totalCapacity > MaximumWorldMeshVertices)
-                throw new InvalidOperationException(
-                    $"World mesh requires {totalCapacity:N0} vertices; limit is {MaximumWorldMeshVertices:N0}.");
-
-            _worldRegionScratch.Add((key, data, vertexCount, capacity, hasPending));
-        }
-
-        foreach ((ChunkKey key, VoxelMeshData[] data) in page.CpuMeshes)
-        {
-            if (page.Regions.ContainsKey(key) ||
-                key.Step != pageKey.Step ||
-                !_chunks.TryGetValue(key, out ChunkEntry? entry) ||
-                !entry.Built)
-                continue;
-
-            int vertexCount = VoxelChunkMesher.CountTriangleVertices(data);
-            int capacity = GetGpuRegionCapacity(vertexCount);
-            totalCapacity = checked(totalCapacity + capacity);
-            if (totalCapacity > MaximumWorldMeshVertices)
-                throw new InvalidOperationException(
-                    $"World mesh requires {totalCapacity:N0} vertices; limit is {MaximumWorldMeshVertices:N0}.");
-
-            _worldRegionScratch.Add((key, data, vertexCount, capacity, true));
-        }
-
-        Dictionary<ChunkKey, GpuMeshRegion> nextRegions =
-            new(_worldRegionScratch.Count);
-
-        if (totalCapacity == 0)
-        {
-            if (page.HasMesh)
-            {
-                UnloadMesh(page.Mesh);
-                page.HasMesh = false;
-                page.Mesh = default;
-                _totalGpuUnloads++;
-            }
-
-            foreach (var region in _worldRegionScratch)
-                nextRegions.Add(region.Key, new GpuMeshRegion(0, 0, 0));
-
-            page.Regions.Clear();
-            foreach (var region in nextRegions)
-                page.Regions.Add(region.Key, region.Value);
-
-            foreach (VoxelMeshData[] data in page.CpuMeshes.Values)
-                ReturnMeshData(data);
-            page.CpuMeshes.Clear();
-            page.Initialized = true;
-            return true;
-        }
-
-        Mesh nextMesh = new(totalCapacity, totalCapacity / 3);
+        Mesh mesh = new(capacity, capacity / 3);
         try
         {
-            nextMesh.AllocVertices();
-            nextMesh.AllocNormals();
-            nextMesh.AllocColors();
-
-            Span<Vector3> vertices = nextMesh.VerticesAs<Vector3>();
-            Span<Vector3> normals = nextMesh.NormalsAs<Vector3>();
-            Span<byte> colors = nextMesh.ColorsAs<byte>();
-            vertices.Clear();
-            normals.Clear();
-            colors.Clear();
-
-            Span<Vector3> oldVertices = page.HasMesh
-                ? page.Mesh.VerticesAs<Vector3>()
-                : Span<Vector3>.Empty;
-            Span<Vector3> oldNormals = page.HasMesh
-                ? page.Mesh.NormalsAs<Vector3>()
-                : Span<Vector3>.Empty;
-            Span<byte> oldColors = page.HasMesh
-                ? page.Mesh.ColorsAs<byte>()
-                : Span<byte>.Empty;
-
-            int offset = 0;
-            foreach (var region in _worldRegionScratch)
-            {
-                if (region.HasPending)
-                {
-                    if (region.VertexCount > 0)
-                    {
-                        VoxelChunkMesher.CopyTriangleSoup(
-                            region.Data,
-                            vertices.Slice(offset, region.VertexCount),
-                            normals.Slice(offset, region.VertexCount),
-                            colors.Slice(offset * 4, region.VertexCount * 4));
-                    }
-                }
-                else if (region.VertexCount > 0)
-                {
-                    GpuMeshRegion oldRegion = page.Regions[region.Key];
-                    oldVertices.Slice(oldRegion.Offset, region.VertexCount)
-                        .CopyTo(vertices.Slice(offset, region.VertexCount));
-                    oldNormals.Slice(oldRegion.Offset, region.VertexCount)
-                        .CopyTo(normals.Slice(offset, region.VertexCount));
-                    oldColors.Slice(oldRegion.Offset * 4, region.VertexCount * 4)
-                        .CopyTo(colors.Slice(offset * 4, region.VertexCount * 4));
-                }
-
-                nextRegions.Add(region.Key,
-                    new GpuMeshRegion(offset, region.Capacity, region.VertexCount));
-                offset += region.Capacity;
-            }
-
-            UploadMesh(ref nextMesh, true);
+            mesh.AllocVertices();
+            mesh.AllocNormals();
+            mesh.AllocColors();
+            mesh.VerticesAs<Vector3>().Clear();
+            mesh.NormalsAs<Vector3>().Clear();
+            mesh.ColorsAs<byte>().Clear();
+            UploadMesh(ref mesh, false);
+            return new GpuMeshBuffer(mesh, capacity);
         }
         catch
         {
-            UnloadMesh(nextMesh);
+            if (mesh.VaoId != 0) UnloadMesh(mesh);
             throw;
         }
+    }
 
-        if (page.HasMesh)
+    private GpuMeshRegion AppendGpuRegion(
+        GpuMeshPage page,
+        VoxelMeshData[] data,
+        int vertexCount)
+    {
+        int capacity = GetGpuRegionCapacity(vertexCount);
+        if (capacity <= 0)
+            return default;
+
+        if ((long)page.ReservedVertexCount + capacity > MaximumWorldMeshVertices)
+            throw new InvalidOperationException(
+                $"LOD page exceeds {MaximumWorldMeshVertices:N0} reserved vertices.");
+
+        int bufferIndex = page.Buffers.Count - 1;
+        GpuMeshBuffer? buffer = bufferIndex >= 0
+            ? page.Buffers[bufferIndex]
+            : null;
+
+        if (buffer == null || buffer.ReservedVertexCount + capacity > buffer.Capacity)
         {
-            UnloadMesh(page.Mesh);
-            _totalGpuUnloads++;
+            int remaining = MaximumWorldMeshVertices - page.ReservedVertexCount;
+            int bufferCapacity = Math.Min(
+                Math.Max(GpuPageBufferVertices, capacity),
+                remaining);
+            if (bufferCapacity < capacity)
+                throw new InvalidOperationException("No GPU page capacity remains.");
+
+            buffer = CreateGpuBuffer(bufferCapacity);
+            page.Buffers.Add(buffer);
+            bufferIndex = page.Buffers.Count - 1;
+            GpuUploadsLastFrame++;
+            _totalGpuUploads++;
         }
 
-        page.Mesh = nextMesh;
-        page.HasMesh = true;
-        page.Initialized = true;
-        page.Regions.Clear();
-        foreach (var region in nextRegions)
-            page.Regions.Add(region.Key, region.Value);
+        int offset = buffer.ReservedVertexCount;
+        VoxelChunkMesher.UpdateTriangleSoup(
+            ref buffer.Mesh, offset, capacity, data);
+        buffer.ReservedVertexCount += capacity;
+        page.ReservedVertexCount += capacity;
+        return new GpuMeshRegion(bufferIndex, offset, capacity, vertexCount);
+    }
 
-        foreach (VoxelMeshData[] data in page.CpuMeshes.Values)
-            ReturnMeshData(data);
-        page.CpuMeshes.Clear();
+    private static void RecalculateGpuDrawCounts(GpuMeshPage page)
+    {
+        foreach (GpuMeshBuffer buffer in page.Buffers)
+            buffer.DrawVertexCount = 0;
 
-        GpuUploadsLastFrame++;
-        _totalGpuUploads++;
-        return true;
+        foreach (GpuMeshRegion region in page.Regions.Values)
+        {
+            if (region.VertexCount <= 0 ||
+                (uint)region.BufferIndex >= (uint)page.Buffers.Count)
+                continue;
+
+            GpuMeshBuffer buffer = page.Buffers[region.BufferIndex];
+            buffer.DrawVertexCount = Math.Max(
+                buffer.DrawVertexCount,
+                region.Offset + region.VertexCount);
+        }
+    }
+
+    private static int DrawGpuPage(GpuMeshPage page, Material material)
+    {
+        int draws = 0;
+        foreach (GpuMeshBuffer buffer in page.Buffers)
+        {
+            if (buffer.DrawVertexCount <= 0)
+                continue;
+
+            Mesh drawMesh = buffer.Mesh;
+            drawMesh.VertexCount = buffer.DrawVertexCount;
+            drawMesh.TriangleCount = buffer.DrawVertexCount / 3;
+            DrawMesh(drawMesh, material, Matrix4x4.Identity);
+            draws++;
+        }
+
+        return draws;
     }
 
     private void UploadDirtyGpuPages()
@@ -1041,19 +961,68 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         for (int dirtyIndex = 0; dirtyIndex < dirtyCount; dirtyIndex++)
         {
             GpuPageKey pageKey = _dirtyGpuPageKeys[dirtyIndex];
-            if (!_gpuPages.TryGetValue(pageKey, out GpuMeshPage? page)) continue;
+            if (!_gpuPages.TryGetValue(pageKey, out GpuMeshPage? page))
+                continue;
+
             page.Dirty = false;
-
-            bool requiresRebuild = !page.Initialized;
-            try
+            foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
             {
-                foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
-                {
-                    if (key.Step != pageKey.Step || !entry.HasPendingSurface)
-                        continue;
+                if (key.Step != pageKey.Step || !entry.HasPendingSurface)
+                    continue;
 
-                    VoxelMeshData[] pending = entry.PendingSurface;
-                    int vertexCount = VoxelChunkMesher.CountTriangleVertices(pending);
+                VoxelMeshData[] pending = entry.PendingSurface;
+                int vertexCount = VoxelChunkMesher.CountTriangleVertices(pending);
+
+                try
+                {
+                    bool hadRegion = page.Regions.TryGetValue(
+                        key, out GpuMeshRegion oldRegion);
+
+                    if (vertexCount == 0)
+                    {
+                        if (hadRegion && oldRegion.Capacity > 0)
+                        {
+                            VoxelChunkMesher.UpdateTriangleSoup(
+                                ref page.Buffers[oldRegion.BufferIndex].Mesh,
+                                oldRegion.Offset,
+                                oldRegion.Capacity,
+                                Array.Empty<VoxelMeshData>());
+                        }
+
+                        page.Regions[key] = hadRegion
+                            ? oldRegion with { VertexCount = 0 }
+                            : default;
+                    }
+                    else if (hadRegion && vertexCount <= oldRegion.Capacity)
+                    {
+                        VoxelChunkMesher.UpdateTriangleSoup(
+                            ref page.Buffers[oldRegion.BufferIndex].Mesh,
+                            oldRegion.Offset,
+                            oldRegion.Capacity,
+                            pending);
+                        page.Regions[key] = oldRegion with
+                        {
+                            VertexCount = vertexCount
+                        };
+                    }
+                    else
+                    {
+                        // Allocate and upload the replacement first. The old
+                        // region remains valid if allocation or upload fails.
+                        GpuMeshRegion nextRegion = AppendGpuRegion(
+                            page, pending, vertexCount);
+
+                        if (hadRegion && oldRegion.Capacity > 0)
+                        {
+                            VoxelChunkMesher.UpdateTriangleSoup(
+                                ref page.Buffers[oldRegion.BufferIndex].Mesh,
+                                oldRegion.Offset,
+                                oldRegion.Capacity,
+                                Array.Empty<VoxelMeshData>());
+                        }
+
+                        page.Regions[key] = nextRegion;
+                    }
 
                     entry.PendingSurface = Array.Empty<VoxelMeshData>();
                     entry.HasPendingSurface = false;
@@ -1065,70 +1034,28 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry.Built = true;
                     DiscardLegacyCutCap(key, entry);
                     SetSurfaceGpuHash(key, entry.PendingSurfaceHash);
+                    ReturnMeshData(pending);
+
                     RebuiltChunks++;
-
-                    if (page.Initialized &&
-                        page.Regions.TryGetValue(key, out GpuMeshRegion region) &&
-                        vertexCount <= region.Capacity)
-                    {
-                        if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? stale))
-                            ReturnMeshData(stale);
-
-                        try
-                        {
-                            if (region.Capacity > 0)
-                            {
-                                VoxelChunkMesher.UpdateTriangleSoup(
-                                    ref page.Mesh, region.Offset, region.Capacity, pending);
-                                GpuUploadsLastFrame++;
-                                _totalGpuUploads++;
-                            }
-                        }
-                        catch
-                        {
-                            page.CpuMeshes[key] = pending;
-                            throw;
-                        }
-
-                        page.Regions[key] = region with { VertexCount = vertexCount };
-                        ReturnMeshData(pending);
-                        continue;
-                    }
-
-                    if (page.Initialized && vertexCount == 0 &&
-                        !page.Regions.ContainsKey(key))
-                    {
-                        if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? stale))
-                            ReturnMeshData(stale);
-                        page.Regions.Add(key, new GpuMeshRegion(0, 0, 0));
-                        ReturnMeshData(pending);
-                        continue;
-                    }
-
-                    if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? previous))
-                        ReturnMeshData(previous);
-                    page.CpuMeshes[key] = pending;
-                    requiresRebuild = true;
+                    GpuUploadsLastFrame++;
+                    _totalGpuUploads++;
                 }
-
-                if (!page.Initialized && !AreStepCandidatesReady(pageKey.Step))
+                catch (Exception exception)
                 {
-                    page.Dirty = true;
-                    _dirtyGpuPageKeys.Add(pageKey);
-                    continue;
+                    // One failed region must not hold up the rest of the LOD page.
+                    entry.FailedRevision = entry.RequestRevision;
+                    entry.PendingSurface = Array.Empty<VoxelMeshData>();
+                    entry.HasPendingSurface = false;
+                    entry.SurfaceDirty = true;
+                    ReturnMeshData(pending);
+                    _totalBuildFailed++;
+                    _logger.Error(
+                        "WORLD_MESH_REGION_UPDATE_FAILED",
+                        $"chunk=({key.X},{key.Y},{key.Z}) step={key.Step} error={exception}");
                 }
+            }
 
-                if (requiresRebuild)
-                    RebuildGlobalGpuPage(pageKey, page);
-            }
-            catch (Exception exception)
-            {
-                page.Dirty = true;
-                _dirtyGpuPageKeys.Add(pageKey);
-                _logger.Error("WORLD_MESH_UPDATE_FAILED",
-                    $"step={pageKey.Step} error={exception}");
-                continue;
-            }
+            RecalculateGpuDrawCounts(page);
         }
 
         _dirtyGpuPageKeys.RemoveRange(0, dirtyCount);
