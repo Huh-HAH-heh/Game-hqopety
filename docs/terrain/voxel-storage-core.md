@@ -168,6 +168,18 @@ Base Volume строится до \`SealBase()\`. После фиксации б
 9. За пределами edit-областей не выделяется память под edit-bricks.
 10. Измеряются время точечного чтения, скорость ReadRegion, время первой материализации, повторного изменения и объём памяти.
 
+Запуск проверок:
+
+```powershell
+dotnet run --project Core.Tests/Core.Tests.csproj --configuration Release
+```
+
+Отдельные измерения производительности:
+
+```powershell
+dotnet run --project Core.Tests/Core.Tests.csproj --configuration Release -- --bench
+```
+
 Рендерер в этих тестах не запускается и не изменяется.
 
 ## 10. Критерий принятия архитектуры
