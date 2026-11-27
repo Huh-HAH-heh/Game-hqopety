@@ -795,7 +795,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             GpuPageKey key = GetGpuPageKey(chunkKey);
             if (!_gpuPages.TryGetValue(key, out GpuMeshPage? page) ||
-                !page.HasMesh || !keys.Add(key))
+                !page.HasMesh || page.Dirty || !keys.Add(key))
                 continue;
             pages.Add((key, page));
         }
