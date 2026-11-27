@@ -656,9 +656,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _fallbackRetiredBaseVersion = field.BaseVersion;
         }
 
+        int coarseReadyCount = 0;
         bool coarseCoverageReady = !basePageReady && HasCompleteCachedLod(
-            _coarseCandidateEntriesScratch, field, FallbackLodStep, out int coarseReadyCount);
-        if (basePageReady) coarseReadyCount = 0;
+            _coarseCandidateEntriesScratch, field, FallbackLodStep, out coarseReadyCount);
 
         _visible.Clear();
         _visibleChunkKeys.Clear();
