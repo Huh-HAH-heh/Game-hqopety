@@ -15,6 +15,7 @@ internal static class Program
         Run("Capsule excavation creates a tunnel only in touched bricks", TestTunnelEdit, ref failures);
         Run("Batch reads match point reads for both channels", TestBatchReads, ref failures);
         Run("Imported dense base bricks support arbitrary generated voxels", TestDenseBaseBrick, ref failures);
+        Run("Uniform base bricks support independent channel reads and paint edits", TestUniformBaseBrickChannels, ref failures);
         Run("Removed material does not reappear after local carve and refill", TestMaterialDoesNotResurrect, ref failures);
         Run("Save/load preserves base regions, dense bricks and local edits", TestSaveLoadRoundTrip, ref failures);
         Run("Uniform and empty regions are described without voxel expansion", TestUniformRegionFastPath, ref failures);
@@ -273,6 +274,70 @@ internal static class Program
         return (
             correct,
             $"solid=({solid.Density},{solid.MaterialId}) air=({air.Density},{air.MaterialId}) painted=({painted.Density},{painted.MaterialId}) carved=({carved.Density},{carved.MaterialId}) baseBricks={store.BaseDenseBrickCount} editBricks={store.EditBrickCount}");
+    }
+
+    private static (bool Passed, string Detail) TestUniformBaseBrickChannels()
+    {
+        VoxelVolumeStore store = CreateTestStore();
+        short[] density = new short[VoxelVolumeStore.BrickCellCount];
+        ushort[] material = new ushort[VoxelVolumeStore.BrickCellCount];
+        Array.Fill(density, (short)102);
+        Array.Fill(material, (ushort)5);
+
+        store.WriteBaseBrick(1, 1, 1, density, material);
+        store.SealBase();
+
+        VoxelVolumeStore.VoxelBounds bounds = new(16, 16, 16, 32, 32, 32);
+        int count = VoxelVolumeStore.BrickCellCount;
+        short[] densityAll = new short[count];
+        ushort[] materialAll = new ushort[count];
+        short[] densityOnly = new short[count];
+        ushort[] materialOnly = new ushort[count];
+
+        store.ReadRegion(bounds, densityAll, materialAll);
+        store.ReadDensityRegion(bounds, densityOnly);
+        store.ReadMaterialRegion(bounds, materialOnly);
+
+        bool initial = true;
+        for (int i = 0; i < count; i++)
+        {
+            if (densityAll[i] != 102 || densityOnly[i] != 102 ||
+                materialAll[i] != 5 || materialOnly[i] != 5)
+            {
+                initial = false;
+                break;
+            }
+        }
+
+        store.PaintSphere(new Vector3(2.4f), 0.25f, materialId: 8);
+        store.ReadRegion(bounds, densityAll, materialAll);
+        store.ReadMaterialRegion(bounds, materialOnly);
+
+        int center = 8 + 16 * (8 + 16 * 8);
+        int painted = 0;
+        int mismatches = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (densityAll[i] != 102 || densityOnly[i] != 102)
+                mismatches++;
+            if (materialAll[i] == 8)
+                painted++;
+            if (materialAll[i] != materialOnly[i])
+                mismatches++;
+        }
+
+        bool correct =
+            initial &&
+            store.BaseDenseBytes == 0 &&
+            store.EditBrickCount == 1 &&
+            materialAll[center] == 8 &&
+            densityAll[center] == 102 &&
+            painted > 0 &&
+            mismatches == 0;
+
+        return (
+            correct,
+            $"uniformBaseBytes={store.BaseDenseBytes} editBricks={store.EditBrickCount} painted={painted} centerMaterial={materialAll[center]} mismatches={mismatches}");
     }
 
     private static (bool Passed, string Detail) TestMaterialDoesNotResurrect()
