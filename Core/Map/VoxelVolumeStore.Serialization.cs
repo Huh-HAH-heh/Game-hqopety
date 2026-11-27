@@ -20,7 +20,7 @@ public sealed partial class VoxelVolumeStore
         using BinaryWriter writer = new(gzip, Encoding.UTF8, leaveOpen: true);
 
         writer.Write(0x31535656); // VVS1
-        writer.Write(1);
+        writer.Write(2);
         writer.Write(Width);
         writer.Write(Height);
         writer.Write(Depth);
@@ -57,8 +57,17 @@ public sealed partial class VoxelVolumeStore
             writer.Write(pair.Key.X);
             writer.Write(pair.Key.Y);
             writer.Write(pair.Key.Z);
-            WriteDensityArray(writer, pair.Value.Density);
-            WriteMaterialArray(writer, pair.Value.Material);
+            writer.Write(pair.Value.IsUniform);
+            if (pair.Value.IsUniform)
+            {
+                writer.Write(pair.Value.UniformSample.Density);
+                writer.Write(pair.Value.UniformSample.MaterialId);
+            }
+            else
+            {
+                WriteDensityArray(writer, pair.Value.Density!);
+                WriteMaterialArray(writer, pair.Value.Material!);
+            }
         }
 
         writer.Write(_editBricks.Count);
@@ -90,7 +99,7 @@ public sealed partial class VoxelVolumeStore
 
         if (reader.ReadInt32() != 0x31535656)
             throw new InvalidDataException("Invalid voxel volume signature.");
-        if (reader.ReadInt32() != 1)
+        if (reader.ReadInt32() != 2)
             throw new InvalidDataException("Unsupported voxel volume version.");
 
         int width = reader.ReadInt32();
@@ -158,23 +167,47 @@ public sealed partial class VoxelVolumeStore
         {
             BrickKey key = ReadBrickKey(reader);
             store.ValidateBrickKey(key);
-            short[] density = ReadDensityArray(reader);
-            ushort[] material = ReadMaterialArray(reader);
-            for (int j = 0; j < BrickCellCount; j++)
+            bool uniform = reader.ReadBoolean();
+            BaseBrick brick;
+
+            if (uniform)
             {
-                density[j] = store.Quantize(Dequantize(density[j]));
-                if (density[j] <= 0)
-                    material[j] = 0;
+                short density = store.Quantize(Dequantize(reader.ReadInt16()));
+                ushort material = reader.ReadUInt16();
+                if (density <= 0)
+                    material = 0;
+
+                brick = new BaseBrick
+                {
+                    Density = null,
+                    Material = null,
+                    IsUniform = true,
+                    UniformSample = new VoxelSample(density, material)
+                };
+            }
+            else
+            {
+                short[] density = ReadDensityArray(reader);
+                ushort[] material = ReadMaterialArray(reader);
+                for (int j = 0; j < BrickCellCount; j++)
+                {
+                    density[j] = store.Quantize(Dequantize(density[j]));
+                    if (density[j] <= 0)
+                        material[j] = 0;
+                }
+
+                bool actuallyUniform = AreUniform(
+                    density, material, out VoxelSample uniformSample);
+                brick = new BaseBrick
+                {
+                    Density = actuallyUniform ? null : density,
+                    Material = actuallyUniform ? null : material,
+                    IsUniform = actuallyUniform,
+                    UniformSample = uniformSample
+                };
             }
 
-            bool uniform = AreUniform(density, material, out VoxelSample uniformSample);
-            if (!store._baseBricks.TryAdd(key, new BaseBrick
-            {
-                Density = density,
-                Material = material,
-                IsUniform = uniform,
-                UniformSample = uniformSample
-            }))
+            if (!store._baseBricks.TryAdd(key, brick))
                 throw new InvalidDataException("Duplicate base brick key.");
         }
 
