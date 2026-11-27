@@ -279,10 +279,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly List<ChunkKey> _inactiveLodChunkScratch = new();
     private readonly List<Candidate> _coarseCandidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _coarseCandidateEntriesScratch = new();
-    private readonly List<(ChunkKey Key, ChunkEntry Entry)> _coarseVisible = new();
     private readonly List<(GpuPageKey Key, GpuMeshPage Page)> _coarseVisiblePages = new();
     private readonly HashSet<ChunkKey> _coarseCandidateKeys = new();
-    private readonly HashSet<GpuPageKey> _coarseVisiblePageKeys = new();
     private readonly List<GpuPageKey> _inactiveLodPageScratch = new();
     // One immutable snapshot represents the entire sparse voxel field and is reused
     // until the field version changes. Per-chunk density buffers are created by workers.
@@ -711,7 +709,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         CollectVisiblePages(_transitionVisible, _transitionVisiblePages, _transitionVisiblePageKeys);
 
         _coarseVisiblePages.Clear();
-        _coarseVisiblePageKeys.Clear();
         bool hasCurrentLodMesh = _visiblePages.Count > 0 ||
             (_lodTransitionActive && _transitionVisiblePages.Count > 0);
         if (!hasCurrentLodMesh &&
@@ -1359,7 +1356,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach (GpuPageKey key in _inactiveLodPageScratch)
         {
             if (!_gpuPages.Remove(key, out GpuMeshPage? page)) continue;
-            if (page.HasMesh) _totalGpuUnloads++;
+            _totalGpuUnloads += page.Buffers.Count;
             page.Dispose();
         }
 
@@ -1418,7 +1415,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (region.Capacity > 0 &&
                 (uint)region.BufferIndex < (uint)page.Buffers.Count)
             {
-                VoxelMeshBufferClear(page, region);
+                VoxelChunkMesher.UpdateTriangleSoup(
+                    ref page.Buffers[region.BufferIndex].Mesh,
+                    region.Offset,
+                    region.Capacity,
+                    Array.Empty<VoxelMeshData>());
                 page.Regions[key] = region with { VertexCount = 0 };
                 RecalculateGpuDrawCounts(page);
                 GpuUploadsLastFrame++;
@@ -2352,7 +2353,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _inactiveLodChunkScratch.Clear();
         _coarseCandidateScratch.Clear();
         _coarseCandidateEntriesScratch.Clear();
-        _coarseVisible.Clear();
         _coarseVisiblePages.Clear();
         _coarseCandidateKeys.Clear();
         _coarseVisiblePageKeys.Clear();
