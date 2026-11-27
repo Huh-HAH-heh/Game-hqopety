@@ -39,12 +39,30 @@ internal static class Program
             Vector3.Zero,
             new Vector3(2_304f, 5f, 2_304f),
             materialId: 1);
+
+        short[] baseDensity = new short[VoxelVolumeStore.BrickCellCount];
+        ushort[] baseMaterial = new ushort[VoxelVolumeStore.BrickCellCount];
+        for (int z = 0; z < VoxelVolumeStore.BrickSize; z++)
+        for (int y = 0; y < VoxelVolumeStore.BrickSize; y++)
+        for (int x = 0; x < VoxelVolumeStore.BrickSize; x++)
+        {
+            int index = x + VoxelVolumeStore.BrickSize *
+                (y + VoxelVolumeStore.BrickSize * z);
+            baseDensity[index] = (short)(80 + x);
+            baseMaterial[index] = 3;
+        }
+
+        for (int bz = 1; bz <= 2; bz++)
+        for (int by = 1; by <= 2; by++)
+        for (int bx = 687; bx <= 688; bx++)
+            store.WriteBaseBrick(bx, by, bz, baseDensity, baseMaterial);
+
         store.SealBase();
 
         VoxelVolumeStore.VoxelBounds uniformBounds =
-            new(10_000, 10, 10_000, 12_000, 40, 12_000);
+            new(2_000, 10, 2_000, 4_000, 40, 4_000);
         VoxelVolumeStore.VoxelBounds readBounds =
-            new(11_000, 10, 11_000, 11_032, 42, 11_032);
+            new(10_992, 16, 10_992, 11_024, 48, 11_024);
 
         short[] density = new short[checked((int)readBounds.Volume)];
         ushort[] material = new ushort[density.Length];
@@ -62,17 +80,38 @@ internal static class Program
                 checksum += sample.Density + sample.MaterialId;
         });
 
-        Measure("read_region_32cubed", 500, () =>
+        Measure("read_region_dense_32cubed", 500, () =>
         {
             store.ReadRegion(readBounds, density, material);
             checksum += density[0] + material[^1];
         });
 
-        Measure("point_sample", 200_000, () =>
+        Measure("read_density_dense_32cubed", 500, () =>
         {
-            int x = random.Next(10_000, 12_000);
+            store.ReadDensityRegion(readBounds, density);
+            checksum += density[0] + density[^1];
+        });
+
+        Measure("read_material_dense_32cubed", 500, () =>
+        {
+            store.ReadMaterialRegion(readBounds, material);
+            checksum += material[0] + material[^1];
+        });
+
+        Measure("point_sample_primitive", 200_000, () =>
+        {
+            int x = random.Next(2_000, 4_000);
             int y = random.Next(10, 40);
-            int z = random.Next(10_000, 12_000);
+            int z = random.Next(2_000, 4_000);
+            VoxelVolumeStore.VoxelSample sample = store.GetVoxel(x, y, z);
+            checksum += sample.Density + sample.MaterialId;
+        });
+
+        Measure("point_sample_dense", 100_000, () =>
+        {
+            int x = random.Next(10_992, 11_024);
+            int y = random.Next(16, 48);
+            int z = random.Next(10_992, 11_024);
             VoxelVolumeStore.VoxelSample sample = store.GetVoxel(x, y, z);
             checksum += sample.Density + sample.MaterialId;
         });
