@@ -23,7 +23,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // Requests now hold metadata + one shared immutable field snapshot; density arrays
     // are rented only by active workers, so the queue can cover the whole visible set.
     private const int MaximumPendingMeshJobs = 4096;
-    private const int MaximumWorldSamplesPerAxis = 4096;
+    private const int MaximumWorldSamplesPerAxis = 2048;
     private const int MaximumWorldMeshVertices = 24_000_000;
     // Use the available physical cores for density capture and Surface Nets builds.
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
@@ -1139,7 +1139,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _stableCutLayer = cutLayer;
     }
 
-    private void CollectVisibleCandidates(
+        private void CollectVisibleCandidates(
         SparseVoxelField field,
         Camera3D camera,
         int viewportWidth,
@@ -1152,117 +1152,47 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ref int macroFrustumTests,
         ref int visibleMacroRegions)
     {
-        const int groupChunks = VisibilityGroupChunks;
+        candidates.Clear();
         int chunkSpan = ChunkCells * renderStep;
-        int groupSpan = chunkSpan * groupChunks;
-        int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
         Vector3 cameraPosition = camera.Position;
 
         int chunksX = DivideRoundUp(field.Width, chunkSpan);
         int chunksY = DivideRoundUp(field.Height, chunkSpan);
         int chunksZ = DivideRoundUp(field.Depth, chunkSpan);
-        if (chunksX == 0 || chunksY == 0 || chunksZ == 0)
+        if (chunksX <= 0 || chunksY <= 0 || chunksZ <= 0)
             return;
 
-        int firstX = 0;
-        int lastX = chunksX - 1;
-        int firstY = 0;
-        int lastY = chunksY - 1;
-        int firstZ = 0;
-        int lastZ = chunksZ - 1;
-
-        int firstGroupX = firstX / groupChunks;
-        int lastGroupX = lastX / groupChunks;
-        int firstGroupZ = firstZ / groupChunks;
-        int lastGroupZ = lastZ / groupChunks;
-
-        for (int groupX = firstGroupX; groupX <= lastGroupX; groupX++)
-        for (int groupZ = firstGroupZ; groupZ <= lastGroupZ; groupZ++)
+        for (int y = 0; y < chunksY; y++)
+        for (int z = 0; z < chunksZ; z++)
+        for (int x = 0; x < chunksX; x++)
         {
-            ulong groupMask = field.GetPotentialVerticalChunkMask(
-                groupX, groupZ, groupSpan);
-            if (cutLayer >= 0)
-            {
-                int cutStorageY = cutLayer / SparseVoxelField.ChunkSize;
-                if (cutStorageY < 63)
-                    groupMask &= (1UL << (cutStorageY + 1)) - 1UL;
-                if (field.HasPotentialCutSurface(
-                        groupX, groupZ, cutLayer, groupSpan) &&
-                    cutStorageY < 64)
-                    groupMask |= 1UL << cutStorageY;
-            }
+            int originX = x * chunkSpan;
+            int originY = y * chunkSpan;
+            int originZ = z * chunkSpan;
+            int sizeX = Math.Min(chunkSpan, field.Width - originX);
+            int sizeY = Math.Min(chunkSpan, field.Height - originY);
+            int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
 
-            if (groupMask == 0)
-                continue;
+            Vector3 center = new(
+                (originX + sizeX * 0.5f) * voxelSize,
+                (originY + sizeY * 0.5f) * voxelSize,
+                (originZ + sizeZ * 0.5f) * voxelSize);
+            float halfX = sizeX * voxelSize * 0.5f;
+            float halfY = sizeY * voxelSize * 0.5f;
+            float halfZ = sizeZ * voxelSize * 0.5f;
+            float radius = MathF.Sqrt(
+                halfX * halfX + halfY * halfY + halfZ * halfZ);
 
-            int groupOriginX = groupX * groupSpan;
-            int groupOriginZ = groupZ * groupSpan;
-            int groupSizeX = Math.Min(groupSpan, field.Width - groupOriginX);
-            int groupSizeZ = Math.Min(groupSpan, field.Depth - groupOriginZ);
-            if (groupSizeX <= 0 || groupSizeZ <= 0)
-                continue;
-
-            int childFirstX = Math.Max(firstX, groupX * groupChunks);
-            int childLastX = Math.Min(lastX, groupX * groupChunks + groupChunks - 1);
-            int childFirstZ = Math.Max(firstZ, groupZ * groupChunks);
-            int childLastZ = Math.Min(lastZ, groupZ * groupChunks + groupChunks - 1);
-
-            for (int y = firstY; y <= lastY; y++)
-            {
-                if (!HasPotentialVerticalBand(
-                        field, groupX, groupZ, y,
-                        storageChunksPerChunk,
-                        groupMask, groupSpan))
-                    continue;
-
-                int originY = y * chunkSpan;
-                int sizeY = Math.Min(chunkSpan, field.Height - originY);
-                for (int macroX = childFirstX; macroX <= childLastX; macroX++)
-                for (int macroZ = childFirstZ; macroZ <= childLastZ; macroZ++)
-                {
-                    ulong mask = field.GetPotentialVerticalChunkMask(
-                        macroX, macroZ, chunkSpan);
-                    if (cutLayer >= 0)
-                    {
-                        int cutStorageY = cutLayer / SparseVoxelField.ChunkSize;
-                        if (cutStorageY < 63)
-                            mask &= (1UL << (cutStorageY + 1)) - 1UL;
-                        if (field.HasPotentialCutSurface(
-                                macroX, macroZ, cutLayer, chunkSpan) &&
-                            cutStorageY < 64)
-                            mask |= 1UL << cutStorageY;
-                    }
-
-                    if (mask == 0 || !HasPotentialVerticalBand(
-                            field, macroX, macroZ, y,
-                            storageChunksPerChunk, mask, chunkSpan))
-                        continue;
-
-                    int originX = macroX * chunkSpan;
-                    int chunkOriginY = y * chunkSpan;
-                    int originZ = macroZ * chunkSpan;
-                    int sizeX = Math.Min(chunkSpan, field.Width - originX);
-                    int chunkSizeY = Math.Min(chunkSpan, field.Height - chunkOriginY);
-                    int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
-                    Vector3 center = new(
-                        (originX + sizeX * 0.5f) * voxelSize,
-                        (chunkOriginY + chunkSizeY * 0.5f) * voxelSize,
-                        (originZ + sizeZ * 0.5f) * voxelSize);
-                    float halfX = sizeX * voxelSize * 0.5f;
-                    float halfY = chunkSizeY * voxelSize * 0.5f;
-                    float halfZ = sizeZ * voxelSize * 0.5f;
-                    float radius = MathF.Sqrt(
-                        halfX * halfX + halfY * halfY + halfZ * halfZ);
-
-                    visibleMacroRegions++;
-                    candidates.Add(new Candidate(
-                        new ChunkKey(macroX, y, macroZ, renderStep),
-                        center, radius,
-                        Vector3.DistanceSquared(center, cameraPosition)));
-                }
-            }
+            candidates.Add(new Candidate(
+                new ChunkKey(x, y, z, renderStep),
+                center, radius,
+                Vector3.DistanceSquared(center, cameraPosition)));
         }
+
+        visibleMacroRegions = candidates.Count;
+        frustumTests = 0;
+        macroFrustumTests = 0;
     }
 
     private void UpdateRenderStep(SparseVoxelField field, Camera3D camera, int viewportHeight)
