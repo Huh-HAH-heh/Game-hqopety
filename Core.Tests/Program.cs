@@ -156,6 +156,9 @@ internal static class Program
         VoxelVolumeStore.VoxelSample solid = store.GetVoxel(24, 25, 24);
         VoxelVolumeStore.VoxelSample air = store.GetVoxel(24, 23, 24);
 
+        store.CarveSphere(new Vector3(2.45f, 2.55f, 2.45f), 0.2f);
+        VoxelVolumeStore.VoxelSample carved = store.GetVoxel(24, 25, 24);
+
         VoxelVolumeStore.VoxelBounds bounds = new(16, 16, 16, 32, 32, 32);
         short[] batchDensity = new short[VoxelVolumeStore.BrickCellCount];
         ushort[] batchMaterial = new ushort[VoxelVolumeStore.BrickCellCount];
@@ -164,14 +167,16 @@ internal static class Program
         bool correct =
             solid.IsSolid && solid.MaterialId == 3 &&
             !air.IsSolid && air.MaterialId == 0 &&
-            batchDensity[8 + 16 * (9 + 16 * 8)] == density[8 + 16 * (9 + 16 * 8)] &&
-            batchMaterial[8 + 16 * (9 + 16 * 8)] == 3 &&
+            !carved.IsSolid && carved.MaterialId == 0 &&
+            batchDensity[8 + 16 * (9 + 16 * 8)] <= 0 &&
+            batchMaterial[8 + 16 * (9 + 16 * 8)] == 0 &&
             store.BaseDenseBrickCount == 1 &&
-            store.BaseDenseBytes == VoxelVolumeStore.BrickCellCount * 4L;
+            store.BaseDenseBytes == VoxelVolumeStore.BrickCellCount * 4L &&
+            store.EditBrickCount == 1;
 
         return (
             correct,
-            $"solid=({solid.Density},{solid.MaterialId}) air=({air.Density},{air.MaterialId}) baseBricks={store.BaseDenseBrickCount} bytes={store.BaseDenseBytes}");
+            $"solid=({solid.Density},{solid.MaterialId}) air=({air.Density},{air.MaterialId}) carved=({carved.Density},{carved.MaterialId}) baseBricks={store.BaseDenseBrickCount} editBricks={store.EditBrickCount}");
     }
 
     private static (bool Passed, string Detail) TestLargeWorldStaysSparse()
