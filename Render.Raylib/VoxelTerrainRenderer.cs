@@ -23,8 +23,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // Requests now hold metadata + one shared immutable field snapshot; density arrays
     // are rented only by active workers, so the queue can cover the whole visible set.
     private const int MaximumPendingMeshJobs = 4096;
-    private const int GpuPageGroupChunks = 4;
-    private const int GpuPageRegionCount = GpuPageGroupChunks * GpuPageGroupChunks;
+    private const int MaximumWorldSamplesPerAxis = 4096;
+    private const int MaximumWorldMeshVertices = 24_000_000;
     // Use the available physical cores for density capture and Surface Nets builds.
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
     private const int MaximumGpuMeshUploadsPerFrame = 16;
@@ -108,28 +108,26 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         """;
 
     private readonly record struct ChunkKey(int X, int Y, int Z, int Step);
-    private readonly record struct GpuPageKey(int X, int Y, int Z, int Step);
-
-    private sealed class GpuMeshSlot
-    {
-        public Mesh Mesh;
-        public int VertexCapacity;
-        public int TriangleCapacity;
-    }
+    private readonly record struct GpuPageKey(int Step);
+    private readonly record struct GpuMeshRegion(int Offset, int Capacity, int VertexCount);
 
     private sealed class GpuMeshPage : IDisposable
     {
-        public GpuMeshSlot[] Meshes = Array.Empty<GpuMeshSlot>();
-        public VoxelMeshData[] CpuMeshes = Array.Empty<VoxelMeshData>();
-        public VoxelRegionMeshRange[][] RegionRanges = CreateEmptyGpuPageRanges();
+        public Mesh Mesh;
+        public bool HasMesh;
         public bool Dirty;
+        public readonly Dictionary<ChunkKey, VoxelMeshData[]> CpuMeshes = new();
+        public readonly Dictionary<ChunkKey, GpuMeshRegion> Regions = new();
 
         public void Dispose()
         {
-            foreach (GpuMeshSlot slot in Meshes) UnloadMesh(slot.Mesh);
-            ReturnMeshData(CpuMeshes);
-            Meshes = Array.Empty<GpuMeshSlot>();
-            CpuMeshes = Array.Empty<VoxelMeshData>();
+            if (HasMesh) UnloadMesh(Mesh);
+            foreach (VoxelMeshData[] data in CpuMeshes.Values)
+                ReturnMeshData(data);
+            CpuMeshes.Clear();
+            Regions.Clear();
+            Mesh = default;
+            HasMesh = false;
         }
     }
 
@@ -250,8 +248,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly List<(GpuPageKey Key, GpuMeshPage Page)> _transitionVisiblePages = new();
     private readonly HashSet<GpuPageKey> _visiblePageKeys = new();
     private readonly HashSet<GpuPageKey> _transitionVisiblePageKeys = new();
-    private readonly List<VoxelMeshData> _pageSourceScratch = new(32);
-    private readonly List<int> _pageOwnerScratch = new(32);
+    private readonly List<(ChunkKey Key, VoxelMeshData[] Data, int VertexCount, int Capacity)> _worldRegionScratch = new();
     // One immutable snapshot represents the entire sparse voxel field and is reused
     // until the field version changes. Per-chunk density buffers are created by workers.
     private IVoxelFieldSource? _worldBuildSnapshot;
@@ -460,7 +457,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(field);
         EnsureFieldSubscription(field);
-        UpdateRenderStep(camera, viewportHeight);
+        UpdateRenderStep(field, camera, viewportHeight);
 
         long voxelFrameStarted = Stopwatch.GetTimestamp();
         float frameTime = Math.Clamp(GetFrameTime(), 0f, 0.05f);
@@ -652,17 +649,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             SetLodShader(0, _lodFade);
             foreach ((GpuPageKey key, GpuMeshPage page) in _visiblePages)
-            foreach (GpuMeshSlot slot in page.Meshes)
             {
-                DrawMesh(slot.Mesh, _material, Matrix4x4.Identity);
+                DrawMesh(page.Mesh, _material, Matrix4x4.Identity);
                 draws++;
             }
 
             SetLodShader(1, _lodFade);
             foreach ((GpuPageKey key, GpuMeshPage page) in _transitionVisiblePages)
-            foreach (GpuMeshSlot slot in page.Meshes)
             {
-                DrawMesh(slot.Mesh, _material, Matrix4x4.Identity);
+                DrawMesh(page.Mesh, _material, Matrix4x4.Identity);
                 draws++;
             }
         }
@@ -670,9 +665,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             SetLodShader(-1, 0f);
             foreach ((GpuPageKey key, GpuMeshPage page) in _visiblePages)
-            foreach (GpuMeshSlot slot in page.Meshes)
             {
-                DrawMesh(slot.Mesh, _material, Matrix4x4.Identity);
+                DrawMesh(page.Mesh, _material, Matrix4x4.Identity);
                 draws++;
             }
         }
@@ -721,10 +715,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entries.Clear();
         keys.Clear();
 
-        float distance = float.IsFinite(maximumViewDistanceMeters)
-            ? MathF.Max(0f, maximumViewDistanceMeters)
-            : 0f;
-        float distanceSquared = distance * distance;
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
 
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
@@ -742,13 +732,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int sizeX = Math.Min(chunkSpan, field.Width - originX);
             int sizeY = Math.Min(chunkSpan, field.Height - originY);
             int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
-            float nearestDistanceSquared = BoundsNearestDistanceSquared(
-                camera.Position,
-                originX, originY, originZ,
-                sizeX, sizeY, sizeZ);
-            if (nearestDistanceSquared > distanceSquared)
-                continue;
-
             Vector3 center = new(
                 (originX + sizeX * 0.5f) * voxelSize,
                 (originY + sizeY * 0.5f) * voxelSize,
@@ -768,25 +751,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
-    private static GpuPageKey GetGpuPageKey(ChunkKey key) =>
-        new(key.X / GpuPageGroupChunks, key.Y, key.Z / GpuPageGroupChunks, key.Step);
+        private static GpuPageKey GetGpuPageKey(ChunkKey key) => new(key.Step);
 
-    private static VoxelRegionMeshRange[][] CreateEmptyGpuPageRanges()
+    private static int GetGpuRegionCapacity(int vertexCount)
     {
-        VoxelRegionMeshRange[][] ranges = new VoxelRegionMeshRange[GpuPageRegionCount][];
-        Array.Fill(ranges, Array.Empty<VoxelRegionMeshRange>());
-        return ranges;
+        if (vertexCount <= 0) return 0;
+        int reserve = Math.Max(192, vertexCount / 8);
+        return checked(((vertexCount + reserve + 2) / 3) * 3);
     }
-
-    private static int GetGpuPageOwner(ChunkKey key) =>
-        (key.X % GpuPageGroupChunks) +
-        (key.Z % GpuPageGroupChunks) * GpuPageGroupChunks;
 
     private bool HasCachedSurface(ChunkKey key)
     {
         GpuPageKey pageKey = GetGpuPageKey(key);
         return _gpuPages.TryGetValue(pageKey, out GpuMeshPage? page) &&
-            page.RegionRanges[GetGpuPageOwner(key)].Length > 0;
+            page.Regions.TryGetValue(key, out GpuMeshRegion region) &&
+            region.VertexCount > 0;
     }
 
     private void MarkGpuPageDirty(ChunkKey key)
@@ -797,6 +776,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             page = new GpuMeshPage();
             _gpuPages.Add(pageKey, page);
         }
+
         if (page.Dirty) return;
         page.Dirty = true;
         _dirtyGpuPageKeys.Add(pageKey);
@@ -813,7 +793,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             GpuPageKey key = GetGpuPageKey(chunkKey);
             if (!_gpuPages.TryGetValue(key, out GpuMeshPage? page) ||
-                page.Dirty || page.Meshes.Length == 0 || !keys.Add(key))
+                !page.HasMesh || !keys.Add(key))
                 continue;
             pages.Add((key, page));
         }
@@ -837,6 +817,125 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         MarkGpuPageDirty(key);
     }
 
+    private bool AreStepCandidatesReady(int step)
+    {
+        List<(Candidate Candidate, ChunkEntry Entry)> entries =
+            step == _displayStep ? _candidateEntriesScratch : _transitionEntriesScratch;
+
+        if (!_gpuPages.TryGetValue(new GpuPageKey(step), out GpuMeshPage? page))
+            return false;
+
+        foreach ((Candidate candidate, ChunkEntry entry) in entries)
+        {
+            if (candidate.Key.Step != step) continue;
+            if (!entry.Built || entry.SurfaceDirty || entry.CutDirty ||
+                entry.BaseVersion != _snapshotField?.BaseVersion ||
+                entry.PaletteVersion != _paletteVersion ||
+                !page.CpuMeshes.ContainsKey(candidate.Key))
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool RebuildGlobalGpuPage(GpuPageKey pageKey, GpuMeshPage page)
+    {
+        _worldRegionScratch.Clear();
+        int totalCapacity = 0;
+
+        foreach ((ChunkKey key, VoxelMeshData[] data) in page.CpuMeshes)
+        {
+            if (key.Step != pageKey.Step ||
+                !_chunks.TryGetValue(key, out ChunkEntry? entry) ||
+                !entry.Built)
+                continue;
+
+            int vertexCount = VoxelChunkMesher.CountTriangleVertices(data);
+            int capacity = GetGpuRegionCapacity(vertexCount);
+            int nextTotal = checked(totalCapacity + capacity);
+            if (nextTotal > MaximumWorldMeshVertices)
+                throw new InvalidOperationException(
+                    $"World mesh requires {nextTotal:N0} vertices; limit is {MaximumWorldMeshVertices:N0}. Increase global LOD before upload.");
+
+            _worldRegionScratch.Add((key, data, vertexCount, capacity));
+            totalCapacity = nextTotal;
+        }
+
+        Dictionary<ChunkKey, GpuMeshRegion> nextRegions = new(_worldRegionScratch.Count);
+        if (totalCapacity == 0)
+        {
+            if (page.HasMesh)
+            {
+                UnloadMesh(page.Mesh);
+                page.HasMesh = false;
+                page.Mesh = default;
+                _totalGpuUnloads++;
+            }
+
+            foreach (var region in _worldRegionScratch)
+                nextRegions.Add(region.Key, new GpuMeshRegion(0, 0, 0));
+            page.Regions.Clear();
+            foreach (var region in nextRegions)
+                page.Regions.Add(region.Key, region.Value);
+            return true;
+        }
+
+        Mesh nextMesh = new(totalCapacity, totalCapacity / 3);
+        try
+        {
+            nextMesh.AllocVertices();
+            nextMesh.AllocNormals();
+            nextMesh.AllocColors();
+
+            Span<Vector3> vertices = nextMesh.VerticesAs<Vector3>();
+            Span<Vector3> normals = nextMesh.NormalsAs<Vector3>();
+            Span<byte> colors = nextMesh.ColorsAs<byte>();
+            vertices.Clear();
+            normals.Clear();
+            colors.Clear();
+
+            int offset = 0;
+            foreach (var region in _worldRegionScratch)
+            {
+                if (region.VertexCount > 0)
+                {
+                    VoxelChunkMesher.CopyTriangleSoup(
+                        region.Data,
+                        vertices.Slice(offset, region.VertexCount),
+                        normals.Slice(offset, region.VertexCount),
+                        colors.Slice(offset * 4, region.VertexCount * 4));
+                }
+
+                nextRegions.Add(region.Key,
+                    new GpuMeshRegion(offset, region.Capacity, region.VertexCount));
+                offset += region.Capacity;
+            }
+
+            UploadMesh(ref nextMesh, true);
+        }
+        catch
+        {
+            UnloadMesh(nextMesh);
+            throw;
+        }
+
+        if (page.HasMesh)
+        {
+            UnloadMesh(page.Mesh);
+            _totalGpuUnloads++;
+        }
+
+        page.Mesh = nextMesh;
+        page.HasMesh = true;
+        page.Regions.Clear();
+        foreach (var region in nextRegions)
+            page.Regions.Add(region.Key, region.Value);
+
+        GpuUploadsLastFrame++;
+        _totalGpuUploads++;
+        return true;
+    }
+
     private void UploadDirtyGpuPages()
     {
         int dirtyCount = _dirtyGpuPageKeys.Count;
@@ -847,161 +946,73 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             GpuPageKey pageKey = _dirtyGpuPageKeys[dirtyIndex];
             if (!_gpuPages.TryGetValue(pageKey, out GpuMeshPage? page)) continue;
-
-            _pageSourceScratch.Clear();
-            _pageOwnerScratch.Clear();
-
-            for (int owner = 0; owner < GpuPageRegionCount; owner++)
-            {
-                int cx = pageKey.X * GpuPageGroupChunks + owner % GpuPageGroupChunks;
-                int cz = pageKey.Z * GpuPageGroupChunks + owner / GpuPageGroupChunks;
-                ChunkKey chunkKey = new(cx, pageKey.Y, cz, pageKey.Step);
-                if (!_chunks.TryGetValue(chunkKey, out ChunkEntry? entry)) continue;
-
-                if (entry.HasPendingSurface)
-                {
-                    foreach (VoxelMeshData source in entry.PendingSurface)
-                    {
-                        _pageSourceScratch.Add(source);
-                        _pageOwnerScratch.Add(owner);
-                    }
-                    continue;
-                }
-
-                foreach (VoxelRegionMeshRange range in page.RegionRanges[owner])
-                {
-                    _pageSourceScratch.Add(page.CpuMeshes[range.PageIndex].CreateView(
-                        range.VertexOffset, range.VertexCount,
-                        range.IndexOffset, range.IndexCount));
-                    _pageOwnerScratch.Add(owner);
-                }
-            }
-
-            VoxelMeshData[] combined;
-            VoxelRegionMeshRange[][] newRanges;
-            try
-            {
-                combined = VoxelChunkMesher.CombineSurfaceData(
-                    _pageSourceScratch, _pageOwnerScratch, GpuPageRegionCount, out newRanges);
-            }
-            catch (Exception exception)
-            {
-                page.Dirty = true;
-                _dirtyGpuPageKeys.Add(pageKey);
-                _logger.Error("GPU_PAGE_COMPOSE_FAILED",
-                    $"page=({pageKey.X},{pageKey.Y},{pageKey.Z}) step={pageKey.Step} error={exception}");
-                continue;
-            }
-
-            GpuMeshSlot[] oldSlots = page.Meshes;
-            GpuMeshSlot[] nextSlots = combined.Length == 0
-                ? Array.Empty<GpuMeshSlot>()
-                : new GpuMeshSlot[combined.Length];
-
-            try
-            {
-                for (int i = 0; i < combined.Length; i++)
-                {
-                    VoxelMeshData source = combined[i];
-                    if (i < oldSlots.Length)
-                    {
-                        GpuMeshSlot old = oldSlots[i];
-                        Mesh mesh = old.Mesh;
-                        if (VoxelChunkMesher.TryUpdateUploaded(
-                                ref mesh, old.VertexCapacity, old.TriangleCapacity, source))
-                        {
-                            old.Mesh = mesh;
-                            nextSlots[i] = old;
-                            GpuUploadsLastFrame++;
-                            _totalGpuUploads++;
-                            continue;
-                        }
-                    }
-
-                    nextSlots[i] = new GpuMeshSlot
-                    {
-                        Mesh = VoxelChunkMesher.UploadOne(source),
-                        VertexCapacity = source.VertexCount,
-                        TriangleCapacity = source.TriangleCount
-                    };
-                    GpuUploadsLastFrame++;
-                    _totalGpuUploads++;
-                }
-            }
-            catch (Exception exception)
-            {
-                for (int i = 0; i < nextSlots.Length; i++)
-                {
-                    GpuMeshSlot? slot = nextSlots[i];
-                    if (slot == null) continue;
-                    bool isOld = i < oldSlots.Length && ReferenceEquals(slot, oldSlots[i]);
-                    if (!isOld) UnloadMesh(slot.Mesh);
-                }
-                ReturnMeshData(combined);
-                page.Dirty = true;
-                _dirtyGpuPageKeys.Add(pageKey);
-                _logger.Error("GPU_PAGE_UPLOAD_FAILED",
-                    $"page=({pageKey.X},{pageKey.Y},{pageKey.Z}) step={pageKey.Step} error={exception}");
-                continue;
-            }
-
-            for (int i = 0; i < oldSlots.Length; i++)
-            {
-                if (i < nextSlots.Length && ReferenceEquals(nextSlots[i], oldSlots[i]))
-                    continue;
-                UnloadMesh(oldSlots[i].Mesh);
-                _totalGpuUnloads++;
-            }
-
-            VoxelMeshData[] oldCpu = page.CpuMeshes;
-            page.Meshes = nextSlots;
-            page.CpuMeshes = combined;
-            page.RegionRanges = newRanges;
             page.Dirty = false;
-            ReturnMeshData(oldCpu);
 
-            for (int owner = 0; owner < GpuPageRegionCount; owner++)
+            bool requiresRebuild = !page.HasMesh;
+            try
             {
-                int cx = pageKey.X * GpuPageGroupChunks + owner % GpuPageGroupChunks;
-                int cz = pageKey.Z * GpuPageGroupChunks + owner / GpuPageGroupChunks;
-                ChunkKey chunkKey = new(cx, pageKey.Y, cz, pageKey.Step);
-                if (!_chunks.TryGetValue(chunkKey, out ChunkEntry? entry) ||
-                    !entry.HasPendingSurface)
-                    continue;
-
-                VoxelMeshData[] pending = entry.PendingSurface;
-                entry.PendingSurface = Array.Empty<VoxelMeshData>();
-                entry.HasPendingSurface = false;
-                entry.BaseVersion = entry.PendingSurfaceBaseVersion;
-                entry.PaletteVersion = entry.PendingSurfacePaletteVersion;
-                entry.CutLayer = entry.PendingSurfaceCutLayer;
-                entry.SurfaceDirty = false;
-                entry.CutDirty = false;
-                entry.Built = true;
-                DiscardLegacyCutCap(chunkKey, entry);
-                SetSurfaceGpuHash(chunkKey, entry.PendingSurfaceHash);
-                ReturnMeshData(pending);
-                RebuiltChunks++;
-            }
-
-            if (page.Meshes.Length == 0)
-            {
-                bool hasMembers = false;
-                for (int owner = 0; owner < GpuPageRegionCount; owner++)
+                foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
                 {
-                    int cx = pageKey.X * GpuPageGroupChunks + owner % GpuPageGroupChunks;
-                    int cz = pageKey.Z * GpuPageGroupChunks + owner / GpuPageGroupChunks;
-                    if (_chunks.ContainsKey(new ChunkKey(cx, pageKey.Y, cz, pageKey.Step)))
+                    if (key.Step != pageKey.Step || !entry.HasPendingSurface)
+                        continue;
+
+                    VoxelMeshData[] pending = entry.PendingSurface;
+                    if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? previous))
+                        ReturnMeshData(previous);
+                    page.CpuMeshes[key] = pending;
+
+                    entry.PendingSurface = Array.Empty<VoxelMeshData>();
+                    entry.HasPendingSurface = false;
+                    entry.BaseVersion = entry.PendingSurfaceBaseVersion;
+                    entry.PaletteVersion = entry.PendingSurfacePaletteVersion;
+                    entry.CutLayer = entry.PendingSurfaceCutLayer;
+                    entry.SurfaceDirty = false;
+                    entry.CutDirty = false;
+                    entry.Built = true;
+                    DiscardLegacyCutCap(key, entry);
+                    SetSurfaceGpuHash(key, entry.PendingSurfaceHash);
+                    RebuiltChunks++;
+
+                    int vertexCount = VoxelChunkMesher.CountTriangleVertices(pending);
+                    if (!page.HasMesh ||
+                        !page.Regions.TryGetValue(key, out GpuMeshRegion region) ||
+                        vertexCount > region.Capacity)
                     {
-                        hasMembers = true;
-                        break;
+                        requiresRebuild = true;
+                        continue;
+                    }
+
+                    if (region.Capacity > 0)
+                    {
+                        VoxelChunkMesher.UpdateTriangleSoup(
+                            ref page.Mesh, region.Offset, region.Capacity, pending);
+                        page.Regions[key] = region with { VertexCount = vertexCount };
+                        GpuUploadsLastFrame++;
+                        _totalGpuUploads++;
+                    }
+                    else if (vertexCount > 0)
+                    {
+                        requiresRebuild = true;
                     }
                 }
-                if (!hasMembers)
+
+                if (!page.HasMesh && !AreStepCandidatesReady(pageKey.Step))
                 {
-                    _gpuPages.Remove(pageKey);
-                    page.Dispose();
+                    page.Dirty = true;
+                    _dirtyGpuPageKeys.Add(pageKey);
+                    continue;
                 }
+
+                if (requiresRebuild)
+                    RebuildGlobalGpuPage(pageKey, page);
+            }
+            catch (Exception exception)
+            {
+                page.Dirty = true;
+                _dirtyGpuPageKeys.Add(pageKey);
+                _logger.Error("WORLD_MESH_UPDATE_FAILED",
+                    $"step={pageKey.Step} error={exception}");
+                continue;
             }
         }
 
@@ -1009,7 +1020,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         GpuUploadMillisecondsLastFrame += timer.Elapsed.TotalMilliseconds;
     }
 
-private void PrepareCandidateEntries(
+    private void PrepareCandidateEntries(
         SparseVoxelField field,
         List<Candidate> candidates,
         int targetCutLayer,
@@ -1138,17 +1149,11 @@ private void PrepareCandidateEntries(
         ref int macroFrustumTests,
         ref int visibleMacroRegions)
     {
-        const float sphereScale = 0.8660254038f;
         const int groupChunks = VisibilityGroupChunks;
         int chunkSpan = ChunkCells * renderStep;
         int groupSpan = chunkSpan * groupChunks;
         int storageChunksPerChunk = chunkSpan / SparseVoxelField.ChunkSize;
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
-        float viewDistance = float.IsFinite(maximumViewDistanceMeters)
-            ? MathF.Max(0f, maximumViewDistanceMeters)
-            : 0f;
-        float viewDistanceSquared = viewDistance * viewDistance;
-        float scanRadius = viewDistance + chunkSpan * sphereScale;
         Vector3 cameraPosition = camera.Position;
 
         int chunksX = DivideRoundUp(field.Width, chunkSpan);
@@ -1157,18 +1162,12 @@ private void PrepareCandidateEntries(
         if (chunksX == 0 || chunksY == 0 || chunksZ == 0)
             return;
 
-        int firstX = Math.Clamp((int)MathF.Floor(
-            (cameraPosition.X - scanRadius) / (chunkSpan * voxelSize)), 0, chunksX - 1);
-        int lastX = Math.Clamp((int)MathF.Floor(
-            (cameraPosition.X + scanRadius) / (chunkSpan * voxelSize)), 0, chunksX - 1);
-        int firstY = Math.Clamp((int)MathF.Floor(
-            (cameraPosition.Y - scanRadius) / (chunkSpan * voxelSize)), 0, chunksY - 1);
-        int lastY = Math.Clamp((int)MathF.Floor(
-            (cameraPosition.Y + scanRadius) / (chunkSpan * voxelSize)), 0, chunksY - 1);
-        int firstZ = Math.Clamp((int)MathF.Floor(
-            (cameraPosition.Z - scanRadius) / (chunkSpan * voxelSize)), 0, chunksZ - 1);
-        int lastZ = Math.Clamp((int)MathF.Floor(
-            (cameraPosition.Z + scanRadius) / (chunkSpan * voxelSize)), 0, chunksZ - 1);
+        int firstX = 0;
+        int lastX = chunksX - 1;
+        int firstY = 0;
+        int lastY = chunksY - 1;
+        int firstZ = 0;
+        int lastZ = chunksZ - 1;
 
         int firstGroupX = firstX / groupChunks;
         int lastGroupX = lastX / groupChunks;
@@ -1216,13 +1215,6 @@ private void PrepareCandidateEntries(
 
                 int originY = y * chunkSpan;
                 int sizeY = Math.Min(chunkSpan, field.Height - originY);
-                float nearestGroupDistanceSquared = BoundsNearestDistanceSquared(
-                    cameraPosition,
-                    groupOriginX, originY, groupOriginZ,
-                    groupSizeX, sizeY, groupSizeZ);
-                if (nearestGroupDistanceSquared > viewDistanceSquared)
-                    continue;
-
                 for (int macroX = childFirstX; macroX <= childLastX; macroX++)
                 for (int macroZ = childFirstZ; macroZ <= childLastZ; macroZ++)
                 {
@@ -1250,13 +1242,6 @@ private void PrepareCandidateEntries(
                     int sizeX = Math.Min(chunkSpan, field.Width - originX);
                     int chunkSizeY = Math.Min(chunkSpan, field.Height - chunkOriginY);
                     int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
-                    float nearestDistanceSquared = BoundsNearestDistanceSquared(
-                        cameraPosition,
-                        originX, chunkOriginY, originZ,
-                        sizeX, chunkSizeY, sizeZ);
-                    if (nearestDistanceSquared > viewDistanceSquared)
-                        continue;
-
                     Vector3 center = new(
                         (originX + sizeX * 0.5f) * voxelSize,
                         (chunkOriginY + chunkSizeY * 0.5f) * voxelSize,
@@ -1277,7 +1262,7 @@ private void PrepareCandidateEntries(
         }
     }
 
-    private void UpdateRenderStep(Camera3D camera, int viewportHeight)
+    private void UpdateRenderStep(SparseVoxelField field, Camera3D camera, int viewportHeight)
     {
         if (_lodTransitionActive)
             return;
@@ -1294,6 +1279,13 @@ private void PrepareCandidateEntries(
         while (desiredStep < MaximumRenderStep &&
             pixelsPerVoxel * desiredStep < 0.85f)
             desiredStep <<= 1;
+
+        int worldExtent = Math.Max(field.Width, Math.Max(field.Height, field.Depth));
+        int worldStep = 1;
+        while (worldStep < MaximumRenderStep &&
+            DivideRoundUp(worldExtent, worldStep) > MaximumWorldSamplesPerAxis)
+            worldStep <<= 1;
+        desiredStep = Math.Max(desiredStep, worldStep);
 
         if (_displayStep == 0)
         {
@@ -1397,7 +1389,6 @@ private void PrepareCandidateEntries(
         Vector3 cameraPosition,
         float maximumViewDistanceMeters)
     {
-        float radiusSquared = maximumViewDistanceMeters * maximumViewDistanceMeters;
         int scanCount = Math.Min(_evictionQueue.Count, CacheEvictionScanBudget);
 
         for (int i = 0; i < scanCount; i++)
@@ -1407,27 +1398,12 @@ private void PrepareCandidateEntries(
                 !ReferenceEquals(entry, queuedEntry))
                 continue;
 
-            int chunkSpan = ChunkCells * key.Step;
-            int originX = key.X * chunkSpan;
-            int originY = key.Y * chunkSpan;
-            int originZ = key.Z * chunkSpan;
-            float distanceSquared = BoundsNearestDistanceSquared(
-                cameraPosition,
-                originX, originY, originZ,
-                Math.Min(chunkSpan, field.Width - originX),
-                Math.Min(chunkSpan, field.Height - originY),
-                Math.Min(chunkSpan, field.Depth - originZ));
-
-            bool outsideRadius = distanceSquared > radiusSquared;
-            bool expired = entry.LastSeenFrame + 120 < _frame;
-            bool cacheOverBudget = _chunks.Count > MaximumCachedChunks &&
-                !_visibleCandidateKeys.Contains(key) &&
-                !_transitionCandidateKeys.Contains(key);
-            if (outsideRadius || expired || cacheOverBudget)
+            bool inactiveLod = key.Step != _displayStep && key.Step != _renderStep;
+            bool expired = inactiveLod && entry.LastSeenFrame + 120 < _frame;
+            bool cacheOverBudget = inactiveLod && _chunks.Count > MaximumCachedChunks;
+            if (expired || cacheOverBudget)
             {
-                RemoveCachedChunk(key, cacheOverBudget
-                    ? "cache-budget"
-                    : "outside-view-radius");
+                RemoveCachedChunk(key, cacheOverBudget ? "lod-cache-budget" : "inactive-lod");
                 continue;
             }
 
@@ -1442,7 +1418,20 @@ private void PrepareCandidateEntries(
 
         _gpuMeshHashCache.Remove(key);
         GpuPageKey pageKey = GetGpuPageKey(key);
-        if (_gpuPages.ContainsKey(pageKey)) MarkGpuPageDirty(key);
+        if (_gpuPages.TryGetValue(pageKey, out GpuMeshPage? page))
+        {
+            if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? cached))
+                ReturnMeshData(cached);
+            if (page.HasMesh && page.Regions.TryGetValue(key, out GpuMeshRegion region))
+            {
+                VoxelChunkMesher.UpdateTriangleSoup(
+                    ref page.Mesh, region.Offset, region.Capacity,
+                    Array.Empty<VoxelMeshData>());
+                page.Regions[key] = region with { VertexCount = 0 };
+                GpuUploadsLastFrame++;
+                _totalGpuUploads++;
+            }
+        }
 
         int residentMeshes = entry.CutCap.Length;
         int partialMeshes = entry.UploadingCutCap.Count;
@@ -2336,7 +2325,7 @@ private void PrepareCandidateEntries(
 
         foreach (GpuMeshPage page in _gpuPages.Values)
         {
-            _totalGpuUnloads += page.Meshes.Length;
+            if (page.HasMesh) _totalGpuUnloads++;
             page.Dispose();
         }
 
@@ -2367,8 +2356,7 @@ private void PrepareCandidateEntries(
         _transitionVisiblePages.Clear();
         _visiblePageKeys.Clear();
         _transitionVisiblePageKeys.Clear();
-        _pageSourceScratch.Clear();
-        _pageOwnerScratch.Clear();
+        _worldRegionScratch.Clear();
 
         UnloadMaterial(_material);
         _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_STOP",
