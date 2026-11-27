@@ -870,8 +870,11 @@ public sealed partial class VoxelVolumeStore
         density = Quantize(Dequantize(density));
         brick.Density![index] = density;
 
-        if (density <= 0 && brick.Material != null)
-            brick.Material[index] = 0;
+        if (density <= 0)
+        {
+            EnsureMaterial(brick, key);
+            brick.Material![index] = 0;
+        }
 
         Revision++;
     }
@@ -887,7 +890,9 @@ public sealed partial class VoxelVolumeStore
         short density = brick.Density != null
             ? brick.Density[index]
             : _baseBricks.TryGetValue(key, out BaseBrick? baseBrick)
-                ? baseBrick.Density[index]
+                ? baseBrick.IsUniform
+                    ? baseBrick.UniformSample.Density
+                    : baseBrick.Density![index]
                 : EvaluateBaseDensity(
                     x, y, z,
                     GetBucketCandidates(_geometryBuckets, x, y, z));
@@ -970,11 +975,14 @@ public sealed partial class VoxelVolumeStore
 
                 if (updatedDensity <= 0)
                 {
-                    if (brick.Material != null)
-                        brick.Material[index] = 0;
+                    if (brick.Material == null)
+                        EnsureMaterial(brick, key);
+                    brick.Material![index] = 0;
                 }
                 else if (add && sdf > 0f && sdf > current)
                 {
+                    if (brick.Material == null)
+                        EnsureMaterial(brick, key);
                     brick.Material![index] = materialId;
                 }
             }
