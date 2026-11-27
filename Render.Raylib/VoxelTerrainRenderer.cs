@@ -127,6 +127,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Regions.Clear();
             Mesh = default;
             HasMesh = false;
+            Initialized = false;
         }
     }
 
@@ -698,7 +699,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
     }
 
-        private void CollectCachedVisibleCandidates(
+    private void CollectCachedVisibleCandidates(
         SparseVoxelField field,
         Camera3D camera,
         int renderStep,
@@ -739,16 +740,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Candidate candidate = new(
                 key, center, radius,
                 Vector3.DistanceSquared(center, cameraPosition));
-            candidates.Add(candidate);
             entries.Add((candidate, entry));
             keys.Add(key);
             entry.LastSeenFrame = _frame;
         }
 
-        candidates.Sort(static (a, b) =>
-            a.DistanceSquared.CompareTo(b.DistanceSquared));
         entries.Sort(static (a, b) =>
             a.Candidate.DistanceSquared.CompareTo(b.Candidate.DistanceSquared));
+        candidates.Clear();
+        foreach ((Candidate candidate, ChunkEntry _) in entries)
+            candidates.Add(candidate);
     }
 
     
@@ -1278,6 +1279,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         else if (desiredStep < _displayStep && currentVoxelPixels < 1.25f)
             desiredStep = _displayStep;
 
+        desiredStep = Math.Max(desiredStep, worldStep);
         int nextTargetStep = desiredStep;
 
         if (nextTargetStep == _renderStep)
