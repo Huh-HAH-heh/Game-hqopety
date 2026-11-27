@@ -817,7 +817,10 @@ public sealed class VoxelVolumeStore
             int ox = bx * BrickSize;
             int oy = by * BrickSize;
             int oz = bz * BrickSize;
-            List<int>? geometryCandidates = GetBucketCandidates(_geometryBuckets, ox, oy, oz);
+            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
+            List<int>? geometryCandidates = baseBrick == null
+                ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
+                : null;
             int x0 = Math.Max(bounds.MinX, ox);
             int y0 = Math.Max(bounds.MinY, oy);
             int z0 = Math.Max(bounds.MinZ, oz);
@@ -833,12 +836,15 @@ public sealed class VoxelVolumeStore
                         shape, VoxelCenter(x, y, z), a, b, radius) < 0f)
                     continue;
 
-                short density = brick.Density == null
-                    ? EvaluateBaseDensity(x, y, z, geometryCandidates)
-                    : brick.Density[GetLocalIndex(ox, oy, oz, x, y, z)];
+                int localIndex = GetLocalIndex(ox, oy, oz, x, y, z);
+                short density = brick.Density != null
+                    ? brick.Density[localIndex]
+                    : baseBrick != null
+                        ? baseBrick.Density[localIndex]
+                        : EvaluateBaseDensity(x, y, z, geometryCandidates);
 
                 if (density > 0)
-                    brick.Material![GetLocalIndex(ox, oy, oz, x, y, z)] = materialId;
+                    brick.Material![localIndex] = materialId;
             }
         }
 
@@ -988,6 +994,13 @@ public sealed class VoxelVolumeStore
     {
         if (brick.Density != null) return;
         short[] values = new short[BrickCellCount];
+        if (_baseBricks.TryGetValue(key, out BaseBrick? baseBrick))
+        {
+            Array.Copy(baseBrick.Density, values, BrickCellCount);
+            brick.Density = values;
+            return;
+        }
+
         int ox = key.X * BrickSize;
         int oy = key.Y * BrickSize;
         int oz = key.Z * BrickSize;
@@ -1013,6 +1026,13 @@ public sealed class VoxelVolumeStore
     {
         if (brick.Material != null) return;
         ushort[] values = new ushort[BrickCellCount];
+        if (_baseBricks.TryGetValue(key, out BaseBrick? baseBrick))
+        {
+            Array.Copy(baseBrick.Material, values, BrickCellCount);
+            brick.Material = values;
+            return;
+        }
+
         int ox = key.X * BrickSize;
         int oy = key.Y * BrickSize;
         int oz = key.Z * BrickSize;
