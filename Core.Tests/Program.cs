@@ -311,6 +311,7 @@ internal static class Program
 
         store.PaintSphere(new Vector3(2.4f), 0.25f, materialId: 8);
         store.ReadRegion(bounds, densityAll, materialAll);
+        store.ReadDensityRegion(bounds, densityOnly);
         store.ReadMaterialRegion(bounds, materialOnly);
 
         int center = 8 + 16 * (8 + 16 * 8);
@@ -432,6 +433,7 @@ internal static class Program
             loaded.BaseGeometryRegionCount == store.BaseGeometryRegionCount &&
             loaded.BaseMaterialRegionCount == store.BaseMaterialRegionCount &&
             loaded.BaseDenseBrickCount == store.BaseDenseBrickCount &&
+            loaded.BaseDenseBytes == 0 &&
             loaded.EditBrickCount == store.EditBrickCount &&
             denseUniform && denseSample.IsSolid && denseSample.MaterialId == 7;
 
