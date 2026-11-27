@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.IO;
 using Core.Map;
 
 internal static class Program
@@ -12,6 +13,7 @@ internal static class Program
         Run("Batch reads match point reads for both channels", TestBatchReads, ref failures);
         Run("Imported dense base bricks support arbitrary generated voxels", TestDenseBaseBrick, ref failures);
         Run("Removed material does not reappear after local carve and refill", TestMaterialDoesNotResurrect, ref failures);
+        Run("Save/load preserves base regions, dense bricks and local edits", TestSaveLoadRoundTrip, ref failures);
         Run("Uniform and empty regions are described without voxel expansion", TestUniformRegionFastPath, ref failures);
         Run("Large world does not allocate edit bricks until changed", TestLargeWorldStaysSparse, ref failures);
 
@@ -213,6 +215,75 @@ internal static class Program
         return (
             correct,
             $"carved=({carved.Density},{carved.MaterialId}) refilled=({refilled.Density},{refilled.MaterialId}) emptied=({emptied.Density},{emptied.MaterialId}) restored=({restored.Density},{restored.MaterialId})");
+    }
+
+    private static (bool Passed, string Detail) TestSaveLoadRoundTrip()
+    {
+        VoxelVolumeStore store = CreateTestStore();
+        store.AddSolidBox(
+            new Vector3(0.8f, 0.8f, 0.8f),
+            new Vector3(5.6f, 5.6f, 5.6f),
+            materialId: 1);
+        store.PaintMaterialCapsule(
+            new Vector3(1f, 3.2f, 3.2f),
+            new Vector3(5.4f, 3.2f, 3.2f),
+            0.12f,
+            materialId: 2);
+
+        short[] baseDensity = new short[VoxelVolumeStore.BrickCellCount];
+        ushort[] baseMaterial = new ushort[VoxelVolumeStore.BrickCellCount];
+        Array.Fill(baseDensity, (short)102);
+        Array.Fill(baseMaterial, (ushort)7);
+        store.WriteBaseBrick(0, 0, 0, baseDensity, baseMaterial);
+
+        store.SealBase();
+        store.CarveSphere(new Vector3(3.2f), 0.3f);
+        store.PaintSphere(new Vector3(4.2f), 0.35f, materialId: 9);
+
+        VoxelVolumeStore.VoxelSample[] before =
+        [
+            store.GetVoxel(8, 8, 8),
+            store.GetVoxel(32, 32, 32),
+            store.GetVoxel(32, 36, 32),
+            store.GetVoxel(42, 42, 42)
+        ];
+        long revision = store.Revision;
+
+        using MemoryStream stream = new();
+        store.Save(stream);
+        long compressedBytes = stream.Length;
+        stream.Position = 0;
+        VoxelVolumeStore loaded = VoxelVolumeStore.Load(stream);
+
+        VoxelVolumeStore.VoxelSample[] after =
+        [
+            loaded.GetVoxel(8, 8, 8),
+            loaded.GetVoxel(32, 32, 32),
+            loaded.GetVoxel(32, 36, 32),
+            loaded.GetVoxel(42, 42, 42)
+        ];
+
+        bool sameSamples = true;
+        for (int i = 0; i < before.Length; i++)
+            if (before[i] != after[i])
+                sameSamples = false;
+
+        VoxelVolumeStore.VoxelBounds denseBounds = new(0, 0, 0, 16, 16, 16);
+        bool denseUniform =
+            loaded.TryGetUniformRegion(denseBounds, out VoxelVolumeStore.VoxelSample denseSample);
+
+        bool correct =
+            sameSamples &&
+            loaded.Revision == revision &&
+            loaded.BaseGeometryRegionCount == store.BaseGeometryRegionCount &&
+            loaded.BaseMaterialRegionCount == store.BaseMaterialRegionCount &&
+            loaded.BaseDenseBrickCount == store.BaseDenseBrickCount &&
+            loaded.EditBrickCount == store.EditBrickCount &&
+            denseUniform && denseSample.IsSolid && denseSample.MaterialId == 7;
+
+        return (
+            correct,
+            $"compressedBytes={compressedBytes} revision={loaded.Revision} baseShapes={loaded.BaseGeometryRegionCount} baseBricks={loaded.BaseDenseBrickCount} editBricks={loaded.EditBrickCount} sameSamples={sameSamples}");
     }
 
     private static (bool Passed, string Detail) TestUniformRegionFastPath()
