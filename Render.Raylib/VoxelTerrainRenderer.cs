@@ -25,7 +25,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumPendingMeshJobs = 4096;
     private const int MaximumWorldSamplesPerAxis = 4096;
     private const int MaximumWorldMeshVertices = 96_000_000;
-    private const int MaximumTotalGpuPageVertices = 140_000_000;
+    private const int MaximumTotalGpuPageVertices = 176_000_000;
     private const int GpuPageBufferVertices = 2_000_000;
     private const int FallbackLodStep = MaximumRenderStep;
     // Use the available physical cores for density capture and Surface Nets builds.
@@ -350,6 +350,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly HashSet<ChunkKey> _visibleCandidateKeys = new();
     private int _displayStep;
     private int _minimumVisibleStep = BaseLodStep;
+    private long _fallbackRetiredBaseVersion = long.MinValue;
     private int _previousDisplayStep;
     private long _lastLodSwitchTimestamp;
     private bool _lodTransitionActive;
@@ -574,15 +575,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         // Step 64 is the complete safety layer; step 16 is the regular world base.
         _coarseCandidateScratch.Clear();
-        CollectVisibleCandidates(
-            field, camera, FallbackLodStep,
-            _coarseCandidateScratch,
-            ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
-        _coarseCandidateScratch.Sort(static (a, b) =>
-            a.DistanceSquared.CompareTo(b.DistanceSquared));
-        PrepareCandidateEntries(
-            field, _coarseCandidateScratch, targetCutLayer,
-            _coarseCandidateEntriesScratch, _coarseCandidateKeys);
+        _coarseCandidateEntriesScratch.Clear();
+        _coarseCandidateKeys.Clear();
+        if (_fallbackRetiredBaseVersion != field.BaseVersion)
+        {
+            CollectVisibleCandidates(
+                field, camera, FallbackLodStep,
+                _coarseCandidateScratch,
+                ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
+            _coarseCandidateScratch.Sort(static (a, b) =>
+                a.DistanceSquared.CompareTo(b.DistanceSquared));
+            PrepareCandidateEntries(
+                field, _coarseCandidateScratch, targetCutLayer,
+                _coarseCandidateEntriesScratch, _coarseCandidateKeys);
+        }
 
         _baseCandidateScratch.Clear();
         CollectVisibleCandidates(
@@ -631,7 +637,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 case 4: Step4ChunksLastFrame++; break;
                 case 8: Step8ChunksLastFrame++; break;
             }
-            _minimumVisibleStep = Math.Min(_minimumVisibleStep, candidate.Key.Step);
         }
 
         EvictInactiveLodChunks();
@@ -640,10 +645,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         RetryPendingGpuUploads();
         UploadDirtyGpuPages();
 
-        bool coarseCoverageReady = HasCompleteCachedLod(
-            _coarseCandidateEntriesScratch, field, FallbackLodStep, out int coarseReadyCount);
         bool baseCoverageReady = HasCompleteCachedLod(
             _baseCandidateEntriesScratch, field, BaseLodStep, out int baseReadyCount);
+        bool basePageReady = baseCoverageReady &&
+            _gpuPages.TryGetValue(new GpuPageKey(BaseLodStep), out GpuMeshPage? basePage) &&
+            basePage.HasMesh && !basePage.Dirty;
+        if (basePageReady && _fallbackRetiredBaseVersion != field.BaseVersion)
+        {
+            RetireFallbackLod();
+            _fallbackRetiredBaseVersion = field.BaseVersion;
+        }
+
+        bool coarseCoverageReady = !basePageReady && HasCompleteCachedLod(
+            _coarseCandidateEntriesScratch, field, FallbackLodStep, out int coarseReadyCount);
+        if (basePageReady) coarseReadyCount = 0;
 
         _visible.Clear();
         _visibleChunkKeys.Clear();
@@ -653,6 +668,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 continue;
             _visibleChunkKeys.Add(candidate.Key);
             AddVisible(candidate.Key, entry);
+            _minimumVisibleStep = Math.Min(_minimumVisibleStep, candidate.Key.Step);
         }
 
         foreach ((Candidate candidate, ChunkEntry entry) in _candidateEntriesScratch)
@@ -660,7 +676,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (!entry.Built || !HasCachedSurface(candidate.Key))
                 continue;
             if (_visibleChunkKeys.Add(candidate.Key))
+            {
                 AddVisible(candidate.Key, entry);
+                _minimumVisibleStep = Math.Min(_minimumVisibleStep, candidate.Key.Step);
+            }
         }
 
         // Keep cached detail while it still occupies visible pixels. It remains
@@ -1694,6 +1713,33 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"display={_displayStep} abandonedTarget={previousTargetStep}");
     }
 
+    private void RetireFallbackLod()
+    {
+        _inactiveLodChunkScratch.Clear();
+        foreach (ChunkKey key in _chunks.Keys)
+            if (key.Step == FallbackLodStep)
+                _inactiveLodChunkScratch.Add(key);
+
+        foreach (ChunkKey key in _inactiveLodChunkScratch)
+        {
+            if (!_chunks.Remove(key, out ChunkEntry? entry)) continue;
+            InvalidatePendingBuild(entry);
+            entry.Dispose();
+            _gpuMeshHashCache.Remove(key);
+        }
+
+        GpuPageKey fallbackKey = new(FallbackLodStep);
+        if (_gpuPages.Remove(fallbackKey, out GpuMeshPage? fallbackPage))
+        {
+            _totalGpuUnloads += fallbackPage.Buffers.Count;
+            fallbackPage.Dispose();
+            _gpuCapacityVersion++;
+        }
+
+        _dirtyGpuPageKeys.RemoveAll(key => key.Step == FallbackLodStep);
+        _inactiveLodChunkScratch.Clear();
+    }
+
     private void GetGpuVertexUsage(out long physicalVertices, out long liveVertices)
     {
         physicalVertices = 0;
@@ -2471,7 +2517,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private static float GetLodDepthBias(int step, float cameraDistance, float nearPlane)
     {
         float detailLevels = MathF.Log2(FallbackLodStep / (float)step);
-        float depthOffsetMeters = detailLevels * 0.08f;
+        float depthOffsetMeters = detailLevels / MathF.Log2(FallbackLodStep) * 0.05f;
         float distanceSquared = MathF.Max(1f, cameraDistance * cameraDistance);
         return 2f * nearPlane * depthOffsetMeters / distanceSquared;
     }
