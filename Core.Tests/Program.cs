@@ -270,6 +270,7 @@ internal static class Program
             Vector3.Zero,
             new Vector3(1_000f, 2f, 1_000f),
             materialId: 1);
+        store.CarveSphere(new Vector3(500f, 40f, 500f), 5f);
         VoxelVolumeStore.VoxelSample sample = store.GetVoxel(5_000, 10, 5_000);
 
         bool correct =
