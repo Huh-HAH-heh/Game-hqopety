@@ -224,7 +224,7 @@ internal static class Program
             voxelSizeMeters: 0.1f);
         store.AddSolidBox(
             Vector3.Zero,
-            new Vector3(1_000f, 2f, 1_000f),
+            new Vector3(700f, 2f, 700f),
             materialId: 1);
 
         VoxelVolumeStore.VoxelBounds plateau = new(5_000, 10, 5_000, 6_000, 14, 6_000);
