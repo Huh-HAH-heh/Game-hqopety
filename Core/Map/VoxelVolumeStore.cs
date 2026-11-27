@@ -402,7 +402,7 @@ public sealed class VoxelVolumeStore
                     sx * ((y - bounds.MinY) + sy * (z - bounds.MinZ));
                 int src = GetLocalIndex(ox, oy, oz, x0, y, z);
 
-                if (edit?.Density is { } denseDensity &&
+                if (edit is not null && edit.Density is { } denseDensity &&
                     edit.Material is { } denseMaterial)
                 {
                     denseMaterial.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
@@ -484,7 +484,7 @@ public sealed class VoxelVolumeStore
             int y1 = Math.Min(bounds.MaxY, brickOriginY + BrickSize);
             int z1 = Math.Min(bounds.MaxZ, brickOriginZ + BrickSize);
 
-            if (edit?.Density is { } denseDensity &&
+            if (edit is not null && edit.Density is { } denseDensity &&
                 edit.Material is { } denseMaterial)
             {
                 int rowLength = x1 - x0;
