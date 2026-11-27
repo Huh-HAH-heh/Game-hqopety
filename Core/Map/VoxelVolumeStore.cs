@@ -884,7 +884,23 @@ public sealed class VoxelVolumeStore
         for (int bx = minBrickX; bx <= maxBrickX; bx++)
         {
             BrickKey key = new(bx, by, bz);
-            EditBrick brick = GetOrCreateBrick(key);
+            _editBricks.TryGetValue(key, out EditBrick? existingEdit);
+            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
+            List<int>? baseCandidates = baseBrick == null
+                ? GetBucketCandidates(
+                    _geometryBuckets,
+                    bx * BrickSize,
+                    by * BrickSize,
+                    bz * BrickSize)
+                : null;
+
+            if (!add &&
+                existingEdit?.Density == null &&
+                (baseBrick == null || baseBrick.IsUniform && !baseBrick.UniformSample.IsSolid) &&
+                !HasSolidBaseCandidate(baseCandidates))
+                continue;
+
+            EditBrick brick = existingEdit ?? GetOrCreateBrick(key);
             EnsureDensity(brick, key);
             if (add) EnsureMaterial(brick, key);
 
@@ -953,16 +969,23 @@ public sealed class VoxelVolumeStore
         for (int bx = minBrickX; bx <= maxBrickX; bx++)
         {
             BrickKey key = new(bx, by, bz);
-            EditBrick brick = GetOrCreateBrick(key);
-            EnsureMaterial(brick, key);
+            _editBricks.TryGetValue(key, out EditBrick? existingEdit);
+            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
 
             int ox = bx * BrickSize;
             int oy = by * BrickSize;
             int oz = bz * BrickSize;
-            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
             List<int>? geometryCandidates = baseBrick == null
                 ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
                 : null;
+
+            if (existingEdit?.Density == null &&
+                (baseBrick == null || baseBrick.IsUniform && !baseBrick.UniformSample.IsSolid) &&
+                !HasSolidBaseCandidate(geometryCandidates))
+                continue;
+
+            EditBrick brick = existingEdit ?? GetOrCreateBrick(key);
+            EnsureMaterial(brick, key);
             int x0 = Math.Max(bounds.MinX, ox);
             int y0 = Math.Max(bounds.MinY, oy);
             int z0 = Math.Max(bounds.MinZ, oz);
@@ -1265,6 +1288,18 @@ public sealed class VoxelVolumeStore
         if (value <= 0f) return 0;
         if (value >= limit) return limit;
         return (int)MathF.Ceiling(value);
+    }
+
+    private bool HasSolidBaseCandidate(List<int>? candidates)
+    {
+        if (candidates == null)
+            return false;
+
+        for (int i = 0; i < candidates.Count; i++)
+            if (_geometry[candidates[i]].Operation == GeometryOperationKind.Union)
+                return true;
+
+        return false;
     }
 
     private static bool HasBrickOverlap<T>(
