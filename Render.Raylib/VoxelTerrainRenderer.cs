@@ -249,6 +249,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly HashSet<GpuPageKey> _visiblePageKeys = new();
     private readonly HashSet<GpuPageKey> _transitionVisiblePageKeys = new();
     private readonly List<(ChunkKey Key, VoxelMeshData[] Data, int VertexCount, int Capacity)> _worldRegionScratch = new();
+    private readonly List<ChunkKey> _inactiveLodChunkScratch = new();
+    private readonly List<GpuPageKey> _inactiveLodPageScratch = new();
     // One immutable snapshot represents the entire sparse voxel field and is reused
     // until the field version changes. Per-chunk density buffers are created by workers.
     private IVoxelFieldSource? _worldBuildSnapshot;
@@ -685,6 +687,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _displayStep = _renderStep;
             _lodTransitionActive = false;
             _lodFade = 0f;
+            ReleaseInactiveLodData();
             _logger.Write(
                 "VOXEL_LOD_SWITCHED",
                 $"from={previousDisplayStep} to={_displayStep} transition=0.25s chunks={_transitionVisible.Count}");
@@ -1347,6 +1350,38 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"display={_displayStep} abandonedTarget={previousTargetStep}");
     }
 
+    private void ReleaseInactiveLodData()
+    {
+        _inactiveLodChunkScratch.Clear();
+        foreach (ChunkKey key in _chunks.Keys)
+            if (key.Step != _displayStep)
+                _inactiveLodChunkScratch.Add(key);
+
+        foreach (ChunkKey key in _inactiveLodChunkScratch)
+        {
+            if (!_chunks.Remove(key, out ChunkEntry? entry)) continue;
+            InvalidatePendingBuild(entry);
+            entry.Dispose();
+            _gpuMeshHashCache.Remove(key);
+        }
+
+        _inactiveLodPageScratch.Clear();
+        foreach (GpuPageKey key in _gpuPages.Keys)
+            if (key.Step != _displayStep)
+                _inactiveLodPageScratch.Add(key);
+
+        foreach (GpuPageKey key in _inactiveLodPageScratch)
+        {
+            if (!_gpuPages.Remove(key, out GpuMeshPage? page)) continue;
+            if (page.HasMesh) _totalGpuUnloads++;
+            page.Dispose();
+        }
+
+        _dirtyGpuPageKeys.RemoveAll(key => key.Step != _displayStep);
+        _inactiveLodChunkScratch.Clear();
+        _inactiveLodPageScratch.Clear();
+    }
+
     private void CancelPendingBuildsForStep(int step)
     {
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
@@ -1422,7 +1457,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? cached))
                 ReturnMeshData(cached);
-            if (page.HasMesh && page.Regions.TryGetValue(key, out GpuMeshRegion region))
+            if (page.HasMesh && page.Regions.TryGetValue(key, out GpuMeshRegion region) &&
+                region.Capacity > 0)
             {
                 VoxelChunkMesher.UpdateTriangleSoup(
                     ref page.Mesh, region.Offset, region.Capacity,
@@ -2357,6 +2393,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _visiblePageKeys.Clear();
         _transitionVisiblePageKeys.Clear();
         _worldRegionScratch.Clear();
+        _inactiveLodChunkScratch.Clear();
+        _inactiveLodPageScratch.Clear();
 
         UnloadMaterial(_material);
         _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_STOP",
