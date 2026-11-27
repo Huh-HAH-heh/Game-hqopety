@@ -271,6 +271,7 @@ internal static class Program
             new Vector3(1_000f, 2f, 1_000f),
             materialId: 1);
         store.CarveSphere(new Vector3(500f, 40f, 500f), 5f);
+        store.PaintSphere(new Vector3(500f, 40f, 500f), 1f, materialId: 2);
         VoxelVolumeStore.VoxelSample sample = store.GetVoxel(5_000, 10, 5_000);
 
         bool correct =
