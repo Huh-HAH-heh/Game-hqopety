@@ -1185,7 +1185,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         page.Buffers.Add(nextBuffer);
         page.AllocatedVertexCount += bufferCapacity;
         page.CapacityVersion++;
-        _gpuCapacityVersion++;
         nextBuffer.ReservedVertexCount = capacity;
         page.ReservedVertexCount += capacity;
         GpuUploadsLastFrame++;
