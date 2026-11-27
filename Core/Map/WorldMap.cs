@@ -12,6 +12,7 @@ public sealed class WorldMap
     private readonly int _baseVoxelWidth;
     private readonly int _baseVoxelHeight;
     private readonly int _baseVoxelDepth;
+    private WorldMapVoxelBaseSource? _voxelBaseSource;
 
     public const byte StateEmpty = 0;
     public const byte StateSolid = 1;
@@ -154,13 +155,14 @@ public sealed class WorldMap
             _baseVoxelHeight,
             _baseVoxelDepth,
             voxelSizeMeters: SparseVoxelField.VoxelSizeMeters);
-        VoxelVolume.SetBaseSource(new WorldMapVoxelBaseSource(
+        _voxelBaseSource = new WorldMapVoxelBaseSource(
             TileWidth,
             TileHeight,
             _baseVoxelHeight,
             _surfaceHeights,
             _columnMaterialIds,
-            ComputeVoxelBaseSignature()));
+            ComputeVoxelBaseSignature());
+        VoxelVolume.SetBaseSource(_voxelBaseSource);
     }
 
     public long GetRegionTerrainVersion(int regionX, int regionY)
@@ -436,10 +438,21 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLevel, y);
         Vector3 maximum = new(x + width, zLevel + heightInMeters, y + depth);
-        if (materialId == 0)
+        if (VoxelVolume.HasBaseSource && !VoxelVolume.IsBaseSealed)
+        {
+            if (materialId == 0)
+                VoxelVolume.SubtractBaseBox(minimum, maximum);
+            else
+                VoxelVolume.AddSolidBox(minimum, maximum, materialId);
+        }
+        else if (materialId == 0)
+        {
             Voxels.CarveBox(minimum, maximum);
+        }
         else
+        {
             Voxels.FillBox(minimum, maximum, materialId);
+        }
     }
 
     /// <summary>
@@ -1647,6 +1660,9 @@ public sealed class WorldMap
     public void LoadVoxelVolume(Stream source)
     {
         ArgumentNullException.ThrowIfNull(source);
+        if (_voxelBaseSource == null)
+            throw new InvalidOperationException(
+                "InitializeVoxelVolumeBase must be called before loading voxel volume data.");
         VoxelVolume = VoxelVolumeStore.Load(source, ResolveVoxelBaseSource);
     }
 
@@ -1666,16 +1682,10 @@ public sealed class WorldMap
             throw new InvalidDataException("Voxel volume base descriptor does not match this WorldMap.");
 
         ulong signature = reader.ReadUInt64();
-        if (signature != ComputeVoxelBaseSignature())
+        if (_voxelBaseSource == null || signature != _voxelBaseSource.Signature)
             throw new InvalidDataException("Voxel volume was saved for a different generated base terrain.");
 
-        return new WorldMapVoxelBaseSource(
-            TileWidth,
-            TileHeight,
-            _baseVoxelHeight,
-            _surfaceHeights,
-            _columnMaterialIds,
-            signature);
+        return _voxelBaseSource;
     }
 
     /// <summary>
@@ -2209,6 +2219,7 @@ public sealed class WorldMap
 
         public string TypeId => SourceTypeId;
         public ushort DataVersion => 1;
+        public ulong Signature => _signature;
         public int Width => _tileWidth * 10;
         public int Height { get; }
         public int Depth => _tileHeight * 10;
