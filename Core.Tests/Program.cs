@@ -12,6 +12,7 @@ internal static class Program
         Run("Batch reads match point reads for both channels", TestBatchReads, ref failures);
         Run("Imported dense base bricks support arbitrary generated voxels", TestDenseBaseBrick, ref failures);
         Run("Removed material does not reappear after local carve and refill", TestMaterialDoesNotResurrect, ref failures);
+        Run("Uniform and empty regions are described without voxel expansion", TestUniformRegionFastPath, ref failures);
         Run("Large world does not allocate edit bricks until changed", TestLargeWorldStaysSparse, ref failures);
 
         Console.WriteLine();
@@ -212,6 +213,49 @@ internal static class Program
         return (
             correct,
             $"carved=({carved.Density},{carved.MaterialId}) refilled=({refilled.Density},{refilled.MaterialId}) emptied=({emptied.Density},{emptied.MaterialId}) restored=({restored.Density},{restored.MaterialId})");
+    }
+
+    private static (bool Passed, string Detail) TestUniformRegionFastPath()
+    {
+        VoxelVolumeStore store = new(
+            width: 10_000,
+            height: 500,
+            depth: 10_000,
+            voxelSizeMeters: 0.1f);
+        store.AddSolidBox(
+            Vector3.Zero,
+            new Vector3(1_000f, 2f, 1_000f),
+            materialId: 1);
+
+        VoxelVolumeStore.VoxelBounds plateau = new(5_000, 10, 5_000, 6_000, 14, 6_000);
+        bool solidUniform = store.TryGetUniformRegion(plateau, out var solid);
+
+        VoxelVolumeStore.VoxelBounds emptyRegion = new(9_000, 10, 9_000, 9_016, 14, 9_016);
+        bool emptyUniform = store.TryGetUniformRegion(emptyRegion, out var empty);
+
+        short[] density = new short[(int)emptyRegion.Volume];
+        ushort[] material = new ushort[density.Length];
+        store.ReadRegion(emptyRegion, density, material);
+
+        bool filled = true;
+        for (int i = 0; i < density.Length; i++)
+        {
+            if (density[i] >= 0 || material[i] != 0)
+            {
+                filled = false;
+                break;
+            }
+        }
+
+        bool correct =
+            solidUniform && solid.IsSolid && solid.MaterialId == 1 &&
+            emptyUniform && !empty.IsSolid && empty.MaterialId == 0 &&
+            filled &&
+            store.EditBrickCount == 0;
+
+        return (
+            correct,
+            $"solidUniform={solidUniform} solid=({solid.Density},{solid.MaterialId}) emptyUniform={emptyUniform} empty=({empty.Density},{empty.MaterialId}) emptyBuffer={filled}");
     }
 
     private static (bool Passed, string Detail) TestLargeWorldStaysSparse()
