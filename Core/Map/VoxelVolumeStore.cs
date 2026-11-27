@@ -317,30 +317,34 @@ public sealed class VoxelVolumeStore
             return new VoxelSample(short.MinValue, 0);
 
         BrickKey key = GetBrickKey(x, y, z);
-        if (_editBricks.TryGetValue(key, out EditBrick? brick))
-        {
-            int index = GetLocalIndex(x, y, z);
-            if (brick.Density != null && brick.Material != null)
-            {
-                short density = brick.Density[index];
-                return new VoxelSample(
-                    density,
-                    density > 0 ? brick.Material[index] : (ushort)0);
-            }
+        int index = GetLocalIndex(x, y, z);
+        _editBricks.TryGetValue(key, out EditBrick? edit);
+        _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
 
+        short baseDensity;
+        ushort baseMaterial;
+        if (baseBrick != null)
+        {
+            baseDensity = baseBrick.Density[index];
+            baseMaterial = baseBrick.Material[index];
+        }
+        else
+        {
             VoxelSample baseSample = EvaluateBaseVoxel(x, y, z);
-            short resolvedDensity = brick.Density == null
-                ? baseSample.Density
-                : brick.Density[index];
-            ushort resolvedMaterial = resolvedDensity <= 0
-                ? (ushort)0
-                : brick.Material == null
-                    ? baseSample.MaterialId
-                    : brick.Material[index];
-            return new VoxelSample(resolvedDensity, resolvedMaterial);
+            baseDensity = baseSample.Density;
+            baseMaterial = baseSample.MaterialId;
         }
 
-        return EvaluateBaseVoxel(x, y, z);
+        short density = edit?.Density == null
+            ? baseDensity
+            : edit.Density[index];
+        ushort material = density <= 0
+            ? (ushort)0
+            : edit?.Material == null
+                ? baseMaterial
+                : edit.Material[index];
+
+        return new VoxelSample(density, material);
     }
 
     public short GetDensity(int x, int y, int z)
@@ -348,9 +352,14 @@ public sealed class VoxelVolumeStore
         if (!IsInside(x, y, z))
             return short.MinValue;
 
-        if (_editBricks.TryGetValue(GetBrickKey(x, y, z), out EditBrick? brick) &&
-            brick.Density != null)
-            return brick.Density[GetLocalIndex(x, y, z)];
+        BrickKey key = GetBrickKey(x, y, z);
+        int index = GetLocalIndex(x, y, z);
+        if (_editBricks.TryGetValue(key, out EditBrick? edit) &&
+            edit.Density != null)
+            return edit.Density[index];
+
+        if (_baseBricks.TryGetValue(key, out BaseBrick? baseBrick))
+            return baseBrick.Density[index];
 
         return EvaluateBaseDensity(
             x, y, z,
