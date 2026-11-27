@@ -17,6 +17,7 @@ internal static class Program
         Run("Imported dense base bricks support arbitrary generated voxels", TestDenseBaseBrick, ref failures);
         Run("Uniform base bricks support independent channel reads and paint edits", TestUniformBaseBrickChannels, ref failures);
         Run("Procedural 3D source supports tunnels, batch reads and save/load", TestProceduralBaseSource, ref failures);
+        Run("WorldMap reads its base volume through the legacy edit field", TestWorldMapBaseVolume, ref failures);
         Run("Removed material does not reappear after local carve and refill", TestMaterialDoesNotResurrect, ref failures);
         Run("Save/load preserves base regions, dense bricks and local edits", TestSaveLoadRoundTrip, ref failures);
         Run("Uniform and empty regions are described without voxel expansion", TestUniformRegionFastPath, ref failures);
@@ -168,6 +169,74 @@ internal static class Program
             failures++;
             Console.WriteLine($"[FAIL] {name}: {exception}");
         }
+    }
+
+    private static (bool Passed, string Detail) TestWorldMapBaseVolume()
+    {
+        const int layerCount = 200;
+        WorldMap world = CreateFlatWorld(layerCount);
+        world.InitializeVoxelVolumeBase();
+        world.VoxelVolume.SealBase();
+
+        VoxelVolumeStore.VoxelSample solid = world.VoxelVolume.GetVoxel(8, 10, 8);
+        VoxelVolumeStore.VoxelSample air = world.VoxelVolume.GetVoxel(8, 190, 8);
+        float legacyDensity = world.Voxels.GetDensity(8, 10, 8);
+        ushort legacyMaterial = world.Voxels.GetMaterialId(8, 10, 8);
+
+        world.CarveStaticVolume(
+            x: 1, y: 1, zLevel: 2,
+            width: 2, depth: 2, heightInMeters: 2);
+        ushort carvedLegacyMaterial = world.Voxels.GetMaterialId(15, 25, 15);
+        VoxelVolumeStore.VoxelSample untouchedBase = world.VoxelVolume.GetVoxel(15, 25, 15);
+
+        VoxelVolumeStore.VoxelBounds bounds = new(8, 10, 8, 10, 12, 10);
+        short[] density = new short[(int)bounds.Volume];
+        ushort[] material = new ushort[density.Length];
+        world.VoxelVolume.ReadRegion(bounds, density, material);
+
+        bool batchMatches = true;
+        int index = 0;
+        for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
+        for (int y = bounds.MinY; y < bounds.MaxY; y++)
+        for (int x = bounds.MinX; x < bounds.MaxX; x++)
+        {
+            VoxelVolumeStore.VoxelSample sample = world.VoxelVolume.GetVoxel(x, y, z);
+            if (density[index] != sample.Density || material[index] != sample.MaterialId)
+                batchMatches = false;
+            index++;
+        }
+
+        using MemoryStream stream = new();
+        world.SaveVoxelVolume(stream);
+        stream.Position = 0;
+
+        WorldMap restored = CreateFlatWorld(layerCount);
+        restored.InitializeVoxelVolumeBase();
+        restored.LoadVoxelVolume(stream);
+        VoxelVolumeStore.VoxelSample restoredSolid = restored.VoxelVolume.GetVoxel(8, 10, 8);
+
+        bool correct =
+            solid.IsSolid && solid.MaterialId == 1 &&
+            !air.IsSolid && air.MaterialId == 0 &&
+            legacyDensity > 0f && legacyMaterial == solid.MaterialId &&
+            carvedLegacyMaterial == 0 &&
+            untouchedBase.IsSolid &&
+            batchMatches &&
+            restoredSolid == solid &&
+            restored.VoxelVolume.IsBaseSealed;
+
+        return (
+            correct,
+            $"base=({solid.Density},{solid.MaterialId}) legacy=({legacyDensity:0.###},{legacyMaterial}) air={air.IsSolid} carvedOverlay={carvedLegacyMaterial} untouchedBase={untouchedBase.IsSolid} batch={batchMatches} restored={restoredSolid}");
+    }
+
+    private static WorldMap CreateFlatWorld(int layerCount)
+    {
+        WorldMap world = new(regionsX: 1, regionsY: 1, layerCount: layerCount);
+        ushort[] heights = new ushort[checked(world.TileWidth * world.TileHeight)];
+        Array.Fill(heights, (ushort)180);
+        world.SetSurfaceHeightPatches(heights, patchSize: 1, materialId: 1);
+        return world;
     }
 
     private static (bool Passed, string Detail) TestPlateauAndVein()
