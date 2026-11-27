@@ -1737,6 +1737,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
 
         _dirtyGpuPageKeys.RemoveAll(key => key.Step == FallbackLodStep);
+        _visibleCandidateKeys.ExceptWith(_coarseCandidateKeys);
+        _coarseCandidateKeys.Clear();
         _inactiveLodChunkScratch.Clear();
     }
 
