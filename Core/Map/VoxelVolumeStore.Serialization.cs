@@ -20,13 +20,20 @@ public sealed partial class VoxelVolumeStore
         using BinaryWriter writer = new(gzip, Encoding.UTF8, leaveOpen: true);
 
         writer.Write(0x31535656); // VVS1
-        writer.Write(2);
+        writer.Write(3);
         writer.Write(Width);
         writer.Write(Height);
         writer.Write(Depth);
         writer.Write(VoxelSizeMeters);
         writer.Write(_baseSealed);
         writer.Write(Revision);
+        writer.Write(_baseSource != null);
+        if (_baseSource != null)
+        {
+            writer.Write(_baseSource.TypeId);
+            writer.Write(_baseSource.DataVersion);
+            _baseSource.WriteState(writer);
+        }
 
         writer.Write(_geometry.Count);
         foreach (GeometryOperation operation in _geometry)
@@ -88,7 +95,9 @@ public sealed partial class VoxelVolumeStore
     }
 
     /// <summary>Restores a complete storage snapshot written by <see cref="Save"/>.</summary>
-    public static VoxelVolumeStore Load(Stream source)
+    public static VoxelVolumeStore Load(
+        Stream source,
+        VoxelBaseSourceResolver? baseSourceResolver = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (!source.CanRead)
@@ -99,7 +108,7 @@ public sealed partial class VoxelVolumeStore
 
         if (reader.ReadInt32() != 0x31535656)
             throw new InvalidDataException("Invalid voxel volume signature.");
-        if (reader.ReadInt32() != 2)
+        if (reader.ReadInt32() != 3)
             throw new InvalidDataException("Unsupported voxel volume version.");
 
         int width = reader.ReadInt32();
@@ -112,6 +121,27 @@ public sealed partial class VoxelVolumeStore
             throw new InvalidDataException("Invalid voxel volume revision.");
 
         VoxelVolumeStore store = new(width, height, depth, voxelSize);
+        if (reader.ReadBoolean())
+        {
+            string typeId = reader.ReadString();
+            ushort dataVersion = reader.ReadUInt16();
+            if (baseSourceResolver == null)
+                throw new InvalidDataException(
+                    $"Voxel base source '{typeId}' requires a resolver.");
+
+            IVoxelBaseSource baseSource = baseSourceResolver(
+                typeId, dataVersion,
+                width, height, depth, voxelSize,
+                reader);
+
+            if (baseSource == null ||
+                !string.Equals(baseSource.TypeId, typeId, StringComparison.Ordinal) ||
+                baseSource.DataVersion != dataVersion)
+                throw new InvalidDataException("Voxel base source resolver returned a mismatched source.");
+
+            store.SetBaseSource(baseSource);
+        }
+
         long maxBrickCount =
             ((long)width + BrickSize - 1) / BrickSize *
             (((long)height + BrickSize - 1) / BrickSize) *
