@@ -142,9 +142,9 @@ internal sealed class TerrainPipelineLogger : IDisposable
         }
 
         string shortMessage = StripStackTrace(message);
-        Enqueue(category, shortMessage, critical: true, LogTarget.Error);
+        Enqueue(category, shortMessage, critical: true, target: LogTarget.Error);
         if (shortMessage.Length < message.Length)
-            Enqueue(category + "_TRACE", message, critical: false, LogTarget.Detail);
+            Enqueue(category + "_TRACE", message, critical: false, target: LogTarget.Detail);
     }
 
     private static string StripStackTrace(string message)
@@ -403,9 +403,9 @@ internal sealed class TerrainPipelineLogger : IDisposable
         FlushSuppressed();
         int suppressedCapacityErrors = Interlocked.Exchange(ref _suppressedCapacityErrors, 0);
         if (suppressedCapacityErrors > 0)
-            Enqueue("ERRORS_SUPPRESSED", $"gpuPageCapacity duplicateRetries={suppressedCapacityErrors}", critical: true, LogTarget.Error);
+            Enqueue("ERRORS_SUPPRESSED", $"gpuPageCapacity duplicateRetries={suppressedCapacityErrors}", critical: true, target: LogTarget.Error);
         if (Enabled)
-            Enqueue("SESSION_END", $"frame={Interlocked.Read(ref _frame)}", critical: true, LogTarget.Summary);
+            Enqueue("SESSION_END", $"frame={Interlocked.Read(ref _frame)}", critical: true, target: LogTarget.Summary);
 
         _messages.Writer.TryComplete();
         try
