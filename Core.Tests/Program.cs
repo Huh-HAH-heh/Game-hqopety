@@ -176,18 +176,26 @@ internal static class Program
         const int layerCount = 200;
         WorldMap world = CreateFlatWorld(layerCount);
         world.InitializeVoxelVolumeBase();
-        world.VoxelVolume.SealBase();
 
         VoxelVolumeStore.VoxelSample solid = world.VoxelVolume.GetVoxel(8, 10, 8);
         VoxelVolumeStore.VoxelSample air = world.VoxelVolume.GetVoxel(8, 190, 8);
         float legacyDensity = world.Voxels.GetDensity(8, 10, 8);
         ushort legacyMaterial = world.Voxels.GetMaterialId(8, 10, 8);
 
+        // Static geology is authored into the compact base before it is sealed.
         world.CarveStaticVolume(
             x: 1, y: 1, zLevel: 2,
             width: 2, depth: 2, heightInMeters: 2);
-        ushort carvedLegacyMaterial = world.Voxels.GetMaterialId(15, 25, 15);
-        VoxelVolumeStore.VoxelSample untouchedBase = world.VoxelVolume.GetVoxel(15, 25, 15);
+        VoxelVolumeStore.VoxelSample baseCarve = world.VoxelVolume.GetVoxel(15, 25, 15);
+        ushort baseCarveLegacyMaterial = world.Voxels.GetMaterialId(15, 25, 15);
+        world.VoxelVolume.SealBase();
+
+        // Runtime edits still use the compatibility SparseVoxelField overlay.
+        world.CarveStaticVolume(
+            x: 3, y: 1, zLevel: 2,
+            width: 2, depth: 2, heightInMeters: 2);
+        ushort overlayMaterial = world.Voxels.GetMaterialId(35, 25, 15);
+        VoxelVolumeStore.VoxelSample overlayBase = world.VoxelVolume.GetVoxel(35, 25, 15);
 
         VoxelVolumeStore.VoxelBounds bounds = new(8, 10, 8, 10, 12, 10);
         short[] density = new short[(int)bounds.Volume];
@@ -206,6 +214,11 @@ internal static class Program
             index++;
         }
 
+        // Height edits modify the sealed volume without replacing its original
+        // procedural source snapshot; the save resolver must restore that snapshot.
+        world.SetSolidHeight(6, 6, height: 0, materialId: 0);
+        VoxelVolumeStore.VoxelSample removedColumn = world.VoxelVolume.GetVoxel(65, 10, 65);
+
         using MemoryStream stream = new();
         world.SaveVoxelVolume(stream);
         stream.Position = 0;
@@ -214,20 +227,26 @@ internal static class Program
         restored.InitializeVoxelVolumeBase();
         restored.LoadVoxelVolume(stream);
         VoxelVolumeStore.VoxelSample restoredSolid = restored.VoxelVolume.GetVoxel(8, 10, 8);
+        VoxelVolumeStore.VoxelSample restoredCarve = restored.VoxelVolume.GetVoxel(15, 25, 15);
+        VoxelVolumeStore.VoxelSample restoredColumn = restored.VoxelVolume.GetVoxel(65, 10, 65);
 
         bool correct =
             solid.IsSolid && solid.MaterialId == 1 &&
             !air.IsSolid && air.MaterialId == 0 &&
             legacyDensity > 0f && legacyMaterial == solid.MaterialId &&
-            carvedLegacyMaterial == 0 &&
-            untouchedBase.IsSolid &&
+            !baseCarve.IsSolid && baseCarve.MaterialId == 0 &&
+            baseCarveLegacyMaterial == 0 &&
+            overlayMaterial == 0 && overlayBase.IsSolid &&
+            !removedColumn.IsSolid &&
             batchMatches &&
             restoredSolid == solid &&
+            restoredCarve == baseCarve &&
+            restoredColumn == removedColumn &&
             restored.VoxelVolume.IsBaseSealed;
 
         return (
             correct,
-            $"base=({solid.Density},{solid.MaterialId}) legacy=({legacyDensity:0.###},{legacyMaterial}) air={air.IsSolid} carvedOverlay={carvedLegacyMaterial} untouchedBase={untouchedBase.IsSolid} batch={batchMatches} restored={restoredSolid}");
+            $"base=({solid.Density},{solid.MaterialId}) legacy=({legacyDensity:0.###},{legacyMaterial}) baseCarve={baseCarve} overlay=({overlayMaterial},{overlayBase.IsSolid}) removedColumn={removedColumn} batch={batchMatches} restored={restoredColumn}");
     }
 
     private static WorldMap CreateFlatWorld(int layerCount)
