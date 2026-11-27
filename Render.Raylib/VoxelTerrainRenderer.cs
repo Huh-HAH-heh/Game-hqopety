@@ -23,7 +23,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // Requests now hold metadata + one shared immutable field snapshot; density arrays
     // are rented only by active workers, so the queue can cover the whole visible set.
     private const int MaximumPendingMeshJobs = 4096;
-    private const int GpuPageGroupChunks = 2;
+    private const int GpuPageGroupChunks = 4;
+    private const int GpuPageRegionCount = GpuPageGroupChunks * GpuPageGroupChunks;
     // Use the available physical cores for density capture and Surface Nets builds.
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
     private const int MaximumGpuMeshUploadsPerFrame = 16;
@@ -120,13 +121,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         public GpuMeshSlot[] Meshes = Array.Empty<GpuMeshSlot>();
         public VoxelMeshData[] CpuMeshes = Array.Empty<VoxelMeshData>();
-        public VoxelRegionMeshRange[][] RegionRanges =
-        {
-            Array.Empty<VoxelRegionMeshRange>(),
-            Array.Empty<VoxelRegionMeshRange>(),
-            Array.Empty<VoxelRegionMeshRange>(),
-            Array.Empty<VoxelRegionMeshRange>()
-        };
+        public VoxelRegionMeshRange[][] RegionRanges = CreateEmptyGpuPageRanges();
         public bool Dirty;
 
         public void Dispose()
@@ -776,8 +771,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private static GpuPageKey GetGpuPageKey(ChunkKey key) =>
         new(key.X / GpuPageGroupChunks, key.Y, key.Z / GpuPageGroupChunks, key.Step);
 
+    private static VoxelRegionMeshRange[][] CreateEmptyGpuPageRanges()
+    {
+        VoxelRegionMeshRange[][] ranges = new VoxelRegionMeshRange[GpuPageRegionCount][];
+        Array.Fill(ranges, Array.Empty<VoxelRegionMeshRange>());
+        return ranges;
+    }
+
     private static int GetGpuPageOwner(ChunkKey key) =>
-        (key.X % 2) + (key.Z % 2) * 2;
+        (key.X % GpuPageGroupChunks) +
+        (key.Z % GpuPageGroupChunks) * GpuPageGroupChunks;
 
     private bool HasCachedSurface(ChunkKey key)
     {
@@ -848,10 +851,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _pageSourceScratch.Clear();
             _pageOwnerScratch.Clear();
 
-            for (int owner = 0; owner < 4; owner++)
+            for (int owner = 0; owner < GpuPageRegionCount; owner++)
             {
-                int cx = pageKey.X * 2 + owner % 2;
-                int cz = pageKey.Z * 2 + owner / 2;
+                int cx = pageKey.X * GpuPageGroupChunks + owner % GpuPageGroupChunks;
+                int cz = pageKey.Z * GpuPageGroupChunks + owner / GpuPageGroupChunks;
                 ChunkKey chunkKey = new(cx, pageKey.Y, cz, pageKey.Step);
                 if (!_chunks.TryGetValue(chunkKey, out ChunkEntry? entry)) continue;
 
@@ -879,7 +882,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             try
             {
                 combined = VoxelChunkMesher.CombineSurfaceData(
-                    _pageSourceScratch, _pageOwnerScratch, 4, out newRanges);
+                    _pageSourceScratch, _pageOwnerScratch, GpuPageRegionCount, out newRanges);
             }
             catch (Exception exception)
             {
@@ -957,10 +960,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             page.Dirty = false;
             ReturnMeshData(oldCpu);
 
-            for (int owner = 0; owner < 4; owner++)
+            for (int owner = 0; owner < GpuPageRegionCount; owner++)
             {
-                int cx = pageKey.X * 2 + owner % 2;
-                int cz = pageKey.Z * 2 + owner / 2;
+                int cx = pageKey.X * GpuPageGroupChunks + owner % GpuPageGroupChunks;
+                int cz = pageKey.Z * GpuPageGroupChunks + owner / GpuPageGroupChunks;
                 ChunkKey chunkKey = new(cx, pageKey.Y, cz, pageKey.Step);
                 if (!_chunks.TryGetValue(chunkKey, out ChunkEntry? entry) ||
                     !entry.HasPendingSurface)
@@ -984,10 +987,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (page.Meshes.Length == 0)
             {
                 bool hasMembers = false;
-                for (int owner = 0; owner < 4; owner++)
+                for (int owner = 0; owner < GpuPageRegionCount; owner++)
                 {
-                    int cx = pageKey.X * 2 + owner % 2;
-                    int cz = pageKey.Z * 2 + owner / 2;
+                    int cx = pageKey.X * GpuPageGroupChunks + owner % GpuPageGroupChunks;
+                    int cz = pageKey.Z * GpuPageGroupChunks + owner / GpuPageGroupChunks;
                     if (_chunks.ContainsKey(new ChunkKey(cx, pageKey.Y, cz, pageKey.Step)))
                     {
                         hasMembers = true;
