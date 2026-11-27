@@ -5,8 +5,11 @@ using Core.Map;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--bench")
+            return RunBenchmarks();
+
         int failures = 0;
         Run("Uniform plateau stays compact and material vein is independent", TestPlateauAndVein, ref failures);
         Run("Capsule excavation creates a tunnel only in touched bricks", TestTunnelEdit, ref failures);
@@ -20,6 +23,92 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine($"RESULT: {(failures == 0 ? "PASS" : "FAIL")} | failed={failures}");
         return failures == 0 ? 0 : 1;
+    }
+
+    private static int RunBenchmarks()
+    {
+        Console.WriteLine("metric,iterations,total_ms,ns_per_op,allocated_bytes");
+
+        VoxelVolumeStore store = new(
+            width: 23_040,
+            height: 500,
+            depth: 23_040,
+            voxelSizeMeters: 0.1f);
+        store.AddSolidBox(
+            Vector3.Zero,
+            new Vector3(2_304f, 5f, 2_304f),
+            materialId: 1);
+        store.SealBase();
+
+        VoxelVolumeStore.VoxelBounds uniformBounds =
+            new(10_000, 10, 10_000, 12_000, 40, 12_000);
+        VoxelVolumeStore.VoxelBounds readBounds =
+            new(11_000, 10, 11_000, 11_032, 42, 11_032);
+
+        short[] density = new short[checked((int)readBounds.Volume)];
+        ushort[] material = new ushort[density.Length];
+        Random random = new(20261127);
+        long checksum = 0;
+
+        // Warm JIT and the common query paths before timing.
+        store.TryGetUniformRegion(uniformBounds, out _);
+        store.GetVoxel(11_000, 20, 11_000);
+        store.ReadRegion(readBounds, density, material);
+
+        Measure("uniform_region_query", 10_000, () =>
+        {
+            if (store.TryGetUniformRegion(uniformBounds, out VoxelVolumeStore.VoxelSample sample))
+                checksum += sample.Density + sample.MaterialId;
+        });
+
+        Measure("read_region_32cubed", 500, () =>
+        {
+            store.ReadRegion(readBounds, density, material);
+            checksum += density[0] + material[^1];
+        });
+
+        Measure("point_sample", 200_000, () =>
+        {
+            int x = random.Next(10_000, 12_000);
+            int y = random.Next(10, 40);
+            int z = random.Next(10_000, 12_000);
+            VoxelVolumeStore.VoxelSample sample = store.GetVoxel(x, y, z);
+            checksum += sample.Density + sample.MaterialId;
+        });
+
+        VoxelVolumeStore warmup = new(64, 64, 64);
+        warmup.AddSolidBox(new Vector3(0.8f), new Vector3(5.6f), 1);
+        warmup.CarveSphere(new Vector3(3.2f), 0.2f);
+
+        Measure("carve_sphere_first", 1, () =>
+            store.CarveSphere(new Vector3(1_152f, 2.5f, 1_152f), 3f));
+
+        Measure("carve_sphere_repeat", 4, () =>
+            store.CarveSphere(new Vector3(1_152f, 2.5f, 1_152f), 3f));
+
+        Measure("paint_sphere_first", 1, () =>
+            store.PaintSphere(new Vector3(1_152f, 2.5f, 1_152f), 2.5f, materialId: 2));
+
+        Console.WriteLine(
+            $"storage_summary,{1},{0:0.###},0,{store.BaseDenseBytes + store.EditBytes}");
+        Console.WriteLine(
+            $"counts,1,{store.BaseGeometryRegionCount},{store.EditBrickCount},{checksum}");
+
+        return 0;
+    }
+
+    private static void Measure(string name, int iterations, Action action)
+    {
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+            action();
+        stopwatch.Stop();
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        double nsPerOperation = stopwatch.Elapsed.TotalMilliseconds * 1_000_000d / iterations;
+        Console.WriteLine(
+            $"{name},{iterations},{stopwatch.Elapsed.TotalMilliseconds:0.###},{nsPerOperation:0.##},{allocated}");
     }
 
     private static void Run(
