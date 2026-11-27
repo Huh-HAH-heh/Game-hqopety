@@ -998,7 +998,7 @@ public sealed class VoxelVolumeStore
         int z,
         List<int>? geometryCandidates)
     {
-        float density = -MaxDensityMeters;
+        float density = -DensityClampMeters;
         Vector3 position = VoxelCenter(x, y, z);
 
         if (geometryCandidates != null)
