@@ -63,6 +63,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec3 fragWorldNormal;
         in vec4 fragColor;
         uniform int uCutEnabled;
+        uniform int uCutHatchingEnabled;
         uniform float uCutHeight;
         uniform vec3 uSunDirection;
         uniform float uAmbientLight;
@@ -103,6 +104,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             finalColor = vec4(
                 fragColor.rgb * faceAO * lighting,
                 fragColor.a);
+
+            // The section hatch is anchored to world XZ, so it does not crawl
+            // when the camera moves or zooms.
+            if (uCutEnabled != 0 && uCutHatchingEnabled != 0 &&
+                abs(fragWorldPosition.y - uCutHeight) < 0.003 &&
+                abs(n.y) > 0.92)
+            {
+                float hatchCoordinate =
+                    (fragWorldPosition.x + fragWorldPosition.z) * 0.9;
+                float hatchDistance = abs(fract(hatchCoordinate) - 0.5);
+                float hatchLine = 1.0 - smoothstep(0.012, 0.028, hatchDistance);
+                finalColor.rgb *= mix(0.95, 1.025, hatchLine);
+            }
         }
         """;
 
@@ -327,6 +341,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Material _material;
     private readonly Shader _shader;
     private readonly int _cutEnabledLocation;
+    private readonly int _cutHatchingEnabledLocation;
     private readonly int _cutHeightLocation;
     private readonly int _sunDirectionLocation;
     private readonly int _ambientLightLocation;
@@ -430,6 +445,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             throw new InvalidOperationException("The 3D voxel surface shader could not be created.");
 
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
+        _cutHatchingEnabledLocation = GetShaderLocation(_shader, "uCutHatchingEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
         _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
         _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
@@ -438,6 +454,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _lodRoleLocation = GetShaderLocation(_shader, "uLodRole");
 
         if (_cutEnabledLocation < 0 ||
+            _cutHatchingEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
             _sunDirectionLocation < 0 ||
             _ambientLightLocation < 0 ||
@@ -543,7 +560,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             PrepareCandidateEntries(
                 field,
                 _coarseCandidateScratch,
-                int.MinValue,
+                targetCutLayer,
                 _coarseCandidateEntriesScratch,
                 _coarseCandidateKeys);
         }
@@ -573,7 +590,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             PrepareCandidateEntries(
                 field,
                 displayCandidates,
-                _displayStep == FallbackLodStep ? int.MinValue : targetCutLayer,
+                targetCutLayer,
                 _candidateEntriesScratch,
                 _visibleCandidateKeys);
         }
@@ -598,7 +615,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             PrepareCandidateEntries(
                 field,
                 transitionCandidates,
-                _renderStep == FallbackLodStep ? int.MinValue : targetCutLayer,
+                targetCutLayer,
                 transitionEntries,
                 _transitionCandidateKeys);
         }
@@ -1143,16 +1160,29 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
 
             entry.LastSeenFrame = _frame;
+            // The cap is produced by clipping the authoritative 3D density
+            // field in VoxelChunkBuildInput. Only the Y chunk containing the
+            // section plane needs a cut-specific mesh; every other chunk keeps
+            // its immutable surface mesh and is clipped by the fragment shader.
+            int chunkCutLayer = int.MinValue;
+            if (targetCutLayer != int.MinValue)
+            {
+                int chunkSpan = ChunkCells * key.Step;
+                int ownerY = Math.Max(0, (targetCutLayer - 1) / chunkSpan);
+                if (key.Y == ownerY)
+                    chunkCutLayer = targetCutLayer;
+            }
+
             bool surfaceStale = !entry.Built ||
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
-            bool cutStateStale = entry.CutLayer != targetCutLayer;
+            bool cutStateStale = entry.CutLayer != chunkCutLayer;
 
             if ((entry.RunningBuild is { } pendingBuild &&
-                    pendingBuild.CutLayer != targetCutLayer) ||
+                    pendingBuild.CutLayer != chunkCutLayer) ||
                 (entry.ReadyRequest is { } readyRequest &&
-                    readyRequest.CutLayer != targetCutLayer))
+                    readyRequest.CutLayer != chunkCutLayer))
                 InvalidatePendingBuild(entry);
 
             if ((surfaceStale || cutStateStale || entry.CutDirty) &&
@@ -1161,10 +1191,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 RequestBuild(
                     field, key, entry,
                     buildSurface: true, buildCutCap: false,
-                    cutLayer: targetCutLayer);
+                    cutLayer: chunkCutLayer);
             }
 
-            if (targetCutLayer == int.MinValue && entry.CutCap.Length > 0)
+            if (chunkCutLayer == int.MinValue && entry.CutCap.Length > 0)
                 ClearCutCap(key, entry);
             destination.Add((candidate, entry));
         }
@@ -2054,6 +2084,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _shader,
             _cutEnabledLocation,
             enabled ? 1 : 0,
+            ShaderUniformDataType.Int);
+        SetShaderValue(
+            _shader,
+            _cutHatchingEnabledLocation,
+            _palette.ShowCutHatching ? 1 : 0,
             ShaderUniformDataType.Int);
         SetShaderValue(
             _shader,
