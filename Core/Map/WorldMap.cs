@@ -136,10 +136,10 @@ public sealed class WorldMap
             _baseVoxelWidth,
             _baseVoxelHeight,
             _baseVoxelDepth,
-            SampleBaseVoxelDensity,
-            SampleBaseVoxelMaterial,
+            SampleVoxelVolumeDensity,
+            SampleVoxelVolumeMaterial,
             GetBaseVoxelSurfaceRange,
-            SampleBaseVoxelDensityColumn);
+            SampleVoxelVolumeDensityColumn);
         Voxels.Changed += OnVoxelFieldChanged;
     }
 
@@ -352,7 +352,6 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLayer * 0.1f, y);
         Vector3 maximum = new(x + width, (zLayer + heightLayers) * 0.1f, y + depth);
-        MirrorVoxelBox(minimum, maximum, materialId);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -406,7 +405,6 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLevel, y);
         Vector3 maximum = new(x + width, zLevel + heightInMeters, y + depth);
-        MirrorVoxelBox(minimum, maximum, materialId);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -438,7 +436,6 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLevel, y);
         Vector3 maximum = new(x + width, zLevel + heightInMeters, y + depth);
-        MirrorVoxelBox(minimum, maximum, materialId, baseOperation: true);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -504,7 +501,6 @@ public sealed class WorldMap
 
         Vector3 minimum = new(x, zLevel, y);
         Vector3 maximum = minimum + Vector3.One;
-        MirrorVoxelBox(minimum, maximum, materialId);
         if (materialId == 0)
             Voxels.CarveBox(minimum, maximum);
         else
@@ -522,7 +518,6 @@ public sealed class WorldMap
             throw new ArgumentOutOfRangeException(nameof(zLevel));
 
         Vector3 minimum = new(x, zLevel, y);
-        MirrorVoxelBox(minimum, minimum + Vector3.One, materialId: 0);
         Voxels.CarveBox(minimum, minimum + Vector3.One);
     }
 
@@ -661,7 +656,6 @@ public sealed class WorldMap
             int index = GetColumnIndex(x, y);
             Vector3 minimum = new(x, z * 0.1f, y);
             Vector3 maximum = new(x + 1f, (z + 1) * 0.1f, y + 1f);
-            MirrorVoxelBox(minimum, maximum, materialId);
             if (materialId == 0)
                 Voxels.CarveBox(minimum, maximum);
             else
@@ -1421,6 +1415,26 @@ public sealed class WorldMap
             Volatile.Write(ref _columnMaterialIds[index], storedMaterial);
             _rangeCache[index] = null;
 
+            if (VoxelVolume.HasBaseSource)
+            {
+                Vector3 columnMinimum = new(globalX, 0f, globalY);
+                Vector3 columnMaximum = new(
+                    globalX + 1f,
+                    LayerCount * SparseVoxelField.VoxelSizeMeters,
+                    globalY + 1f);
+                VoxelVolume.CarveBox(columnMinimum, columnMaximum);
+
+                if (storedHeight > 0)
+                {
+                    Vector3 solidMaximum = new(
+                        globalX + 1f,
+                        storedHeight * SparseVoxelField.VoxelSizeMeters,
+                        globalY + 1f);
+                    VoxelVolume.AddBox(
+                        columnMinimum, solidMaximum, storedMaterial);
+                }
+            }
+
             Voxels.ResetBaseColumn(globalX, globalY);
             Voxels.InvalidateBaseField();
             Volatile.Write(ref _simpleFillColumns[index], true);
@@ -1696,32 +1710,6 @@ public sealed class WorldMap
         }
     }
 
-    private void MirrorVoxelBox(
-        Vector3 minimum,
-        Vector3 maximum,
-        ushort materialId,
-        bool baseOperation = false)
-    {
-        if (!VoxelVolume.HasBaseSource)
-            return;
-
-        bool writeBase = baseOperation && !VoxelVolume.IsBaseSealed;
-        if (materialId == 0)
-        {
-            if (writeBase)
-                VoxelVolume.SubtractBaseBox(minimum, maximum);
-            else
-                VoxelVolume.CarveBox(minimum, maximum);
-        }
-        else
-        {
-            if (writeBase)
-                VoxelVolume.AddSolidBox(minimum, maximum, materialId);
-            else
-                VoxelVolume.AddBox(minimum, maximum, materialId);
-        }
-    }
-
     private ulong ComputeVoxelBaseSignature()
     {
         const ulong offset = 14695981039346656037UL;
@@ -1768,20 +1756,14 @@ public sealed class WorldMap
     }
 
 
-    public void CarveVoxelBox(Vector3 minimumMeters, Vector3 maximumMeters)
-    {
-        MirrorVoxelBox(minimumMeters, maximumMeters, materialId: 0);
+    public void CarveVoxelBox(Vector3 minimumMeters, Vector3 maximumMeters) =>
         Voxels.CarveBox(minimumMeters, maximumMeters);
-    }
 
     public void AddVoxelBox(
         Vector3 minimumMeters,
         Vector3 maximumMeters,
-        ushort materialId)
-    {
-        MirrorVoxelBox(minimumMeters, maximumMeters, materialId);
+        ushort materialId) =>
         Voxels.FillBox(minimumMeters, maximumMeters, materialId);
-    }
 
     public void AddVoxelRamp(
         Vector3 startMeters,
@@ -1856,6 +1838,47 @@ public sealed class WorldMap
     /// on the shared 0.1 m voxel lattice. Positive values are solid; negative are air.
     /// Density is measured in voxel units, matching SparseVoxelField's edit scale.
     /// </summary>
+    private float SampleVoxelVolumeDensity(int voxelX, int voxelY, int voxelZ)
+    {
+        if (!VoxelVolume.HasBaseSource)
+            return SampleBaseVoxelDensity(voxelX, voxelY, voxelZ);
+
+        return VoxelVolume.GetDensity(voxelX, voxelY, voxelZ) /
+            (float)VoxelVolumeStore.DensityUnitsPerMeter /
+            SparseVoxelField.VoxelSizeMeters;
+    }
+
+    private ushort SampleVoxelVolumeMaterial(int voxelX, int voxelY, int voxelZ)
+    {
+        if (!VoxelVolume.HasBaseSource)
+            return SampleBaseVoxelMaterial(voxelX, voxelY, voxelZ);
+
+        return VoxelVolume.GetMaterialId(voxelX, voxelY, voxelZ);
+    }
+
+    private void SampleVoxelVolumeDensityColumn(
+        int voxelX,
+        int voxelZ,
+        int startY,
+        int step,
+        Span<float> destination)
+    {
+        if (!VoxelVolume.HasBaseSource)
+        {
+            SampleBaseVoxelDensityColumn(
+                voxelX, voxelZ, startY, step, destination);
+            return;
+        }
+
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = VoxelVolume.GetDensity(
+                voxelX, startY + i * step, voxelZ) /
+                (float)VoxelVolumeStore.DensityUnitsPerMeter /
+                SparseVoxelField.VoxelSizeMeters;
+        }
+    }
+
     private void SampleBaseVoxelDensityColumn(
         int voxelX,
         int voxelZ,
