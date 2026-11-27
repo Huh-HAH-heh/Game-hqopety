@@ -323,7 +323,7 @@ internal sealed class RaylibLayerSlicePanel
             new Color(88, 104, 122, 190));
         DrawCenteredText(
             font,
-            $"ШАГ {settings.CutawayStepMeters:0.0} м  ↻",
+            $"ШАГ {settings.CutawayStepMeters:0.0} м",
             stepButton,
             11f,
             new Color(222, 230, 239, 245));
