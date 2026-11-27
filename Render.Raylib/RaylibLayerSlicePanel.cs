@@ -57,7 +57,13 @@ internal sealed class RaylibLayerSlicePanel
                     maximumLayer);
                 int wheelSteps = Math.Sign(wheel) *
                     Math.Max(1, (int)MathF.Round(MathF.Abs(wheel)));
-                int nextLayer = Math.Clamp(currentLayer + wheelSteps, 0, maximumLayer);
+                int stepLayers = Math.Max(
+                    1,
+                    (int)MathF.Round(settings.CutawayStepMeters / LayerHeightMeters));
+                int nextLayer = Math.Clamp(
+                    currentLayer + wheelSteps * stepLayers,
+                    0,
+                    maximumLayer);
 
                 settings.CutawayEnabled = true;
                 settings.CutawayHeightMeters = nextLayer * LayerHeightMeters;
@@ -77,6 +83,14 @@ internal sealed class RaylibLayerSlicePanel
             if (_isOpen && CheckCollisionPointRec(mouse, GetCutawayButtonBounds()))
             {
                 settings.CutawayEnabled = !settings.CutawayEnabled;
+                _settingsCommitRequested = true;
+                return;
+            }
+
+            if (_isOpen && CheckCollisionPointRec(mouse, GetStepButtonBounds()))
+            {
+                settings.CutawayStepMeters =
+                    settings.CutawayStepMeters < 0.5f ? 1f : 0.1f;
                 _settingsCommitRequested = true;
                 return;
             }
@@ -293,16 +307,37 @@ internal sealed class RaylibLayerSlicePanel
             0.3f,
             new Color(168, 181, 197, 235));
 
+        Rectangle stepButton = GetStepButtonBounds();
+        bool stepHovered = CheckCollisionPointRec(mouse, stepButton);
+        DrawRectangle(
+            (int)stepButton.X,
+            (int)stepButton.Y,
+            (int)stepButton.Width,
+            (int)stepButton.Height,
+            stepHovered
+                ? new Color(48, 59, 72, 235)
+                : new Color(28, 37, 48, 225));
+        DrawRectangleLinesEx(
+            stepButton,
+            1f,
+            new Color(88, 104, 122, 190));
+        DrawCenteredText(
+            font,
+            $"ШАГ {settings.CutawayStepMeters:0.0} м  ↻",
+            stepButton,
+            11f,
+            new Color(222, 230, 239, 245));
+
         DrawTextEx(
             font,
-            "Колесо над ползунком: шаг 0,1 м.",
+            $"Колесо над ползунком: шаг {settings.CutawayStepMeters:0.0} м.",
             new Vector2(panel.X + 14f, panel.Y + 282f),
             10f,
             0.25f,
             new Color(151, 164, 180, 225));
         DrawTextEx(
             font,
-            "Объём выше плоскости скрывается.",
+            "Сечение сохраняет реальные пустоты.",
             new Vector2(panel.X + 14f, panel.Y + 299f),
             10f,
             0.25f,
@@ -348,6 +383,16 @@ internal sealed class RaylibLayerSlicePanel
             panel.Y + 46f,
             panel.Width - 28f,
             32f);
+    }
+
+    private static Rectangle GetStepButtonBounds()
+    {
+        Rectangle panel = GetPanelBounds();
+        return new Rectangle(
+            panel.X + 94f,
+            panel.Y + 207f,
+            panel.Width - 108f,
+            30f);
     }
 
     private static Rectangle GetSliderTrackBounds()
