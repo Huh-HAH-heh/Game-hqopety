@@ -611,6 +611,17 @@ public sealed partial class VoxelVolumeStore
                     continue;
                 }
 
+                if (editDensity == null && editMaterial == null &&
+                    baseBrick != null && !baseBrick.IsUniform)
+                {
+                    baseBrick.Material!.AsSpan(src, rowLength)
+                        .CopyTo(destination.Slice(dst, rowLength));
+                    for (int i = 0; i < rowLength; i++)
+                        if (baseBrick.Density![src + i] <= 0)
+                            destination[dst + i] = 0;
+                    continue;
+                }
+
                 if (editDensity != null && editMaterial != null)
                 {
                     editMaterial.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
@@ -723,6 +734,19 @@ public sealed partial class VoxelVolumeStore
                         ? baseBrick.UniformSample.MaterialId
                         : (ushort)0;
                     materialDestination.Slice(dst, rowLength).Fill(material);
+                    continue;
+                }
+
+                if (editDensity == null && editMaterial == null &&
+                    baseBrick != null && !baseBrick.IsUniform)
+                {
+                    baseBrick.Density!.AsSpan(src, rowLength)
+                        .CopyTo(densityDestination.Slice(dst, rowLength));
+                    baseBrick.Material!.AsSpan(src, rowLength)
+                        .CopyTo(materialDestination.Slice(dst, rowLength));
+                    for (int i = 0; i < rowLength; i++)
+                        if (densityDestination[dst + i] <= 0)
+                            materialDestination[dst + i] = 0;
                     continue;
                 }
 
