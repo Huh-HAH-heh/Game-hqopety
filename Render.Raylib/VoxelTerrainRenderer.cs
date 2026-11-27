@@ -1037,12 +1037,23 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         page.Regions.TryGetValue(key, out GpuMeshRegion region) &&
                         vertexCount <= region.Capacity)
                     {
-                        if (region.Capacity > 0)
+                        if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? stale))
+                            ReturnMeshData(stale);
+
+                        try
                         {
-                            VoxelChunkMesher.UpdateTriangleSoup(
-                                ref page.Mesh, region.Offset, region.Capacity, pending);
-                            GpuUploadsLastFrame++;
-                            _totalGpuUploads++;
+                            if (region.Capacity > 0)
+                            {
+                                VoxelChunkMesher.UpdateTriangleSoup(
+                                    ref page.Mesh, region.Offset, region.Capacity, pending);
+                                GpuUploadsLastFrame++;
+                                _totalGpuUploads++;
+                            }
+                        }
+                        catch
+                        {
+                            page.CpuMeshes[key] = pending;
+                            throw;
                         }
 
                         page.Regions[key] = region with { VertexCount = vertexCount };
@@ -1053,6 +1064,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     if (page.Initialized && vertexCount == 0 &&
                         !page.Regions.ContainsKey(key))
                     {
+                        if (page.CpuMeshes.Remove(key, out VoxelMeshData[]? stale))
+                            ReturnMeshData(stale);
                         page.Regions.Add(key, new GpuMeshRegion(0, 0, 0));
                         ReturnMeshData(pending);
                         continue;
