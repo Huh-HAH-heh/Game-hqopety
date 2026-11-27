@@ -754,6 +754,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _coarseVisiblePages.Clear();
         bool hasCurrentLodMesh = displayCoverageReady;
         if (!hasCurrentLodMesh &&
+            coarseCoverageReady &&
             _displayStep != FallbackLodStep &&
             _gpuPages.TryGetValue(new GpuPageKey(FallbackLodStep), out GpuMeshPage? coarsePage) &&
             coarsePage.HasMesh && !coarsePage.Dirty)
@@ -1203,18 +1204,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             region.Capacity,
             Array.Empty<VoxelMeshData>());
         ReleaseGpuRegion(page, region);
-    }
-
-    private bool HasRenderableLodPage(int step)
-    {
-        if (!_gpuPages.TryGetValue(new GpuPageKey(step), out GpuMeshPage? page) ||
-            page.Dirty)
-            return false;
-
-        foreach (GpuMeshBuffer buffer in page.Buffers)
-            if (buffer.DrawVertexCount > 0)
-                return true;
-        return false;
     }
 
     private static void RecalculateGpuDrawCounts(GpuMeshPage page)
