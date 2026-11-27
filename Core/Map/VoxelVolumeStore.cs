@@ -483,7 +483,14 @@ public sealed partial class VoxelVolumeStore
                 if (Overlaps(_materials[i].Bounds, bounds))
                     return false;
 
-            return _baseSource.TryGetUniformRegion(bounds, out sample);
+            if (!_baseSource.TryGetUniformRegion(bounds, out VoxelSample sourceUniform))
+                return false;
+
+            short sourceDensity = Quantize(Dequantize(sourceUniform.Density));
+            sample = new VoxelSample(
+                sourceDensity,
+                sourceDensity > 0 ? sourceUniform.MaterialId : (ushort)0);
+            return true;
         }
 
         if (_baseSource != null)
