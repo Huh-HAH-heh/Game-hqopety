@@ -592,6 +592,98 @@ internal static class VoxelChunkMesher
         return true;
     }
 
+    public static int CountTriangleVertices(IReadOnlyList<VoxelMeshData> sources)
+    {
+        int count = 0;
+        for (int i = 0; i < sources.Count; i++)
+            count = checked(count + sources[i].IndexCount);
+        return count;
+    }
+
+    public static int CopyTriangleSoup(
+        IReadOnlyList<VoxelMeshData> sources,
+        Span<Vector3> vertices,
+        Span<Vector3> normals,
+        Span<byte> colors)
+    {
+        int required = CountTriangleVertices(sources);
+        if (vertices.Length < required || normals.Length < required ||
+            colors.Length < checked(required * 4))
+            throw new ArgumentException("Triangle-soup destination is too small.");
+
+        int destination = 0;
+        for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
+        {
+            VoxelMeshData source = sources[sourceIndex];
+            ReadOnlySpan<Vector3> sourceVertices = source.Vertices;
+            ReadOnlySpan<Vector3> sourceNormals = source.Normals;
+            ReadOnlySpan<byte> sourceColors = source.Colors;
+            ReadOnlySpan<ushort> indices = source.Indices;
+
+            for (int i = 0; i < indices.Length; i++)
+            {
+                int index = indices[i] - source.IndexBase;
+                if ((uint)index >= (uint)sourceVertices.Length)
+                    throw new InvalidOperationException("Surface index is outside its source mesh.");
+
+                vertices[destination] = sourceVertices[index];
+                normals[destination] = sourceNormals[index];
+                sourceColors.Slice(index * 4, 4).CopyTo(colors.Slice(destination * 4, 4));
+                destination++;
+            }
+        }
+
+        return destination;
+    }
+
+    public static unsafe void UpdateTriangleSoup(
+        ref Mesh mesh,
+        int destinationOffset,
+        int destinationCapacity,
+        IReadOnlyList<VoxelMeshData> sources)
+    {
+        if (destinationOffset < 0 || destinationCapacity <= 0 ||
+            mesh.VaoId == 0 || mesh.VboId == null)
+            throw new ArgumentOutOfRangeException(nameof(destinationCapacity));
+
+        Vector3[] vertices = ArrayPool<Vector3>.Shared.Rent(destinationCapacity);
+        Vector3[] normals = ArrayPool<Vector3>.Shared.Rent(destinationCapacity);
+        byte[] colors = ArrayPool<byte>.Shared.Rent(checked(destinationCapacity * 4));
+        try
+        {
+            Span<Vector3> vertexSpan = vertices.AsSpan(0, destinationCapacity);
+            Span<Vector3> normalSpan = normals.AsSpan(0, destinationCapacity);
+            Span<byte> colorSpan = colors.AsSpan(0, destinationCapacity * 4);
+            vertexSpan.Clear();
+            normalSpan.Clear();
+            colorSpan.Clear();
+            CopyTriangleSoup(sources, vertexSpan, normalSpan, colorSpan);
+
+            fixed (Vector3* p = vertexSpan)
+                UpdateMeshBuffer(
+                    mesh, Mesh.VboIdIndexVertices, p,
+                    destinationCapacity * sizeof(Vector3),
+                    destinationOffset * sizeof(Vector3));
+            fixed (Vector3* p = normalSpan)
+                UpdateMeshBuffer(
+                    mesh, Mesh.VboIdIndexNormals, p,
+                    destinationCapacity * sizeof(Vector3),
+                    destinationOffset * sizeof(Vector3));
+            fixed (byte* p = colorSpan)
+                UpdateMeshBuffer(
+                    mesh, Mesh.VboIdIndexColors, p,
+                    destinationCapacity * 4,
+                    destinationOffset * 4);
+        }
+        finally
+        {
+            ArrayPool<Vector3>.Shared.Return(vertices);
+            ArrayPool<Vector3>.Shared.Return(normals);
+            ArrayPool<byte>.Shared.Return(colors);
+        }
+    }
+
+
     public static Mesh[] Upload(VoxelMeshData[] data)
     {
         if (data.Length == 0)
