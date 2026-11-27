@@ -111,6 +111,8 @@ public sealed class VoxelVolumeStore
     {
         public required short[] Density { get; init; }
         public required ushort[] Material { get; init; }
+        public bool IsUniform { get; init; }
+        public VoxelSample UniformSample { get; init; }
     }
 
     private sealed class EditBrick
@@ -291,10 +293,24 @@ public sealed class VoxelVolumeStore
                 materialCopy[i] = 0;
         }
 
+        short firstDensity = densityCopy[0];
+        ushort firstMaterial = materialCopy[0];
+        bool uniform = true;
+        for (int i = 1; i < BrickCellCount; i++)
+        {
+            if (densityCopy[i] != firstDensity || materialCopy[i] != firstMaterial)
+            {
+                uniform = false;
+                break;
+            }
+        }
+
         _baseBricks[new BrickKey(brickX, brickY, brickZ)] = new BaseBrick
         {
             Density = densityCopy,
-            Material = materialCopy
+            Material = materialCopy,
+            IsUniform = uniform,
+            UniformSample = new VoxelSample(firstDensity, firstMaterial)
         };
         Revision++;
     }
@@ -371,6 +387,85 @@ public sealed class VoxelVolumeStore
     public ushort GetMaterialId(int x, int y, int z) =>
         GetVoxel(x, y, z).MaterialId;
 
+    /// <summary>
+    /// Returns a value only when every voxel in the requested region is provably
+    /// identical. This allows large empty or uniform areas to be queried without
+    /// expanding them into per-voxel buffers.
+    /// </summary>
+    public bool TryGetUniformRegion(VoxelBounds bounds, out VoxelSample sample)
+    {
+        ValidateBounds(bounds);
+        sample = default;
+        if (bounds.IsEmpty)
+            return true;
+
+        if (HasBrickOverlap(_editBricks, bounds))
+            return false;
+
+        if (HasBrickOverlap(_baseBricks, bounds))
+        {
+            int bx = bounds.MinX / BrickSize;
+            int by = bounds.MinY / BrickSize;
+            int bz = bounds.MinZ / BrickSize;
+            if ((bounds.MaxX - 1) / BrickSize != bx ||
+                (bounds.MaxY - 1) / BrickSize != by ||
+                (bounds.MaxZ - 1) / BrickSize != bz ||
+                !_baseBricks.TryGetValue(new BrickKey(bx, by, bz), out BaseBrick? brick) ||
+                !brick.IsUniform)
+                return false;
+
+            sample = brick.UniformSample;
+            return true;
+        }
+
+        int geometryId = -1;
+        for (int i = 0; i < _geometry.Count; i++)
+        {
+            GeometryOperation operation = _geometry[i];
+            if (!Overlaps(operation.Bounds, bounds))
+                continue;
+
+            if (geometryId >= 0)
+                return false;
+
+            geometryId = i;
+        }
+
+        if (geometryId < 0)
+        {
+            sample = new VoxelSample(Quantize(-DensityClampMeters), 0);
+            return true;
+        }
+
+        GeometryOperation geometry = _geometry[geometryId];
+        if (geometry.Operation == GeometryOperationKind.Difference)
+        {
+            sample = new VoxelSample(Quantize(-DensityClampMeters), 0);
+            return true;
+        }
+
+        if (geometry.Shape != ShapeKind.Box ||
+            !IsRegionInsideBox(bounds, geometry.A, geometry.B, DensityClampMeters))
+            return false;
+
+        ushort materialId = geometry.MaterialId;
+        for (int i = 0; i < _materials.Count; i++)
+        {
+            MaterialOperation operation = _materials[i];
+            if (!Overlaps(operation.Bounds, bounds))
+                continue;
+
+            if (operation.Shape != ShapeKind.Box ||
+                !IsRegionInsideBox(bounds, operation.A, operation.B, margin: 0f))
+                return false;
+
+            materialId = operation.MaterialId;
+        }
+
+        sample = new VoxelSample(Quantize(DensityClampMeters), materialId);
+        return true;
+    }
+
     /// <summary>Reads only the geometry channel into a caller-owned dense buffer.</summary>
     public void ReadDensityRegion(VoxelBounds bounds, Span<short> destination)
     {
@@ -379,6 +474,11 @@ public sealed class VoxelVolumeStore
         if (destination.Length != count)
             throw new ArgumentException("Density destination length does not match region.", nameof(destination));
         if (count == 0) return;
+        if (TryGetUniformRegion(bounds, out VoxelSample uniform))
+        {
+            destination.Fill(uniform.Density);
+            return;
+        }
 
         int sx = bounds.SizeX;
         int sy = bounds.SizeY;
@@ -435,6 +535,11 @@ public sealed class VoxelVolumeStore
         if (destination.Length != count)
             throw new ArgumentException("Material destination length does not match region.", nameof(destination));
         if (count == 0) return;
+        if (TryGetUniformRegion(bounds, out VoxelSample uniform))
+        {
+            destination.Fill(uniform.MaterialId);
+            return;
+        }
 
         int sx = bounds.SizeX;
         int sy = bounds.SizeY;
@@ -534,6 +639,12 @@ public sealed class VoxelVolumeStore
         if (materialDestination.Length != count)
             throw new ArgumentException("Material destination length does not match region.", nameof(materialDestination));
         if (count == 0) return;
+        if (TryGetUniformRegion(bounds, out VoxelSample uniform))
+        {
+            densityDestination.Fill(uniform.Density);
+            materialDestination.Fill(uniform.MaterialId);
+            return;
+        }
 
         for (int bz = bounds.MinZ / BrickSize; bz <= (bounds.MaxZ - 1) / BrickSize; bz++)
         for (int by = bounds.MinY / BrickSize; by <= (bounds.MaxY - 1) / BrickSize; by++)
@@ -1154,6 +1265,69 @@ public sealed class VoxelVolumeStore
         if (value <= 0f) return 0;
         if (value >= limit) return limit;
         return (int)MathF.Ceiling(value);
+    }
+
+    private static bool HasBrickOverlap<T>(
+        Dictionary<BrickKey, T> bricks,
+        VoxelBounds bounds)
+    {
+        if (bricks.Count == 0 || bounds.IsEmpty)
+            return false;
+
+        int minX = bounds.MinX / BrickSize;
+        int minY = bounds.MinY / BrickSize;
+        int minZ = bounds.MinZ / BrickSize;
+        int maxX = (bounds.MaxX - 1) / BrickSize;
+        int maxY = (bounds.MaxY - 1) / BrickSize;
+        int maxZ = (bounds.MaxZ - 1) / BrickSize;
+        long queryBrickCount = (long)(maxX - minX + 1) *
+            (maxY - minY + 1) * (maxZ - minZ + 1);
+
+        if (queryBrickCount <= bricks.Count)
+        {
+            for (int z = minZ; z <= maxZ; z++)
+            for (int y = minY; y <= maxY; y++)
+            for (int x = minX; x <= maxX; x++)
+                if (bricks.ContainsKey(new BrickKey(x, y, z)))
+                    return true;
+            return false;
+        }
+
+        foreach (BrickKey key in bricks.Keys)
+        {
+            if (key.X >= minX && key.X <= maxX &&
+                key.Y >= minY && key.Y <= maxY &&
+                key.Z >= minZ && key.Z <= maxZ)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool Overlaps(VoxelBounds a, VoxelBounds b) =>
+        a.MinX < b.MaxX && a.MaxX > b.MinX &&
+        a.MinY < b.MaxY && a.MaxY > b.MinY &&
+        a.MinZ < b.MaxZ && a.MaxZ > b.MinZ;
+
+    private bool IsRegionInsideBox(
+        VoxelBounds bounds,
+        Vector3 center,
+        Vector3 halfExtents,
+        float margin)
+    {
+        float minX = (bounds.MinX + 0.5f) * VoxelSizeMeters;
+        float minY = (bounds.MinY + 0.5f) * VoxelSizeMeters;
+        float minZ = (bounds.MinZ + 0.5f) * VoxelSizeMeters;
+        float maxX = (bounds.MaxX - 0.5f) * VoxelSizeMeters;
+        float maxY = (bounds.MaxY - 0.5f) * VoxelSizeMeters;
+        float maxZ = (bounds.MaxZ - 0.5f) * VoxelSizeMeters;
+
+        return minX - (center.X - halfExtents.X) >= margin &&
+            minY - (center.Y - halfExtents.Y) >= margin &&
+            minZ - (center.Z - halfExtents.Z) >= margin &&
+            (center.X + halfExtents.X) - maxX >= margin &&
+            (center.Y + halfExtents.Y) - maxY >= margin &&
+            (center.Z + halfExtents.Z) - maxZ >= margin;
     }
 
     private void AddToBuckets(
