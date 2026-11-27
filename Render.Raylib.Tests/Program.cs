@@ -16,6 +16,7 @@ internal static class Program
         Run("Adjacent chunks sample the same shared halo plane", TestSharedHalo, ref failures);
         Run("Flat procedural density produces a continuous horizontal surface", TestFlatSurface, ref failures);
         Run("Voxel cut creates a horizontal cap at the requested world height", TestCutSurface, ref failures);
+        Run("Voxel cut preserves a tunnel opening through the section", TestCutPreservesTunnelOpening, ref failures);
         Run("Enclosed solid chunk exits without creating a surface", TestEnclosedSolid, ref failures);
         Run("Three-dimensional tunnel walls are meshed inside solid terrain", TestTunnelSurface, ref failures);
         Run("Empty chunks exit before Surface Nets", TestEmptyField, ref failures);
@@ -126,6 +127,38 @@ internal static class Program
             return (
                 hasCap,
                 $"cut={cutHeightMeters:0.0}m horizontalCap={hasCap} vertices={CountVertices(meshes)}");
+        }
+        finally
+        {
+            ReturnMeshData(meshes);
+        }
+    }
+
+    private static (bool Passed, string Detail) TestCutPreservesTunnelOpening()
+    {
+        const int cutLayer = 50;
+        const float cutHeightMeters = cutLayer * SparseVoxelField.VoxelSizeMeters;
+        SyntheticDensityField field = new(
+            256, 256, 256,
+            surfaceHeight: 80,
+            sectionTunnel: true);
+
+        using VoxelChunkBuildInput input = new(
+            field, 1, 0, 1, cutLayer, cellsPerAxis: 64);
+        input.CaptureAll(field);
+
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
+            input, new TerrainPalette());
+        try
+        {
+            bool solidAreaClosed = HasHorizontalTriangleCoveringXZ(
+                meshes, cutHeightMeters, 8.0f, 8.0f);
+            bool tunnelRemainsOpen = !HasHorizontalTriangleCoveringXZ(
+                meshes, cutHeightMeters, 9.4f, 9.4f);
+
+            return (
+                solidAreaClosed && tunnelRemainsOpen,
+                $"solidArea={solidAreaClosed} tunnelOpening={tunnelRemainsOpen} vertices={CountVertices(meshes)}");
         }
         finally
         {
@@ -252,6 +285,53 @@ internal static class Program
         return false;
     }
 
+    private static bool HasHorizontalTriangleCoveringXZ(
+        VoxelMeshData[] meshes,
+        float height,
+        float x,
+        float z)
+    {
+        foreach (VoxelMeshData mesh in meshes)
+        {
+            ReadOnlySpan<Vector3> vertices = mesh.Vertices;
+            ReadOnlySpan<ushort> indices = mesh.Indices;
+            for (int i = 0; i + 2 < indices.Length; i += 3)
+            {
+                int ia = indices[i] - mesh.IndexBase;
+                int ib = indices[i + 1] - mesh.IndexBase;
+                int ic = indices[i + 2] - mesh.IndexBase;
+                if ((uint)ia >= (uint)vertices.Length ||
+                    (uint)ib >= (uint)vertices.Length ||
+                    (uint)ic >= (uint)vertices.Length)
+                    continue;
+
+                Vector3 a = vertices[ia];
+                Vector3 b = vertices[ib];
+                Vector3 c = vertices[ic];
+                if (MathF.Abs(a.Y - height) > 0.001f ||
+                    MathF.Abs(b.Y - height) > 0.001f ||
+                    MathF.Abs(c.Y - height) > 0.001f)
+                    continue;
+
+                float ab = (x - b.X) * (a.Z - b.Z) -
+                    (a.X - b.X) * (z - b.Z);
+                float bc = (x - c.X) * (b.Z - c.Z) -
+                    (b.X - c.X) * (z - c.Z);
+                float ca = (x - a.X) * (c.Z - a.Z) -
+                    (c.X - a.X) * (z - a.Z);
+
+                bool hasNegative = ab < -0.0001f ||
+                    bc < -0.0001f || ca < -0.0001f;
+                bool hasPositive = ab > 0.0001f ||
+                    bc > 0.0001f || ca > 0.0001f;
+                if (!(hasNegative && hasPositive))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool HasVertexNear(VoxelMeshData[] meshes, Vector3 point, float radius)
     {
         float radiusSquared = radius * radius;
@@ -331,6 +411,7 @@ internal static class Program
         private readonly bool _empty;
         private readonly bool _solidAll;
         private readonly bool _tunnel;
+        private readonly bool _sectionTunnel;
 
         public int Width { get; }
         public int Height { get; }
@@ -343,7 +424,8 @@ internal static class Program
             int surfaceHeight = 20,
             bool empty = false,
             bool solidAll = false,
-            bool tunnel = false)
+            bool tunnel = false,
+            bool sectionTunnel = false)
         {
             Width = width;
             Height = height;
@@ -352,6 +434,7 @@ internal static class Program
             _empty = empty;
             _solidAll = solidAll;
             _tunnel = tunnel;
+            _sectionTunnel = sectionTunnel;
         }
 
         public float GetDensity(int x, int y, int z)
@@ -367,6 +450,12 @@ internal static class Program
 
             if (_solidAll)
                 return 1f;
+
+            if (_sectionTunnel &&
+                x >= 90 && x < 98 &&
+                y >= 43 && y < 58 &&
+                z >= 90 && z < 98)
+                return -1f;
 
             return _surfaceHeight - (y + 0.5f);
         }
