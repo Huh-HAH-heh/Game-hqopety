@@ -394,26 +394,30 @@ public sealed class VoxelVolumeStore
             int y1 = Math.Min(bounds.MaxY, oy + BrickSize);
             int z1 = Math.Min(bounds.MaxZ, oz + BrickSize);
 
-            _editBricks.TryGetValue(new BrickKey(bx, by, bz), out EditBrick? edit);
+            BrickKey key = new(bx, by, bz);
+            _editBricks.TryGetValue(key, out EditBrick? edit);
+            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
             int rowLength = x1 - x0;
-            List<int>? candidates = GetBucketCandidates(_geometryBuckets, ox, oy, oz);
+            List<int>? candidates = baseBrick == null
+                ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
+                : null;
 
             for (int z = z0; z < z1; z++)
             for (int y = y0; y < y1; y++)
             {
                 int dst = (x0 - bounds.MinX) +
                     sx * ((y - bounds.MinY) + sy * (z - bounds.MinZ));
-                if (edit?.Density is { } dense)
+                int src = GetLocalIndex(ox, oy, oz, x0, y, z);
+
+                short[]? dense = edit?.Density ?? baseBrick?.Density;
+                if (dense != null)
                 {
-                    int src = GetLocalIndex(ox, oy, oz, x0, y, z);
                     dense.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
                     continue;
                 }
 
                 for (int x = x0; x < x1; x++)
-                {
                     destination[dst++] = EvaluateBaseDensity(x, y, z, candidates);
-                }
             }
         }
     }
@@ -436,6 +440,10 @@ public sealed class VoxelVolumeStore
         for (int by = bounds.MinY / BrickSize; by <= (bounds.MaxY - 1) / BrickSize; by++)
         for (int bx = bounds.MinX / BrickSize; bx <= (bounds.MaxX - 1) / BrickSize; bx++)
         {
+            BrickKey key = new(bx, by, bz);
+            _editBricks.TryGetValue(key, out EditBrick? edit);
+            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
+
             int ox = bx * BrickSize;
             int oy = by * BrickSize;
             int oz = bz * BrickSize;
@@ -445,11 +453,16 @@ public sealed class VoxelVolumeStore
             int x1 = Math.Min(bounds.MaxX, ox + BrickSize);
             int y1 = Math.Min(bounds.MaxY, oy + BrickSize);
             int z1 = Math.Min(bounds.MaxZ, oz + BrickSize);
-
-            _editBricks.TryGetValue(new BrickKey(bx, by, bz), out EditBrick? edit);
             int rowLength = x1 - x0;
-            List<int>? geometryCandidates = GetBucketCandidates(_geometryBuckets, ox, oy, oz);
-            List<int>? materialCandidates = GetBucketCandidates(_materialBuckets, ox, oy, oz);
+
+            short[]? densityData = edit?.Density ?? baseBrick?.Density;
+            ushort[]? materialData = edit?.Material ?? baseBrick?.Material;
+            List<int>? geometryCandidates = densityData == null || materialData == null
+                ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
+                : null;
+            List<int>? materialCandidates = materialData == null
+                ? GetBucketCandidates(_materialBuckets, ox, oy, oz)
+                : null;
 
             for (int z = z0; z < z1; z++)
             for (int y = y0; y < y1; y++)
@@ -458,35 +471,41 @@ public sealed class VoxelVolumeStore
                     sx * ((y - bounds.MinY) + sy * (z - bounds.MinZ));
                 int src = GetLocalIndex(ox, oy, oz, x0, y, z);
 
-                if (edit is not null && edit.Density is { } denseDensity &&
-                    edit.Material is { } denseMaterial)
+                if (densityData != null && materialData != null)
                 {
-                    denseMaterial.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
+                    materialData.AsSpan(src, rowLength).CopyTo(destination.Slice(dst, rowLength));
                     for (int i = 0; i < rowLength; i++)
-                        if (denseDensity[src + i] <= 0)
+                        if (densityData[src + i] <= 0)
                             destination[dst + i] = 0;
                     continue;
                 }
 
                 for (int x = x0; x < x1; x++)
                 {
-                    int localIndex = src + (x - x0);
-                    bool needBase = edit == null ||
-                        edit.Density == null ||
-                        edit.Material == null;
-                    VoxelSample baseSample = needBase
-                        ? EvaluateBaseVoxel(x, y, z, geometryCandidates, materialCandidates)
-                        : default;
+                    int local = src + (x - x0);
+                    VoxelSample baseSample = baseBrick != null
+                        ? new VoxelSample(
+                            baseBrick.Density[local],
+                            baseBrick.Material[local])
+                        : densityData == null || materialData == null
+                            ? EvaluateBaseVoxel(x, y, z, geometryCandidates, materialCandidates)
+                            : default;
 
-                    short density = edit?.Density == null
-                        ? baseSample.Density
-                        : edit.Density[localIndex];
+                    short density = edit?.Density != null
+                        ? edit.Density[local]
+                        : baseBrick != null
+                            ? baseBrick.Density[local]
+                            : baseSample.Density;
 
-                    destination[dst++] = density <= 0
+                    ushort material = density <= 0
                         ? (ushort)0
-                        : edit?.Material == null
-                            ? baseSample.MaterialId
-                            : edit.Material[localIndex];
+                        : edit?.Material != null
+                            ? edit.Material[local]
+                            : baseBrick != null
+                                ? baseBrick.Material[local]
+                                : baseSample.MaterialId;
+
+                    destination[dst++] = material;
                 }
             }
         }
@@ -506,8 +525,7 @@ public sealed class VoxelVolumeStore
         ValidateBounds(bounds);
         int sizeX = bounds.SizeX;
         int sizeY = bounds.SizeY;
-        int sizeZ = bounds.SizeZ;
-        int count = checked(sizeX * sizeY * sizeZ);
+        int count = checked(sizeX * sizeY * bounds.SizeZ);
 
         if (densityDestination.Length != count)
             throw new ArgumentException("Density destination length does not match region.", nameof(densityDestination));
@@ -515,95 +533,78 @@ public sealed class VoxelVolumeStore
             throw new ArgumentException("Material destination length does not match region.", nameof(materialDestination));
         if (count == 0) return;
 
-        int minBrickX = bounds.MinX / BrickSize;
-        int minBrickY = bounds.MinY / BrickSize;
-        int minBrickZ = bounds.MinZ / BrickSize;
-        int maxBrickX = (bounds.MaxX - 1) / BrickSize;
-        int maxBrickY = (bounds.MaxY - 1) / BrickSize;
-        int maxBrickZ = (bounds.MaxZ - 1) / BrickSize;
-
-        for (int bz = minBrickZ; bz <= maxBrickZ; bz++)
-        for (int by = minBrickY; by <= maxBrickY; by++)
-        for (int bx = minBrickX; bx <= maxBrickX; bx++)
+        for (int bz = bounds.MinZ / BrickSize; bz <= (bounds.MaxZ - 1) / BrickSize; bz++)
+        for (int by = bounds.MinY / BrickSize; by <= (bounds.MaxY - 1) / BrickSize; by++)
+        for (int bx = bounds.MinX / BrickSize; bx <= (bounds.MaxX - 1) / BrickSize; bx++)
         {
             BrickKey key = new(bx, by, bz);
             _editBricks.TryGetValue(key, out EditBrick? edit);
+            _baseBricks.TryGetValue(key, out BaseBrick? baseBrick);
 
-            int brickOriginX = bx * BrickSize;
-            int brickOriginY = by * BrickSize;
-            int brickOriginZ = bz * BrickSize;
+            int ox = bx * BrickSize;
+            int oy = by * BrickSize;
+            int oz = bz * BrickSize;
+            int x0 = Math.Max(bounds.MinX, ox);
+            int y0 = Math.Max(bounds.MinY, oy);
+            int z0 = Math.Max(bounds.MinZ, oz);
+            int x1 = Math.Min(bounds.MaxX, ox + BrickSize);
+            int y1 = Math.Min(bounds.MaxY, oy + BrickSize);
+            int z1 = Math.Min(bounds.MaxZ, oz + BrickSize);
+            int rowLength = x1 - x0;
 
-            int x0 = Math.Max(bounds.MinX, brickOriginX);
-            int y0 = Math.Max(bounds.MinY, brickOriginY);
-            int z0 = Math.Max(bounds.MinZ, brickOriginZ);
-            int x1 = Math.Min(bounds.MaxX, brickOriginX + BrickSize);
-            int y1 = Math.Min(bounds.MaxY, brickOriginY + BrickSize);
-            int z1 = Math.Min(bounds.MaxZ, brickOriginZ + BrickSize);
-
-            if (edit is not null && edit.Density is { } denseDensity &&
-                edit.Material is { } denseMaterial)
-            {
-                int rowLength = x1 - x0;
-                for (int z = z0; z < z1; z++)
-                for (int y = y0; y < y1; y++)
-                {
-                    int src = GetLocalIndex(
-                        brickOriginX, brickOriginY, brickOriginZ, x0, y, z);
-                    int dst =
-                        (x0 - bounds.MinX) +
-                        sizeX * ((y - bounds.MinY) + sizeY * (z - bounds.MinZ));
-
-                    denseDensity.AsSpan(src, rowLength)
-                        .CopyTo(densityDestination.Slice(dst, rowLength));
-                    denseMaterial.AsSpan(src, rowLength)
-                        .CopyTo(materialDestination.Slice(dst, rowLength));
-
-                    for (int i = 0; i < rowLength; i++)
-                        if (densityDestination[dst + i] <= 0)
-                            materialDestination[dst + i] = 0;
-                }
-
-                continue;
-            }
-
-            List<int>? geometryCandidates = GetBucketCandidates(
-                _geometryBuckets, brickOriginX, brickOriginY, brickOriginZ);
-            List<int>? materialCandidates = GetBucketCandidates(
-                _materialBuckets, brickOriginX, brickOriginY, brickOriginZ);
+            short[]? densityData = edit?.Density ?? baseBrick?.Density;
+            ushort[]? materialData = edit?.Material ?? baseBrick?.Material;
+            List<int>? geometryCandidates = densityData == null || materialData == null
+                ? GetBucketCandidates(_geometryBuckets, ox, oy, oz)
+                : null;
+            List<int>? materialCandidates = materialData == null
+                ? GetBucketCandidates(_materialBuckets, ox, oy, oz)
+                : null;
 
             for (int z = z0; z < z1; z++)
             for (int y = y0; y < y1; y++)
             {
-                int sourceIndex = GetLocalIndex(brickOriginX, brickOriginY, brickOriginZ,
-                    x0, y, z);
-                int destinationIndex =
+                int src = GetLocalIndex(ox, oy, oz, x0, y, z);
+                int dst =
                     (x0 - bounds.MinX) +
                     sizeX * ((y - bounds.MinY) + sizeY * (z - bounds.MinZ));
 
+                if (densityData != null && materialData != null)
+                {
+                    densityData.AsSpan(src, rowLength).CopyTo(densityDestination.Slice(dst, rowLength));
+                    materialData.AsSpan(src, rowLength).CopyTo(materialDestination.Slice(dst, rowLength));
+                    for (int i = 0; i < rowLength; i++)
+                        if (densityDestination[dst + i] <= 0)
+                            materialDestination[dst + i] = 0;
+                    continue;
+                }
+
                 for (int x = x0; x < x1; x++)
                 {
-                    int localIndex = sourceIndex + (x - x0);
-                    bool needBase = edit == null ||
-                        edit.Density == null ||
-                        edit.Material == null;
+                    int local = src + (x - x0);
+                    VoxelSample baseSample = baseBrick != null
+                        ? new VoxelSample(
+                            baseBrick.Density[local],
+                            baseBrick.Material[local])
+                        : EvaluateBaseVoxel(x, y, z, geometryCandidates, materialCandidates);
 
-                    VoxelSample baseSample = needBase
-                        ? EvaluateBaseVoxel(x, y, z, geometryCandidates, materialCandidates)
-                        : default;
-
-                    short density = edit?.Density == null
-                        ? baseSample.Density
-                        : edit.Density[localIndex];
+                    short density = edit?.Density != null
+                        ? edit.Density[local]
+                        : baseBrick != null
+                            ? baseBrick.Density[local]
+                            : baseSample.Density;
 
                     ushort material = density <= 0
                         ? (ushort)0
-                        : edit?.Material == null
-                            ? baseSample.MaterialId
-                            : edit.Material[localIndex];
+                        : edit?.Material != null
+                            ? edit.Material[local]
+                            : baseBrick != null
+                                ? baseBrick.Material[local]
+                                : baseSample.MaterialId;
 
-                    densityDestination[destinationIndex] = density;
-                    materialDestination[destinationIndex] = material;
-                    destinationIndex++;
+                    densityDestination[dst] = density;
+                    materialDestination[dst] = material;
+                    dst++;
                 }
             }
         }
