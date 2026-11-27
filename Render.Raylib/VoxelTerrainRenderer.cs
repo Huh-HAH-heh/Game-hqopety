@@ -145,6 +145,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public readonly List<GpuMeshBuffer> Buffers = new(4);
         public readonly Dictionary<ChunkKey, GpuMeshRegion> Regions = new();
         public int ReservedVertexCount;
+        public int AllocatedVertexCount;
         public bool Dirty;
         public bool HasMesh => Buffers.Count > 0;
 
@@ -155,6 +156,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Buffers.Clear();
             Regions.Clear();
             ReservedVertexCount = 0;
+            AllocatedVertexCount = 0;
             Dirty = false;
         }
     }
@@ -751,7 +753,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count +
-            (_lodTransitionActive ? _transitionVisible.Count : 0);
+            (_lodTransitionActive ? _transitionVisible.Count : 0) +
+            (_coarseVisiblePages.Count > 0
+                ? _coarseVisiblePages[0].Page.Regions.Values.Count(static r => r.VertexCount > 0)
+                : 0);
         if (_lodTransitionActive && _lodFade >= 1f)
         {
             int previousDisplayStep = _displayStep;
@@ -936,7 +941,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (buffer == null || buffer.ReservedVertexCount + capacity > buffer.Capacity)
         {
-            int remaining = MaximumWorldMeshVertices - page.ReservedVertexCount;
+            int remaining = MaximumWorldMeshVertices - page.AllocatedVertexCount;
             int bufferCapacity = Math.Min(
                 Math.Max(GpuPageBufferVertices, capacity),
                 remaining);
@@ -945,6 +950,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             buffer = CreateGpuBuffer(bufferCapacity);
             page.Buffers.Add(buffer);
+            page.AllocatedVertexCount += bufferCapacity;
             bufferIndex = page.Buffers.Count - 1;
             GpuUploadsLastFrame++;
             _totalGpuUploads++;
@@ -2319,7 +2325,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach (GpuMeshPage page in _gpuPages.Values)
         {
-            if (page.HasMesh) _totalGpuUnloads++;
+            _totalGpuUnloads += page.Buffers.Count;
             page.Dispose();
         }
 
