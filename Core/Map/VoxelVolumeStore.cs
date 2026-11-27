@@ -319,10 +319,6 @@ public sealed partial class VoxelVolumeStore
     /// Freezes the compact base description. Subsequent changes materialize only
     /// the touched 16^3 edit bricks.
     /// </summary>
-    /// <summary>
-    /// Freezes the compact base description. Subsequent changes materialize only
-    /// the touched 16^3 edit bricks.
-    /// </summary>
     public void SealBase()
     {
         _baseSealed = true;
