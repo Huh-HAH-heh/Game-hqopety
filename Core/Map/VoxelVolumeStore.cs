@@ -552,7 +552,6 @@ public sealed class VoxelVolumeStore
             int ox = bx * BrickSize;
             int oy = by * BrickSize;
             int oz = bz * BrickSize;
-            List<int>? geometryCandidates = GetBucketCandidates(_geometryBuckets, ox, oy, oz);
             int x0 = Math.Max(bounds.MinX, ox);
             int y0 = Math.Max(bounds.MinY, oy);
             int z0 = Math.Max(bounds.MinZ, oz);
@@ -612,6 +611,7 @@ public sealed class VoxelVolumeStore
             int ox = bx * BrickSize;
             int oy = by * BrickSize;
             int oz = bz * BrickSize;
+            List<int>? geometryCandidates = GetBucketCandidates(_geometryBuckets, ox, oy, oz);
             int x0 = Math.Max(bounds.MinX, ox);
             int y0 = Math.Max(bounds.MinY, oy);
             int z0 = Math.Max(bounds.MinZ, oz);
