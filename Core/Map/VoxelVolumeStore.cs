@@ -25,6 +25,7 @@ public sealed partial class VoxelVolumeStore
     private readonly List<MaterialOperation> _materials = new();
     private readonly Dictionary<BrickKey, BaseBrick> _baseBricks = new();
     private readonly Dictionary<BrickKey, EditBrick> _editBricks = new();
+    private IVoxelBaseSource? _baseSource;
     private bool _baseSealed;
 
     public int Width { get; }
@@ -33,6 +34,7 @@ public sealed partial class VoxelVolumeStore
     public float VoxelSizeMeters { get; }
     public long Revision { get; private set; }
     public bool IsBaseSealed => _baseSealed;
+    public bool HasBaseSource => _baseSource != null;
     public int BaseGeometryRegionCount => _geometry.Count;
     public int BaseMaterialRegionCount => _materials.Count;
     public int BaseDenseBrickCount => _baseBricks.Count;
@@ -329,6 +331,28 @@ public sealed partial class VoxelVolumeStore
     /// Freezes the compact base description. Subsequent changes materialize only
     /// the touched 16^3 edit bricks.
     /// </summary>
+    /// <summary>
+    /// Sets the immutable procedural source for all base voxels not overridden by
+    /// imported bricks. CSG primitives and material regions are applied on top.
+    /// The source must be deterministic, thread-safe for reads and serializable.
+    /// </summary>
+    public void SetBaseSource(IVoxelBaseSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ValidateBaseMutable();
+
+        if (_baseSource != null)
+            throw new InvalidOperationException("A base voxel source is already assigned.");
+        if (string.IsNullOrWhiteSpace(source.TypeId) || source.TypeId.Length > 256)
+            throw new ArgumentException("Base source TypeId must contain 1..256 characters.", nameof(source));
+        if (source.Width != Width || source.Height != Height || source.Depth != Depth ||
+            MathF.Abs(source.VoxelSizeMeters - VoxelSizeMeters) > 1e-6f)
+            throw new ArgumentException("Base source dimensions and voxel size must match the store.", nameof(source));
+
+        _baseSource = source;
+        Revision++;
+    }
+
     public void SealBase()
     {
         _baseSealed = true;
@@ -449,9 +473,21 @@ public sealed partial class VoxelVolumeStore
 
         if (geometryId < 0)
         {
-            sample = new VoxelSample(Quantize(-DensityClampMeters), 0);
-            return true;
+            if (_baseSource == null)
+            {
+                sample = new VoxelSample(Quantize(-DensityClampMeters), 0);
+                return true;
+            }
+
+            for (int i = 0; i < _materials.Count; i++)
+                if (Overlaps(_materials[i].Bounds, bounds))
+                    return false;
+
+            return _baseSource.TryGetUniformRegion(bounds, out sample);
         }
+
+        if (_baseSource != null)
+            return false;
 
         GeometryOperation geometry = _geometry[geometryId];
         if (geometry.Operation == GeometryOperationKind.Difference)
@@ -493,6 +529,12 @@ public sealed partial class VoxelVolumeStore
         if (TryGetUniformRegion(bounds, out VoxelSample uniform))
         {
             destination.Fill(uniform.Density);
+            return;
+        }
+        if (CanReadBaseSourceDirect(bounds))
+        {
+            _baseSource!.ReadDensityRegion(bounds, destination);
+            ClampSourceDensity(destination);
             return;
         }
 
@@ -562,6 +604,11 @@ public sealed partial class VoxelVolumeStore
         if (TryGetUniformRegion(bounds, out VoxelSample uniform))
         {
             destination.Fill(uniform.MaterialId);
+            return;
+        }
+        if (CanReadBaseSourceDirect(bounds))
+        {
+            _baseSource!.ReadMaterialRegion(bounds, destination);
             return;
         }
 
@@ -702,6 +749,12 @@ public sealed partial class VoxelVolumeStore
         {
             densityDestination.Fill(uniform.Density);
             materialDestination.Fill(uniform.MaterialId);
+            return;
+        }
+        if (CanReadBaseSourceDirect(bounds))
+        {
+            _baseSource!.ReadRegion(bounds, densityDestination, materialDestination);
+            NormalizeSourceRegion(densityDestination, materialDestination);
             return;
         }
 
@@ -1191,8 +1244,10 @@ public sealed partial class VoxelVolumeStore
         List<int>? geometryCandidates,
         List<int>? materialCandidates)
     {
-        float density = -DensityClampMeters;
-        ushort materialId = 0;
+        VoxelSample sourceSample = _baseSource?.Sample(x, y, z) ??
+            new VoxelSample(Quantize(-DensityClampMeters), 0);
+        float density = Dequantize(Quantize(Dequantize(sourceSample.Density)));
+        ushort materialId = density > 0f ? sourceSample.MaterialId : (ushort)0;
         Vector3 position = VoxelCenter(x, y, z);
 
         if (geometryCandidates != null)
@@ -1250,7 +1305,9 @@ public sealed partial class VoxelVolumeStore
         int z,
         List<int>? geometryCandidates)
     {
-        float density = -DensityClampMeters;
+        float density = _baseSource == null
+            ? -DensityClampMeters
+            : Dequantize(Quantize(Dequantize(_baseSource.Sample(x, y, z).Density)));
         Vector3 position = VoxelCenter(x, y, z);
 
         if (geometryCandidates != null)
@@ -1487,6 +1544,43 @@ public sealed partial class VoxelVolumeStore
             (center.X + halfExtents.X) - maxX >= margin &&
             (center.Y + halfExtents.Y) - maxY >= margin &&
             (center.Z + halfExtents.Z) - maxZ >= margin;
+    }
+
+    private bool CanReadBaseSourceDirect(VoxelBounds bounds) =>
+        _baseSource != null &&
+        !HasBrickOverlap(_baseBricks, bounds) &&
+        !HasBrickOverlap(_editBricks, bounds) &&
+        !HasBaseOperationOverlap(bounds);
+
+    private bool HasBaseOperationOverlap(VoxelBounds bounds)
+    {
+        for (int i = 0; i < _geometry.Count; i++)
+            if (Overlaps(_geometry[i].Bounds, bounds))
+                return true;
+
+        for (int i = 0; i < _materials.Count; i++)
+            if (Overlaps(_materials[i].Bounds, bounds))
+                return true;
+
+        return false;
+    }
+
+    private void ClampSourceDensity(Span<short> density)
+    {
+        for (int i = 0; i < density.Length; i++)
+            density[i] = Quantize(Dequantize(density[i]));
+    }
+
+    private void NormalizeSourceRegion(
+        Span<short> density,
+        Span<ushort> material)
+    {
+        for (int i = 0; i < density.Length; i++)
+        {
+            density[i] = Quantize(Dequantize(density[i]));
+            if (density[i] <= 0)
+                material[i] = 0;
+        }
     }
 
     private void AddToBuckets(
