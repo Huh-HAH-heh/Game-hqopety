@@ -24,7 +24,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // are rented only by active workers, so the queue can cover the whole visible set.
     private const int MaximumPendingMeshJobs = 4096;
     private const int MaximumWorldSamplesPerAxis = 4096;
-    private const int MaximumWorldMeshVertices = 64_000_000;
+    private const int MaximumWorldMeshVertices = 96_000_000;
     private const int GpuPageBufferVertices = 2_000_000;
     private const int FallbackLodStep = MaximumRenderStep;
     // Use the available physical cores for density capture and Surface Nets builds.
@@ -163,6 +163,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public readonly Dictionary<ChunkKey, GpuMeshRegion> Regions = new();
         public int ReservedVertexCount;
         public int AllocatedVertexCount;
+        public long CapacityVersion;
         public bool Dirty;
         public bool HasMesh => Buffers.Count > 0;
 
@@ -209,6 +210,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public bool UploadQueued;
         public long UploadQueueGeneration;
         public long GpuUploadRetryFrame;
+        public long GpuUploadRetryVersion = long.MinValue;
 
         public void Dispose()
         {
@@ -714,20 +716,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dynamicFragments.ReleaseBakedBodies(
             bounds => AreCachedMeshesCurrent(bounds, field));
 
-        if ((_frame % 300) == 0)
+        if ((_frame % 600) == 0)
         {
-            string summary =
-                $"frame={_frame} displayStep={_displayStep} buildStep={_renderStep} fade={_lodFade:0.00} " +
-                $"lodReady={targetReadyCount}/{(_renderStep == _displayStep ? _candidateEntriesScratch.Count : transitionEntries.Count)} displayReady={displayReadyCount}/{ExpectedChunkCount(field, _displayStep)} coarseReady={coarseReadyCount}/{(_displayStep != FallbackLodStep && _renderStep != FallbackLodStep ? ExpectedChunkCount(field, FallbackLodStep) : 0)} " +
-                $"candidates={_visibleCandidateKeys.Count} transitionCandidates={transitionCandidates.Count} " +
-                $"visible={_visible.Count} transitionVisible={_transitionVisible.Count} cache={_chunks.Count} empty={_totalEmptyChunks} " +
-                $"buildMs={WorkerBuildMillisecondsLastFrame:0.00} queueMs={LastWorkerQueueWaitMilliseconds:0.0} gpuMs={GpuUploadMillisecondsLastFrame:0.00} " +
-                $"packets={GpuUploadsLastFrame} builds={_totalBuildCompleted}/{_totalBuildRequests} pending={_buildQueue.Count} " +
-                $"failed={_totalBuildFailed} stale={_totalStaleResults} deferred={_totalQueueSaturated} repeat={_totalRepeatedBuilds} " +
-                $"uploads={_totalGpuUploads} unloads={_totalGpuUnloads} cacheHits={_totalIdenticalSurfaceSkips} uploadFailures={_totalGpuUploadFailures} " +
-                $"gpuPages={_gpuPages.Count} dirtyPages={_dirtyGpuPageKeys.Count}";
+            int lodCandidates = _renderStep == _displayStep
+                ? _candidateEntriesScratch.Count
+                : transitionEntries.Count;
             GetGpuVertexUsage(out long gpuPhysicalVertices, out long gpuLiveVertices);
-            summary += $" gpuVertices={gpuLiveVertices:N0}/{gpuPhysicalVertices:N0} gpuFree={gpuPhysicalVertices - gpuLiveVertices:N0}";
+            string summary =
+                $"frame={_frame} lod={_displayStep}->{_renderStep} ready={targetReadyCount}/{lodCandidates} " +
+                $"display={displayReadyCount}/{ExpectedChunkCount(field, _displayStep)} visible={_visible.Count} " +
+                $"builds={_totalBuildCompleted}/{_totalBuildRequests} pending={_buildQueue.Count} " +
+                $"gpu={gpuLiveVertices / 1_000_000d:0.0}/{gpuPhysicalVertices / 1_000_000d:0.0}M " +
+                $"uploadFail={_totalGpuUploadFailures} cacheHits={_totalIdenticalSurfaceSkips}";
             _logger.Write("FRAME_SUMMARY", summary);
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
@@ -1103,6 +1103,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         GpuMeshBuffer nextBuffer = CreateGpuBuffer(bufferCapacity);
         page.Buffers.Add(nextBuffer);
         page.AllocatedVertexCount += bufferCapacity;
+        page.CapacityVersion++;
         nextBuffer.ReservedVertexCount = capacity;
         page.ReservedVertexCount += capacity;
         GpuUploadsLastFrame++;
@@ -1180,6 +1181,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         ranges.Insert(insert, new GpuFreeRange(offset, capacity));
         page.ReservedVertexCount -= region.Capacity;
+        page.CapacityVersion++;
 
         while (ranges.Count > 0)
         {
@@ -1315,6 +1317,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry.CutDirty = false;
                     entry.Built = true;
                     entry.GpuUploadRetryFrame = 0;
+                    entry.GpuUploadRetryVersion = long.MinValue;
                     DiscardLegacyCutCap(key, entry);
                     SetSurfaceGpuHash(key, entry.PendingSurfaceHash);
                     ReturnMeshData(pending);
@@ -1329,7 +1332,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 {
                     // Preserve the CPU result and the previous GPU region. Retry later;
                     // capacity pressure must not permanently poison this chunk revision.
-                    entry.GpuUploadRetryFrame = _frame + 60;
+                    bool capacityBlocked = exception is InvalidOperationException &&
+                        (exception.Message.StartsWith("No reusable GPU page range", StringComparison.Ordinal) ||
+                         exception.Message.StartsWith("LOD page exceeds", StringComparison.Ordinal));
+                    entry.GpuUploadRetryFrame = capacityBlocked ? long.MaxValue : _frame + 60;
+                    entry.GpuUploadRetryVersion = capacityBlocked
+                        ? page.CapacityVersion
+                        : long.MinValue;
                     entry.SurfaceDirty = true;
                     _totalGpuUploadFailures++;
                     _logger.Error(
@@ -1349,8 +1358,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
-            if (!entry.HasPendingSurface || _frame < entry.GpuUploadRetryFrame)
-                continue;
+            if (!entry.HasPendingSurface) continue;
+
+            if (entry.GpuUploadRetryVersion != long.MinValue)
+            {
+                if (!_gpuPages.TryGetValue(GetGpuPageKey(key), out GpuMeshPage? page) ||
+                    page.CapacityVersion == entry.GpuUploadRetryVersion)
+                    continue;
+
+                entry.GpuUploadRetryVersion = long.MinValue;
+                entry.GpuUploadRetryFrame = 0;
+            }
+
+            if (_frame < entry.GpuUploadRetryFrame) continue;
+            entry.GpuUploadRetryFrame = 0;
             MarkGpuPageDirty(key);
         }
     }
@@ -2241,6 +2262,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.ReadyBuild = null;
         entry.ReadyRequest = null;
         entry.CutUploadIndex = 0;
+        entry.GpuUploadRetryFrame = 0;
+        entry.GpuUploadRetryVersion = long.MinValue;
 
         foreach (Mesh mesh in entry.UploadingCutCap)
         {
