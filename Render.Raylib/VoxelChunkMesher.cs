@@ -646,43 +646,34 @@ internal static class VoxelChunkMesher
             mesh.VaoId == 0 || mesh.VboId == null)
             throw new ArgumentOutOfRangeException(nameof(destinationCapacity));
 
-        Vector3[] vertices = ArrayPool<Vector3>.Shared.Rent(destinationCapacity);
-        Vector3[] normals = ArrayPool<Vector3>.Shared.Rent(destinationCapacity);
-        byte[] colors = ArrayPool<byte>.Shared.Rent(checked(destinationCapacity * 4));
-        try
-        {
-            Span<Vector3> vertexSpan = vertices.AsSpan(0, destinationCapacity);
-            Span<Vector3> normalSpan = normals.AsSpan(0, destinationCapacity);
-            Span<byte> colorSpan = colors.AsSpan(0, destinationCapacity * 4);
-            vertexSpan.Clear();
-            normalSpan.Clear();
-            colorSpan.Clear();
-            CopyTriangleSoup(sources, vertexSpan, normalSpan, colorSpan);
+        Span<Vector3> vertices = mesh.VerticesAs<Vector3>().Slice(
+            destinationOffset, destinationCapacity);
+        Span<Vector3> normals = mesh.NormalsAs<Vector3>().Slice(
+            destinationOffset, destinationCapacity);
+        Span<byte> colors = mesh.ColorsAs<byte>().Slice(
+            destinationOffset * 4, destinationCapacity * 4);
 
-            fixed (Vector3* p = vertexSpan)
-                UpdateMeshBuffer(
-                    mesh, Mesh.VboIdIndexVertices, p,
-                    destinationCapacity * sizeof(Vector3),
-                    destinationOffset * sizeof(Vector3));
-            fixed (Vector3* p = normalSpan)
-                UpdateMeshBuffer(
-                    mesh, Mesh.VboIdIndexNormals, p,
-                    destinationCapacity * sizeof(Vector3),
-                    destinationOffset * sizeof(Vector3));
-            fixed (byte* p = colorSpan)
-                UpdateMeshBuffer(
-                    mesh, Mesh.VboIdIndexColors, p,
-                    destinationCapacity * 4,
-                    destinationOffset * 4);
-        }
-        finally
-        {
-            ArrayPool<Vector3>.Shared.Return(vertices);
-            ArrayPool<Vector3>.Shared.Return(normals);
-            ArrayPool<byte>.Shared.Return(colors);
-        }
+        vertices.Clear();
+        normals.Clear();
+        colors.Clear();
+        CopyTriangleSoup(sources, vertices, normals, colors);
+
+        fixed (Vector3* p = vertices)
+            UpdateMeshBuffer(
+                mesh, Mesh.VboIdIndexVertices, p,
+                destinationCapacity * sizeof(Vector3),
+                destinationOffset * sizeof(Vector3));
+        fixed (Vector3* p = normals)
+            UpdateMeshBuffer(
+                mesh, Mesh.VboIdIndexNormals, p,
+                destinationCapacity * sizeof(Vector3),
+                destinationOffset * sizeof(Vector3));
+        fixed (byte* p = colors)
+            UpdateMeshBuffer(
+                mesh, Mesh.VboIdIndexColors, p,
+                destinationCapacity * 4,
+                destinationOffset * 4);
     }
-
 
     public static Mesh[] Upload(VoxelMeshData[] data)
     {
