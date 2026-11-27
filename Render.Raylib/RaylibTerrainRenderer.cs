@@ -165,7 +165,7 @@ internal sealed class RaylibTerrainRenderer : IDisposable
 
             if (_logger.IsEnabled(RenderLogMode.FrameSummary))
                 _logger.Write(RenderLogMode.FrameSummary, "TERRAIN_DRAW_END",
-                    $"backend=density-surface-nets-only elapsedMs={Stopwatch.GetElapsedTime(voxelDrawStarted).TotalMilliseconds:0.000} visibleChunks={VisibleRegionsLastFrame} draws={DrawCallsLastFrame} rebuilt={RebuiltRegions} cutCaps={CutSurfaceRebuilds}");
+                    $"backend=density-surface-nets-only elapsedMs={Stopwatch.GetElapsedTime(voxelDrawStarted).TotalMilliseconds:0.000} visibleChunks={VisibleRegionsLastFrame} draws={DrawCallsLastFrame} rebuilt={RebuiltRegions} sectionSlabs={CutSurfaceRebuilds}");
             return;
         }
 
