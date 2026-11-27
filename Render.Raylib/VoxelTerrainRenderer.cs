@@ -27,14 +27,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int MaximumWorldMeshVertices = 64_000_000;
     // Use the available physical cores for density capture and Surface Nets builds.
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
-    private const int MaximumGpuMeshUploadsPerFrame = 16;
     private const double GpuUploadBudgetMilliseconds = 3.0;
     private const int CutCapSettleFrames = 8;
     private const int MaximumRenderStep = 64;
     private const int CacheEvictionScanBudget = 4096;
     private const int MaximumCachedChunks = 4096;
     // Keep the visibility hierarchy's world-space group width near 51.2 m.
-    private const int VisibilityGroupChunks = 4;
     private const float LodFadeDurationSeconds = 0.25f;
     private const double LodTargetSettleMilliseconds = 350d;
 
@@ -503,8 +501,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_renderStep == _displayStep)
         {
             CollectVisibleCandidates(
-                field, camera, viewportWidth, viewportHeight,
-                maximumViewDistanceMeters, _displayStep, stableCutLayer,
+                field, camera, _displayStep,
                 displayCandidates,
                 ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
             displayCandidates.Sort(static (a, b) =>
@@ -519,16 +516,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             // During a LOD change, keep only already-resident meshes from the
             // old level. Never schedule thousands of obsolete fine meshes.
             CollectCachedVisibleCandidates(
-                field, camera, viewportWidth, viewportHeight,
-                maximumViewDistanceMeters, _displayStep,
+                field, camera, _displayStep,
                 displayCandidates, _candidateEntriesScratch,
                 _visibleCandidateKeys);
 
             // Build the requested level directly. Do not walk through every
             // intermediate LOD: a distant camera can jump from step 1 to 64.
             CollectVisibleCandidates(
-                field, camera, viewportWidth, viewportHeight,
-                maximumViewDistanceMeters, _renderStep, stableCutLayer,
+                field, camera, _renderStep,
                 transitionCandidates,
                 ref frustumTests, ref macroFrustumTests, ref visibleMacroRegions);
             transitionCandidates.Sort(static (a, b) =>
@@ -543,7 +538,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // Their queue records are discarded by workers without allocating density buffers.
         CancelUnseenBuilds();
 
-        // All visible requests for this frame are queued before waking workers.
+        // All world-region requests are queued before waking workers.
         // The worker pool receives one batch wake-up, not one signal per chunk.
         SignalBuildWorkers();
 
@@ -559,8 +554,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         Step32ChunksLastFrame = _displayStep == 32 ? displayCandidates.Count : 0;
         Step64ChunksLastFrame = _displayStep == 64 ? displayCandidates.Count : 0;
 
-        EvictChunksOutsideRadius(
-            field, camera.Position, MathF.Max(0f, maximumViewDistanceMeters));
+        EvictInactiveLodChunks();
         CollectCompletedBuilds(field);
         UploadReadyMeshes();
         UploadDirtyGpuPages();
@@ -703,12 +697,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"meshBuildMs={WorkerBuildMillisecondsLastFrame:0.000} gpuMs={GpuUploadMillisecondsLastFrame:0.000}");
     }
 
-    private void CollectCachedVisibleCandidates(
+        private void CollectCachedVisibleCandidates(
         SparseVoxelField field,
         Camera3D camera,
-        int viewportWidth,
-        int viewportHeight,
-        float maximumViewDistanceMeters,
         int renderStep,
         List<Candidate> candidates,
         List<(Candidate Candidate, ChunkEntry Entry)> entries,
@@ -719,22 +710,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         keys.Clear();
 
         float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        Vector3 cameraPosition = camera.Position;
 
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
             if (key.Step != renderStep || !entry.Built || !HasCachedSurface(key))
                 continue;
 
-            int chunkSpan = ChunkCells * key.Step;
+            int chunkSpan = ChunkCells * renderStep;
             int originX = key.X * chunkSpan;
             int originY = key.Y * chunkSpan;
             int originZ = key.Z * chunkSpan;
-            if (originX >= field.Width || originY >= field.Height || originZ >= field.Depth)
-                continue;
-
             int sizeX = Math.Min(chunkSpan, field.Width - originX);
             int sizeY = Math.Min(chunkSpan, field.Height - originY);
             int sizeZ = Math.Min(chunkSpan, field.Depth - originZ);
+
             Vector3 center = new(
                 (originX + sizeX * 0.5f) * voxelSize,
                 (originY + sizeY * 0.5f) * voxelSize,
@@ -742,19 +732,27 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             float halfX = sizeX * voxelSize * 0.5f;
             float halfY = sizeY * voxelSize * 0.5f;
             float halfZ = sizeZ * voxelSize * 0.5f;
-            float radius = MathF.Sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+            float radius = MathF.Sqrt(
+                halfX * halfX + halfY * halfY + halfZ * halfZ);
 
             Candidate candidate = new(
                 key, center, radius,
-                Vector3.DistanceSquared(center, camera.Position));
+                Vector3.DistanceSquared(center, cameraPosition));
             candidates.Add(candidate);
             entries.Add((candidate, entry));
             keys.Add(key);
             entry.LastSeenFrame = _frame;
         }
+
+        candidates.Sort(static (a, b) =>
+            a.DistanceSquared.CompareTo(b.DistanceSquared));
+        entries.Sort(static (a, b) =>
+            a.Candidate.DistanceSquared.CompareTo(b.Candidate.DistanceSquared));
     }
 
-        private static GpuPageKey GetGpuPageKey(ChunkKey key) => new(key.Step);
+    
+
+    private static GpuPageKey GetGpuPageKey(ChunkKey key) => new(key.Step);
 
     private static int GetGpuRegionCapacity(int vertexCount)
     {
@@ -1089,28 +1087,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return true;
     }
 
-    private static bool HasPotentialVerticalBand(
-        SparseVoxelField field,
-        int macroX,
-        int macroZ,
-        int chunkY,
-        int storageChunksPerChunk,
-        ulong mask,
-        int macroCells)
-    {
-        int firstStorageY = chunkY * storageChunksPerChunk;
-        int endStorageY = firstStorageY + storageChunksPerChunk;
-        for (int storageY = firstStorageY; storageY < endStorageY; storageY++)
-        {
-            bool present = storageY < 64
-                ? (mask & (1UL << storageY)) != 0
-                : field.HasPotentialVerticalChunk(
-                    macroX, macroZ, storageY, macroCells);
-            if (present)
-                return true;
-        }
-        return false;
-    }
+        
 
     private void UpdateStableCutLayer(bool cutEnabled, int cutLayer)
     {
@@ -1139,14 +1116,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _stableCutLayer = cutLayer;
     }
 
-        private void CollectVisibleCandidates(
+            private void CollectVisibleCandidates(
         SparseVoxelField field,
         Camera3D camera,
-        int viewportWidth,
-        int viewportHeight,
-        float maximumViewDistanceMeters,
         int renderStep,
-        int cutLayer,
         List<Candidate> candidates,
         ref int frustumTests,
         ref int macroFrustumTests,
@@ -1321,41 +1294,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     
 
-    private static float BoundsNearestDistanceSquared(
-        Vector3 point,
-        int originX,
-        int originY,
-        int originZ,
-        int sizeX,
-        int sizeY,
-        int sizeZ)
-    {
-        float voxelSize = SparseVoxelField.VoxelSizeMeters;
+        
 
-        float minX = originX * voxelSize;
-        float minY = originY * voxelSize;
-        float minZ = originZ * voxelSize;
-        float maxX = (originX + sizeX) * voxelSize;
-        float maxY = (originY + sizeY) * voxelSize;
-        float maxZ = (originZ + sizeZ) * voxelSize;
-
-        float dx = point.X < minX ? minX - point.X :
-            point.X > maxX ? point.X - maxX : 0f;
-        float dy = point.Y < minY ? minY - point.Y :
-            point.Y > maxY ? point.Y - maxY : 0f;
-        float dz = point.Z < minZ ? minZ - point.Z :
-            point.Z > maxZ ? point.Z - maxZ : 0f;
-
-        return dx * dx + dy * dy + dz * dz;
-    }
-
-    private void EvictChunksOutsideRadius(
-        SparseVoxelField field,
-        Vector3 cameraPosition,
-        float maximumViewDistanceMeters)
+    private void EvictInactiveLodChunks()
     {
         int scanCount = Math.Min(_evictionQueue.Count, CacheEvictionScanBudget);
-
         for (int i = 0; i < scanCount; i++)
         {
             (ChunkKey key, ChunkEntry queuedEntry) = _evictionQueue.Dequeue();
