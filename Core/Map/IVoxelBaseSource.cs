@@ -1,6 +1,4 @@
 using System.IO;
-using Core.Map;
-
 namespace Core.Map;
 
 /// <summary>
@@ -35,8 +33,6 @@ public interface IVoxelBaseSource
         Span<short> density,
         Span<ushort> material)
     {
-        int sizeX = bounds.SizeX;
-        int sizeY = bounds.SizeY;
         int index = 0;
 
         for (int z = bounds.MinZ; z < bounds.MaxZ; z++)
