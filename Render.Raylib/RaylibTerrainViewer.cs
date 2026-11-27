@@ -1024,7 +1024,7 @@ public static class RaylibTerrainViewer
             }
 
             lines.Add((
-                $"MESH SWAPS/FRAME {renderer.RebuiltRegions} | CUT CAPS {renderer.CutSurfaceRebuilds}",
+                $"MESH SWAPS/FRAME {renderer.RebuiltRegions} | SECTION SLABS {renderer.CutSurfaceRebuilds}",
                 13f,
                 Color.LightGray));
             if (settings.TerrainMode == TerrainRenderMode.Voxel)
