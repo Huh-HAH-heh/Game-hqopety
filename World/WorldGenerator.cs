@@ -12,14 +12,12 @@ public static class WorldGenerator
         WorldMap worldMap,
         bool writeLog = true)
     {
-        worldMap.DisableDiscreteBlockTerrain();
-        worldMap.Water.Clear();
+        ArgumentNullException.ThrowIfNull(worldMap);
 
-        GenerateBaseTerrain(worldMap);
+        // The default world must use the detailed 1 m surface anchors.
+        // GenerateBaseTerrain is retained only as an explicit coarse fallback.
+        GenerateSmooth(worldMap, writeLog);
         worldMap.EnableDiscreteBlockTerrain();
-
-        if (writeLog)
-            WriteRegionSummary(worldMap);
     }
 
     private static void WriteRegionSummary(WorldMap worldMap)
@@ -66,8 +64,7 @@ public static class WorldGenerator
         float canyonSpacing = rampDistance * 2f;
         float[] canyonFloorY = new float[worldMap.TileWidth];
 
-        // Restored from the earlier detailed canyon map. Evaluate its terrain
-        // profile at the centre of each 4x4-tile render patch.
+        // Evaluate the terrain profile at every 1 m surface anchor.
         for (int x = 0; x < worldMap.TileWidth; x++)
         {
             float dx = x - centerX;
