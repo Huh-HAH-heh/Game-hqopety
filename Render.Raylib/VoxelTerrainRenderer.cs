@@ -2396,7 +2396,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _coarseCandidateEntriesScratch.Clear();
         _coarseVisiblePages.Clear();
         _coarseCandidateKeys.Clear();
-        _coarseVisiblePageKeys.Clear();
         _inactiveLodPageScratch.Clear();
 
         UnloadMaterial(_material);
