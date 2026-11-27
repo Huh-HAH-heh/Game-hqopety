@@ -260,10 +260,6 @@ public sealed class VoxelVolumeStore
     }
 
     /// <summary>
-    /// Freezes the compact base description. Subsequent changes materialize only
-    /// the touched 16^3 edit bricks.
-    /// </summary>
-    /// <summary>
     /// Imports one exact 16^3 base brick. This is the path for arbitrary generated
     /// voxel data that cannot be represented by a small set of simple primitives.
     /// The arrays are copied and the material channel is normalized for air cells.
@@ -301,6 +297,10 @@ public sealed class VoxelVolumeStore
         Revision++;
     }
 
+    /// <summary>
+    /// Freezes the compact base description. Subsequent changes materialize only
+    /// the touched 16^3 edit bricks.
+    /// </summary>
     public void SealBase()
     {
         _baseSealed = true;
@@ -645,7 +645,7 @@ public sealed class VoxelVolumeStore
         ValidateMaterial(materialId);
         ApplyGeometryBrush(
             ShapeKind.Capsule, startMeters, endMeters, radiusMeters,
-            add: true, materialId);
+            add: true, materialId: materialId);
     }
 
     public void CarveBox(Vector3 minMeters, Vector3 maxMeters)
