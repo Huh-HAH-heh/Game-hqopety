@@ -109,7 +109,9 @@ public static class RaylibTerrainViewer
         RaylibPauseMenu menu = new(settings);
         RaylibLayerSlicePanel layerPanel = new();
         RaylibTerrainRenderer? renderer = null;
-        bool cutawayMode = settings.CutawayEnabled;
+        settings.CutawayEnabled = false;
+        settings.Save();
+        bool cutawayMode = false;
         float maximumCutHeight = Math.Max(
             0f,
             terrain.VerticalWorldExtentMeters -
@@ -119,7 +121,7 @@ public static class RaylibTerrainViewer
             0f,
             maximumCutHeight);
         bool cutHeightKeyWasHeld = false;
-        string focusName = cutawayMode ? "HORIZONTAL SECTION" : "SURFACE";
+        string focusName = "SURFACE";
         VoxelEditMode voxelEditMode = VoxelEditMode.Off;
         float voxelBrushRadiusMeters = 1.5f;
         ushort voxelBrushMaterial = 1;
@@ -194,6 +196,10 @@ public static class RaylibTerrainViewer
                 else
                 {
                     layerPanel.Update(menu.Settings, maximumCutHeight);
+                    menu.Settings.CutawayEnabled = false;
+                    menu.CutawayEnabled = false;
+                    cutawayMode = false;
+                    focusName = "SURFACE";
                     if (menu.Settings.CutawayEnabled != cutawayMode)
                     {
                         cutawayMode = menu.Settings.CutawayEnabled;
@@ -231,21 +237,9 @@ public static class RaylibTerrainViewer
                         break;
 
                     case RaylibMenuAction.FocusLowerTunnel:
-                        cutawayMode = true;
-                        menu.CutawayEnabled = true;
-                        menu.Settings.CutawayHeightMeters = 17f;
-                        menu.SaveSettings();
-                        focusName = "LOWER TUNNEL";
-                        FocusLowerTunnel(camera, terrain);
-                        break;
-
                     case RaylibMenuAction.FocusUpperPassage:
-                        cutawayMode = true;
-                        menu.CutawayEnabled = true;
-                        menu.Settings.CutawayHeightMeters = 28f;
+                        menu.Settings.CutawayEnabled = false;
                         menu.SaveSettings();
-                        focusName = "UPPER PASSAGE";
-                        FocusUpperPassage(camera, terrain);
                         break;
 
                     case RaylibMenuAction.RebuildTerrainMode:
@@ -285,13 +279,19 @@ public static class RaylibTerrainViewer
                         break;
 
                     case RaylibMenuAction.ToggleCutaway:
-                        cutawayMode = menu.CutawayEnabled;
-                        focusName = cutawayMode ? "HORIZONTAL SECTION" : "SURFACE";
+                        cutawayMode = false;
+                        menu.CutawayEnabled = false;
+                        menu.Settings.CutawayEnabled = false;
+                        focusName = "SURFACE";
                         menu.SaveSettings();
-                        if (!cutawayMode)
-                            terrain.DisableCutaway();
+                        terrain.DisableCutaway();
                         break;
                 }
+
+                cutawayMode = false;
+                menu.CutawayEnabled = false;
+                menu.Settings.CutawayEnabled = false;
+                focusName = "SURFACE";
 
                 camera.ApplySettings(menu.Settings);
 
@@ -313,70 +313,7 @@ public static class RaylibTerrainViewer
                 else
                 {
 
-                    if (IsKeyPressed(KeyboardKey.F1))
-                    {
-                        cutawayMode = true;
-                        menu.CutawayEnabled = true;
-                        menu.Settings.CutawayHeightMeters = 17f;
-                        menu.SaveSettings();
-                        focusName = "LOWER TUNNEL";
-                        FocusLowerTunnel(camera, terrain);
-                    }
-
-                    if (IsKeyPressed(KeyboardKey.F2))
-                    {
-                        cutawayMode = true;
-                        menu.CutawayEnabled = true;
-                        menu.Settings.CutawayHeightMeters = 28f;
-                        menu.SaveSettings();
-                        focusName = "UPPER PASSAGE";
-                        FocusUpperPassage(camera, terrain);
-                    }
-
-                    if (IsKeyPressed(KeyboardKey.C))
-                    {
-                        cutawayMode = !cutawayMode;
-                        menu.CutawayEnabled = cutawayMode;
-                        focusName = cutawayMode ? "HORIZONTAL SECTION" : "SURFACE";
-                        menu.SaveSettings();
-                        if (!cutawayMode)
-                            terrain.DisableCutaway();
-                    }
-
-                    bool shiftDown =
-                        IsKeyDown(KeyboardKey.LeftShift) ||
-                        IsKeyDown(KeyboardKey.RightShift);
-                    bool coarseSliceStep =
-                        IsKeyDown(KeyboardKey.LeftControl) ||
-                        IsKeyDown(KeyboardKey.RightControl);
-                    bool sliceKeysDown =
-                        IsKeyDown(KeyboardKey.Q) ||
-                        IsKeyDown(KeyboardKey.E);
-                    bool sliceChanged = cutawayMode && UpdateCutawayInput(
-                        menu.Settings,
-                        camera.VerticalSpeedMultiplier,
-                        deltaTime,
-                        mouseWheel,
-                        shiftDown,
-                        coarseSliceStep,
-                        maximumCutHeight);
-
-                    if (sliceChanged && !sliceKeysDown)
-                        menu.SaveSettings();
-
-                    if (sliceKeysDown)
-                    {
-                        cutHeightKeyWasHeld = true;
-                    }
-                    else if (cutHeightKeyWasHeld)
-                    {
-                        menu.SaveSettings();
-                        cutHeightKeyWasHeld = false;
-                    }
-
-                    float cameraWheel = cutawayMode && (shiftDown || coarseSliceStep)
-                        ? 0f
-                        : mouseWheel;
+                    float cameraWheel = mouseWheel;
                     camera.Update(
                         deltaTime,
                         cameraWheel,
@@ -607,23 +544,7 @@ public static class RaylibTerrainViewer
 
                 long syncStarted = Stopwatch.GetTimestamp();
                 bool terrainChanged = terrain.RefreshFromWorld(worldMap);
-                if (cutawayMode)
-                {
-                    const float layerHeightMeters =
-                        WorldMap.LayerHeightUnits * 0.1f;
-                    int cutLayer = Math.Clamp(
-                        (int)MathF.Round(
-                            menu.Settings.CutawayHeightMeters /
-                            layerHeightMeters),
-                        0,
-                        worldMap.LayerCount - 1);
-
-                    terrain.SetCutawayLayer(cutLayer);
-                }
-                else
-                {
-                    terrain.DisableCutaway();
-                }
+                terrain.DisableCutaway();
                 if (terrainChanged)
                     renderer.Synchronize(terrain);
 
@@ -712,7 +633,7 @@ public static class RaylibTerrainViewer
                         $"terrain3dMs={terrainDrawMs:0.000} hudMs={hudMs:0.000} layerPanelMs={layerPanelMs:0.000} menuMs={menuMs:0.000} totalMs={frameMs:0.000}");
                 if (renderLogger.IsEnabled(RenderLogMode.FrameSummary))
                     renderLogger.Write(RenderLogMode.FrameSummary, "FRAME",
-                        $"fps={GetFPS()} dtMs={deltaTime * 1000f:0.000} ms={frameMs:0.000} viewport={GetScreenWidth()}x{GetScreenHeight()} mode={menu.Settings.TerrainMode} cameraMode={menu.Settings.CameraMode} camera=({camera.Camera.Position.X:0.0},{camera.Camera.Position.Y:0.0},{camera.Camera.Position.Z:0.0}) target=({camera.Camera.Target.X:0.0},{camera.Camera.Target.Y:0.0},{camera.Camera.Target.Z:0.0}) cutaway={cutawayMode}:{menu.Settings.CutawayHeightMeters:0.0} visible={renderer.VisibleRegionsLastFrame} draws={renderer.DrawCallsLastFrame} rebuilt={renderer.RebuiltRegions} chunks={renderer.CachedVoxelChunks} workers={renderer.VoxelMeshWorkers} queue={renderer.VoxelPendingMeshJobs} results={renderer.VoxelCompletedMeshResultsPending} uploads={renderer.VoxelGpuUploadsLastFrame} gpuMs={renderer.VoxelGpuUploadMilliseconds:0.000}");
+                        $"fps={GetFPS()} dtMs={deltaTime * 1000f:0.000} ms={frameMs:0.000} viewport={GetScreenWidth()}x{GetScreenHeight()} mode={menu.Settings.TerrainMode} cameraMode={menu.Settings.CameraMode} camera=({camera.Camera.Position.X:0.0},{camera.Camera.Position.Y:0.0},{camera.Camera.Position.Z:0.0}) target=({camera.Camera.Target.X:0.0},{camera.Camera.Target.Y:0.0},{camera.Camera.Target.Z:0.0}) cutaway=disabled visible={renderer.VisibleRegionsLastFrame} draws={renderer.DrawCallsLastFrame} rebuilt={renderer.RebuiltRegions} chunks={renderer.CachedVoxelChunks} workers={renderer.VoxelMeshWorkers} queue={renderer.VoxelPendingMeshJobs} results={renderer.VoxelCompletedMeshResultsPending} uploads={renderer.VoxelGpuUploadsLastFrame} gpuMs={renderer.VoxelGpuUploadMilliseconds:0.000}");
             }
         }
         catch (Exception exception)
