@@ -170,7 +170,7 @@ internal static class Program
     {
         LinearCutField field = new(128, 64, 128);
         VoxelMeshData[] meshes = VoxelChunkMesher.BuildCutSurfaceData(
-            field, layer: 32, new TerrainPalette(), step: 4);
+            field, layer: 32, palette: new TerrainPalette(), step: 4);
 
         try
         {
