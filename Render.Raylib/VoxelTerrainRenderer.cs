@@ -442,7 +442,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _cutSurfaceReadyRevision = long.MinValue;
     private int _cutSurfaceReadyPaletteVersion = int.MinValue;
     private int _cutSurfaceDrawnLayer = int.MinValue;
-    private string _lastCutState = string.Empty;
+    private int _lastCutStateHash = int.MinValue;
 
     private long _totalBuildRequests;
     private long _totalBuildStarted;
@@ -739,12 +739,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // Give the section its own guaranteed progress before ordinary terrain
         // uploads can consume the whole frame budget.
         double cutUploadBudget = Math.Min(0.75d, GpuUploadBudgetMilliseconds * 0.25d);
-        GpuUploadMillisecondsLastFrame +=
+        double cutUploadMilliseconds =
             UploadPendingCutSurfaceMeshes(cutUploadBudget);
 
         UploadReadyMeshes();
         RetryPendingGpuUploads();
         UploadDirtyGpuPages();
+        GpuUploadMillisecondsLastFrame += cutUploadMilliseconds;
 
         bool baseCoverageReady = HasCompleteCachedLod(
             _baseCandidateEntriesScratch, field, BaseLodStep, out int baseReadyCount);
@@ -878,17 +879,24 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         // visible LOD chunk used to keep the cut disabled on large/streaming maps.
         bool activeCut = cutEnabled && cutSurfaceCurrent;
 
-        string cutState =
-            $"enabled={cutEnabled} requested={_requestedCutLayer} stable={stableCutLayer} " +
-            $"active={activeCut} capLayer={_activeCutLayer} capMeshes={_cutSurfaceMeshes.Length} " +
-            $"capRev={_cutSurfaceReadyRevision}/{currentCutRevision} " +
-            $"palette={_cutSurfaceReadyPaletteVersion}/{_paletteVersion} " +
-            $"pending={_pendingCutSurfaceUploadIndex}/{_pendingCutSurfaceData?.Length ?? 0} " +
-            $"retryFrame={_cutSurfaceRetryFrame}";
-        if (!string.Equals(cutState, _lastCutState, StringComparison.Ordinal))
+        int pendingCutCount = _pendingCutSurfaceData?.Length ?? 0;
+        int cutStateHash = HashCode.Combine(
+            HashCode.Combine(cutEnabled, _requestedCutLayer, stableCutLayer, activeCut),
+            HashCode.Combine(_activeCutLayer, _cutSurfaceMeshes.Length,
+                _cutSurfaceReadyRevision, currentCutRevision),
+            HashCode.Combine(_cutSurfaceReadyPaletteVersion, _paletteVersion,
+                _pendingCutSurfaceUploadIndex, pendingCutCount, _cutSurfaceRetryFrame));
+        if (cutStateHash != _lastCutStateHash)
         {
-            _lastCutState = cutState;
-            _logger.Write(RenderLogMode.FrameSummary, "CUT_STATE", cutState);
+            _lastCutStateHash = cutStateHash;
+            _logger.Write(
+                RenderLogMode.FrameSummary,
+                "CUT_STATE",
+                $"enabled={cutEnabled} requested={_requestedCutLayer} stable={stableCutLayer} " +
+                $"active={activeCut} capLayer={_activeCutLayer} capMeshes={_cutSurfaceMeshes.Length} " +
+                $"capRev={_cutSurfaceReadyRevision}/{currentCutRevision} " +
+                $"palette={_cutSurfaceReadyPaletteVersion}/{_paletteVersion} " +
+                $"pending={_pendingCutSurfaceUploadIndex}/{pendingCutCount} retryFrame={_cutSurfaceRetryFrame}");
         }
         float renderCutHeightMeters = activeCut
             ? _activeCutLayer * SparseVoxelField.VoxelSizeMeters
