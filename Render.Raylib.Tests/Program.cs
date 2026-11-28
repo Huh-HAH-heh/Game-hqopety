@@ -235,10 +235,14 @@ internal static class Program
         static float Cross(float ax, float az, float bx, float bz, float px, float pz) =>
             (bx - ax) * (pz - az) - (bz - az) * (px - ax);
 
+        float area = Cross(a.X, a.Z, b.X, b.Z, c.X, c.Z);
+        const float epsilon = 0.00001f;
+        if (MathF.Abs(area) <= epsilon)
+            return false;
+
         float ab = Cross(a.X, a.Z, b.X, b.Z, x, z);
         float bc = Cross(b.X, b.Z, c.X, c.Z, x, z);
         float ca = Cross(c.X, c.Z, a.X, a.Z, x, z);
-        const float epsilon = 0.00001f;
         bool negative = ab < -epsilon || bc < -epsilon || ca < -epsilon;
         bool positive = ab > epsilon || bc > epsilon || ca > epsilon;
         return !(negative && positive);
