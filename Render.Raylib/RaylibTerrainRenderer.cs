@@ -7,9 +7,8 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Caches full terrain meshes per storage region. Voxel cutaway uses a GPU clip
-/// plane, so moving the plane never invalidates the underlying terrain meshes.
-/// Only the lightweight horizontal cut surfaces are rebuilt.
+/// Owns the terrain render backends. The temporary voxel acceptance path renders
+/// the complete field at a fixed sampling step; cutaway and adaptive LOD are bypassed.
 /// </summary>
 internal sealed class RaylibTerrainRenderer : IDisposable
 {
