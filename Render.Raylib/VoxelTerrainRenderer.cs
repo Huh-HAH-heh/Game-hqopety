@@ -699,7 +699,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _coarseCandidateScratch.Sort(static (a, b) =>
                 a.DistanceSquared.CompareTo(b.DistanceSquared));
             PrepareCandidateEntries(
-                field, _coarseCandidateScratch, targetCutLayer,
+                field, _coarseCandidateScratch,
                 _coarseCandidateEntriesScratch, _coarseCandidateKeys);
         }
 
@@ -718,10 +718,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         // The stable base enters the worker queue before regional detail.
         PrepareCandidateEntries(
-            field, _baseCandidateScratch, targetCutLayer,
+            field, _baseCandidateScratch,
             _baseCandidateEntriesScratch, _baseCandidateKeys);
         PrepareCandidateEntries(
-            field, _candidateScratch, targetCutLayer,
+            field, _candidateScratch,
             _candidateEntriesScratch, _visibleCandidateKeys);
         _visibleCandidateKeys.UnionWith(_baseCandidateKeys);
         _visibleCandidateKeys.UnionWith(_coarseCandidateKeys);
@@ -1144,14 +1144,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return checked((int)count);
     }
 
-    private static int GetChunkCutLayer(ChunkKey key, int targetCutLayer)
-    {
-        if (targetCutLayer == int.MinValue) return int.MinValue;
-        int chunkSpan = ChunkCells * key.Step;
-        int ownerY = Math.Max(0, (targetCutLayer - 1) / chunkSpan);
-        return key.Y == ownerY ? targetCutLayer : int.MinValue;
-    }
-
     private bool HasCompleteCachedLod(
         List<(Candidate Candidate, ChunkEntry Entry)> entries,
         SparseVoxelField field,
@@ -1169,7 +1161,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private bool AreLodCandidatesReady(
         List<(Candidate Candidate, ChunkEntry Entry)> entries,
         SparseVoxelField field,
-        int targetCutLayer,
         out int readyCount)
     {
         readyCount = 0;
@@ -1185,7 +1176,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 !entry.ReadyBuild.HasValue &&
                 entry.BaseVersion == field.BaseVersion &&
                 entry.PaletteVersion == _paletteVersion &&
-                entry.CutLayer == GetChunkCutLayer(candidate.Key, targetCutLayer) &&
                 entry.FailedRevision != entry.RequestRevision;
             if (ready) readyCount++;
         }
@@ -2113,7 +2103,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private void PrepareCandidateEntries(
         SparseVoxelField field,
         List<Candidate> candidates,
-        int targetCutLayer,
         List<(Candidate Candidate, ChunkEntry Entry)> destination,
         HashSet<ChunkKey>? keys)
     {
@@ -2131,35 +2120,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
 
             entry.LastSeenFrame = _frame;
-            // The cap is produced by clipping the authoritative 3D density
-            // field in VoxelChunkBuildInput. Only the Y chunk containing the
-            // section plane needs a cut-specific mesh; every other chunk keeps
-            // its immutable surface mesh and is clipped by the fragment shader.
-            int chunkCutLayer = GetChunkCutLayer(key, targetCutLayer);
-
             bool surfaceStale = !entry.Built ||
                 entry.SurfaceDirty ||
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
-            bool cutStateStale = entry.CutLayer != chunkCutLayer;
 
-            if ((entry.RunningBuild is { } pendingBuild &&
-                    pendingBuild.CutLayer != chunkCutLayer) ||
-                (entry.ReadyRequest is { } readyRequest &&
-                    readyRequest.CutLayer != chunkCutLayer))
-                InvalidatePendingBuild(entry);
-
-            if ((surfaceStale || cutStateStale || entry.CutDirty) &&
-                !HasPendingWork(entry))
+            if ((surfaceStale || entry.CutDirty) && !HasPendingWork(entry))
             {
                 RequestBuild(
                     field, key, entry,
                     buildSurface: true, buildCutCap: false,
-                    cutLayer: chunkCutLayer);
+                    cutLayer: int.MinValue);
             }
 
-            if (chunkCutLayer == int.MinValue && entry.CutCap.Length > 0)
+            if (entry.CutCap.Length > 0)
                 ClearCutCap(key, entry);
+
             destination.Add((candidate, entry));
         }
     }
