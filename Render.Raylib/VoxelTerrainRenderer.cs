@@ -1697,49 +1697,68 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     continue;
 
                 VoxelMeshData[] pending = entry.PendingSurface;
-                int vertexCount = VoxelChunkMesher.CountTriangleVertices(pending);
+                int vertexCount = VoxelChunkMesher.CountVertices(pending);
+                int indexCount = VoxelChunkMesher.CountIndices(pending);
 
                 try
                 {
-                    bool hadRegion = page.Regions.TryGetValue(
-                        key, out GpuMeshRegion oldRegion);
+                    bool hadRegions = page.Regions.TryGetValue(
+                        key, out GpuMeshRegion[]? oldRegions);
 
-                    if (vertexCount == 0)
+                    if (vertexCount == 0 || indexCount == 0)
                     {
-                        if (hadRegion && oldRegion.Capacity > 0)
-                            ClearAndReleaseGpuRegion(page, oldRegion);
+                        if (hadRegions)
+                            ReleaseGpuRegions(page, oldRegions!);
                         page.Regions.Remove(key);
-                    }
-                    else if (hadRegion && vertexCount <= oldRegion.Capacity)
-                    {
-                        VoxelChunkMesher.UpdateTriangleSoup(
-                            ref page.Buffers[oldRegion.BufferIndex].Mesh,
-                            oldRegion.Offset,
-                            oldRegion.Capacity,
-                            pending);
-                        page.Regions[key] = oldRegion with
-                        {
-                            VertexCount = vertexCount
-                        };
                     }
                     else
                     {
-                        // Commit the replacement only after it uploads and the old
-                        // region can be safely retired. Keep the dictionary pointing
-                        // at the old mesh if either operation fails.
-                        GpuMeshRegion nextRegion = AppendGpuRegion(
-                            page, pending, vertexCount);
-                        try
+                        BuildGpuSourceGroups(pending);
+                        if (_gpuSourceGroupsScratch.Count == 0)
                         {
-                            if (hadRegion && oldRegion.Capacity > 0)
-                                ClearAndReleaseGpuRegion(page, oldRegion);
+                            if (hadRegions)
+                                ReleaseGpuRegions(page, oldRegions!);
+                            page.Regions.Remove(key);
                         }
-                        catch
+                        else if (hadRegions &&
+                            CanUpdateGpuRegions(oldRegions!, _gpuSourceGroupsScratch))
                         {
-                            ClearAndReleaseGpuRegion(page, nextRegion);
-                            throw;
+                            for (int groupIndex = 0;
+                                 groupIndex < _gpuSourceGroupsScratch.Count;
+                                 groupIndex++)
+                            {
+                                GpuSourceGroup group = _gpuSourceGroupsScratch[groupIndex];
+                                GpuMeshRegion oldRegion = oldRegions![groupIndex];
+                                GpuMeshBuffer buffer = page.Buffers[oldRegion.BufferIndex];
+
+                                VoxelChunkMesher.UpdateIndexedMesh(
+                                    ref buffer.Mesh,
+                                    oldRegion.VertexOffset,
+                                    oldRegion.VertexCapacity,
+                                    oldRegion.IndexOffset,
+                                    oldRegion.IndexCapacity,
+                                    pending,
+                                    group.FirstSource,
+                                    group.SourceCount);
+
+                                oldRegions[groupIndex] = oldRegion with
+                                {
+                                    VertexCount = group.VertexCount,
+                                    IndexCount = group.IndexCount
+                                };
+                            }
+
+                            page.Regions[key] = oldRegions!;
                         }
-                        page.Regions[key] = nextRegion;
+                        else
+                        {
+                            // Upload the replacement first. The old indexed ranges remain
+                            // valid until every new packet has reached its GPU buffer.
+                            GpuMeshRegion[] nextRegions = AppendGpuRegions(page, pending);
+                            if (hadRegions)
+                                ReleaseGpuRegions(page, oldRegions!);
+                            page.Regions[key] = nextRegions;
+                        }
                     }
 
                     entry.PendingSurface = Array.Empty<VoxelMeshData>();
@@ -1764,8 +1783,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 }
                 catch (Exception exception)
                 {
-                    // Preserve the CPU result and the previous GPU region. Retry later;
-                    // capacity pressure must not permanently poison this chunk revision.
                     bool capacityBlocked = exception is InvalidOperationException &&
                         (exception.Message.StartsWith("No reusable GPU page range", StringComparison.Ordinal) ||
                          exception.Message.StartsWith("No global GPU page capacity", StringComparison.Ordinal) ||
@@ -1781,8 +1798,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         $"chunk=({key.X},{key.Y},{key.Z}) step={key.Step} retryFrame={entry.GpuUploadRetryFrame} error={exception}");
                 }
             }
-
-            RecalculateGpuDrawCounts(page);
         }
 
         _dirtyGpuPageKeys.RemoveRange(0, dirtyCount);
