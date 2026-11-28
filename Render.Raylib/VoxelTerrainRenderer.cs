@@ -890,7 +890,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         EndShaderMode();
 
         if (activeCut)
+        {
             DrawCutOverlay(field, renderCutHeightMeters);
+            draws++;
+        }
 
         _dynamicFragments.Draw(_material);
         EndMode3D();
@@ -1935,7 +1938,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         DrawMesh(
             _cutPlaneMesh,
             _material,
-            Matrix4x4.CreateTranslation(0f, heightMeters, 0f));
+            Raymath.MatrixTranslate(0f, heightMeters, 0f));
 
         SetShaderValue(
             _shader,
@@ -3348,6 +3351,27 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_observedField != null) _observedField.Changed -= OnVoxelFieldChanged;
         _observedField = null;
 
+        Interlocked.Increment(ref _cutMaskGeneration);
+        if (_cutMaskCancellation != null)
+        {
+            try { _cutMaskCancellation.Cancel(); }
+            catch (ObjectDisposedException) { }
+            _cutMaskCancellation = null;
+        }
+        while (_cutMaskCompletions.TryDequeue(out CutMaskBuildResult cutMask))
+            ArrayPool<byte>.Shared.Return(cutMask.Pixels, clearArray: false);
+
+        if (_cutMaskTexture.Id != 0)
+        {
+            UnloadTexture(_cutMaskTexture);
+            _cutMaskTexture = default;
+        }
+        if (_cutPlaneMesh.VaoId != 0)
+        {
+            UnloadMesh(_cutPlaneMesh);
+            _cutPlaneMesh = default;
+        }
+
         foreach (ChunkEntry entry in _chunks.Values)
         {
             InvalidatePendingBuild(entry);
@@ -3392,6 +3416,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _splitChunkKeys.Clear();
         _nextSplitChunkKeys.Clear();
         _visibleChunkKeys.Clear();
+        _baseCandidateIndices.Clear();
         _visiblePages.Clear();
         _transitionVisiblePages.Clear();
         _visiblePageKeys.Clear();
