@@ -145,7 +145,7 @@ internal static class Program
         byte[] colors = ArrayPool<byte>.Shared.Rent(vertexCount * 4);
         ushort[] indices = ArrayPool<ushort>.Shared.Rent(sourceIndices.Count);
 
-        bool meshOwnsArrays = false;
+        VoxelMeshData? originalMesh = null;
         try
         {
             for (int z = 0; z < side; z++)
@@ -165,7 +165,7 @@ internal static class Program
             VoxelMeshData original = new(
                 vertices, normals, colors, indices,
                 vertexCount, sourceIndices.Count);
-            meshOwnsArrays = true;
+            originalMesh = original;
 
             Vector3[] boundaryPoints = BuildGridBoundaryPoints(
                 side, holeMin, holeMax);
@@ -240,7 +240,9 @@ internal static class Program
         }
         catch
         {
-            if (!meshOwnsArrays)
+            if (originalMesh != null)
+                originalMesh.ReturnCpuArrays();
+            else
             {
                 ArrayPool<Vector3>.Shared.Return(vertices, clearArray: false);
                 ArrayPool<Vector3>.Shared.Return(normals, clearArray: false);
