@@ -522,6 +522,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _cameraPositionLocation = GetShaderLocation(_shader, "uCameraPosition");
         _cameraForwardLocation = GetShaderLocation(_shader, "uCameraForward");
         _nearPlaneLocation = GetShaderLocation(_shader, "uNearPlane");
+        _mvpLocation = GetShaderLocation(_shader, "mvp");
+        _modelLocation = GetShaderLocation(_shader, "matModel");
 
         if (_cutEnabledLocation < 0 ||
             _cutHatchingEnabledLocation < 0 ||
@@ -534,7 +536,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _lodDepthBiasLocation < 0 ||
             _cameraPositionLocation < 0 ||
             _cameraForwardLocation < 0 ||
-            _nearPlaneLocation < 0)
+            _nearPlaneLocation < 0 ||
+            _mvpLocation < 0 ||
+            _modelLocation < 0)
         {
             UnloadShader(_shader);
             throw new InvalidOperationException("The 3D voxel shader is missing a required uniform.");
