@@ -2668,7 +2668,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             input = new VoxelChunkBuildInput(
                 request.Source,
                 request.Key.X, request.Key.Y, request.Key.Z,
-                request.CutLayer, request.Key.Step, ChunkCells);
+                request.Key.Step, ChunkCells);
 
             long captureStarted = Stopwatch.GetTimestamp();
             input.CaptureAll(token);
