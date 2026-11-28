@@ -111,7 +111,6 @@ internal sealed class VoxelChunkBuildInput : IDisposable
     public int SampleSide { get; }
     public int SamplePlane { get; }
     public int TotalSamples { get; }
-    public int CutLayer { get; }
     public int Step { get; }
     public bool IsCaptured { get; private set; }
     public bool HasPotentialSurface { get; private set; }
@@ -121,7 +120,6 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         int chunkX,
         int chunkY,
         int chunkZ,
-        int cutLayer = int.MinValue,
         int step = 1,
         int cellsPerAxis = DefaultCellsPerAxis)
     {
@@ -144,7 +142,6 @@ internal sealed class VoxelChunkBuildInput : IDisposable
         FieldWidth = field.Width;
         FieldHeight = field.Height;
         FieldDepth = field.Depth;
-        CutLayer = cutLayer;
 
         SampleSide = cellsPerAxis + 3;
         SamplePlane = SampleSide * SampleSide;
