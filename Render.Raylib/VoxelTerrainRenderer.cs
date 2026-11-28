@@ -255,6 +255,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public bool UploadQueued;
         public long UploadQueueGeneration;
         public long GpuUploadRetryFrame;
+        public long GpuUploadRetryPageVersion = long.MinValue;
         public long GpuUploadRetryVersion = long.MinValue;
 
         public void Dispose()
@@ -1473,7 +1474,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         page.Buffers.Add(nextBuffer);
         page.AllocatedVertexCount += vertexBufferCapacity;
         page.AllocatedIndexCount += indexBufferCapacity;
-        page.CapacityVersion++;
 
         nextBuffer.ReservedVertexCount = vertexCapacity;
         nextBuffer.ReservedIndexCount = indexCapacity;
@@ -1562,6 +1562,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         List<GpuSourceGroup> groups = _gpuSourceGroupsScratch;
         GpuMeshRegion[] regions = new GpuMeshRegion[groups.Count];
+        int originalBufferCount = page.Buffers.Count;
         int allocatedCount = 0;
 
         try
@@ -1596,13 +1597,35 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
         catch
         {
+            // Roll back the whole append transaction. Ranges released here were
+            // acquired by this same attempt, so this does not create new capacity.
             for (int i = allocatedCount - 1; i >= 0; i--)
-                ReleaseGpuRegion(page, regions[i]);
+                ReleaseGpuRegion(page, regions[i], notifyWaiters: false);
+
+            // Buffers created by the failed transaction have no committed regions.
+            // Destroy them instead of retaining empty VRAM pages after an OOM.
+            while (page.Buffers.Count > originalBufferCount)
+            {
+                int last = page.Buffers.Count - 1;
+                GpuMeshBuffer buffer = page.Buffers[last];
+                if (buffer.ReservedVertexCount != 0 || buffer.ReservedIndexCount != 0)
+                    throw new InvalidOperationException("GPU append rollback left a reserved buffer.");
+
+                page.AllocatedVertexCount -= buffer.VertexCapacity;
+                page.AllocatedIndexCount -= buffer.IndexCapacity;
+                buffer.Dispose();
+                page.Buffers.RemoveAt(last);
+                _totalGpuUnloads++;
+            }
+
             throw;
         }
     }
 
-    private void ReleaseGpuRegion(GpuMeshPage page, GpuMeshRegion region)
+    private void ReleaseGpuRegion(
+        GpuMeshPage page,
+        GpuMeshRegion region,
+        bool notifyWaiters = true)
     {
         if (region.VertexCapacity <= 0 ||
             (uint)region.BufferIndex >= (uint)page.Buffers.Count)
@@ -1622,8 +1645,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         page.ReservedVertexCount -= region.VertexCapacity;
         page.ReservedIndexCount -= region.IndexCapacity;
-        page.CapacityVersion++;
-        _gpuCapacityVersion++;
+        if (notifyWaiters)
+            page.CapacityVersion++;
     }
 
     private void ReleaseGpuRegions(GpuMeshPage page, GpuMeshRegion[] regions)
@@ -2023,7 +2046,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 // Another chunk can dirty this page while this region is blocked.
                 // Skip it until capacity changes; otherwise each page flush retries
                 // the same failed upload and spends the frame repeating the exception.
-                if (entry.GpuUploadRetryVersion == _gpuCapacityVersion ||
+                if ((entry.GpuUploadRetryPageVersion == page.CapacityVersion &&
+                     entry.GpuUploadRetryVersion == _gpuCapacityVersion) ||
                     _frame < entry.GpuUploadRetryFrame)
                     continue;
 
@@ -2083,16 +2107,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         }
                         else
                         {
-                            // Reuse the old region capacity before requesting new global
-                            // GPU storage. CanUpdateGpuRegions above is the zero-reallocation
-                            // fast path for replacements that fit in the existing ranges.
-                            if (hadRegions)
+                            // Detail chunks may fall back to their parent while replacing
+                            // storage. Keep base/fallback geometry until its replacement commits.
+                            bool preserveOldRegions = hadRegions && key.Step >= BaseLodStep;
+                            if (hadRegions && !preserveOldRegions)
                             {
                                 page.Regions.Remove(key);
                                 ReleaseGpuRegions(page, oldRegions!);
                             }
 
                             GpuMeshRegion[] nextRegions = AppendGpuRegions(page, pending);
+                            if (preserveOldRegions)
+                                ReleaseGpuRegions(page, oldRegions!);
                             page.Regions[key] = nextRegions;
                         }
                     }
@@ -2105,6 +2131,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry.SurfaceDirty = false;
                     entry.Built = true;
                     entry.GpuUploadRetryFrame = 0;
+                    entry.GpuUploadRetryPageVersion = long.MinValue;
                     entry.GpuUploadRetryVersion = long.MinValue;
                     DiscardLegacyCutCap(key, entry);
                     SetSurfaceGpuHash(key, entry.PendingSurfaceHash);
@@ -2123,6 +2150,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                          exception.Message.StartsWith("No global GPU page capacity", StringComparison.Ordinal) ||
                          exception.Message.StartsWith("LOD page exceeds", StringComparison.Ordinal));
                     entry.GpuUploadRetryFrame = capacityBlocked ? long.MaxValue : _frame + 60;
+                    entry.GpuUploadRetryPageVersion = capacityBlocked
+                        ? page.CapacityVersion
+                        : long.MinValue;
                     entry.GpuUploadRetryVersion = capacityBlocked
                         ? _gpuCapacityVersion
                         : long.MinValue;
@@ -2145,11 +2175,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             if (!entry.HasPendingSurface) continue;
 
-            if (entry.GpuUploadRetryVersion != long.MinValue)
+            if (entry.GpuUploadRetryPageVersion != long.MinValue ||
+                entry.GpuUploadRetryVersion != long.MinValue)
             {
-                if (_gpuCapacityVersion == entry.GpuUploadRetryVersion)
+                long pageVersion = _gpuPages.TryGetValue(
+                    GetGpuPageKey(key), out GpuMeshPage? page)
+                    ? page.CapacityVersion
+                    : long.MinValue;
+
+                if (pageVersion == entry.GpuUploadRetryPageVersion &&
+                    _gpuCapacityVersion == entry.GpuUploadRetryVersion)
                     continue;
 
+                entry.GpuUploadRetryPageVersion = long.MinValue;
                 entry.GpuUploadRetryVersion = long.MinValue;
                 entry.GpuUploadRetryFrame = 0;
             }
