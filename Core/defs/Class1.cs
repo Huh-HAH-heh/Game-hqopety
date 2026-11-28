@@ -7,7 +7,7 @@ public class FloorDef
 {
     public ushort Id;
 
-    public string Name;
+    public string Name = string.Empty;
 
     public float MoveSpeed;
 
@@ -17,7 +17,7 @@ public class WallDef
 {
     public ushort Id;
 
-    public string Name;
+    public string Name = string.Empty;
 
     public float HitPoints;
 
@@ -29,7 +29,7 @@ public class RoofDef
 {
     public byte Id;
 
-    public string Name;
+    public string Name = string.Empty;
 
     public bool BlocksRain;
 
@@ -39,7 +39,7 @@ public class SolidDef
 {
     public ushort Id;
 
-    public string Name;
+    public string Name = string.Empty;
 
     public float Hardness;
 
@@ -51,7 +51,7 @@ public class EdificeDef
 {
     public int Id;
 
-    public string Name;
+    public string Name = string.Empty;
 
     public float HitPoints;
 
