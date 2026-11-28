@@ -166,6 +166,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int Width,
         int Depth,
         long FieldVersion,
+        int SolidPixels,
         byte[] Pixels);
 
     private sealed class GpuMeshBuffer : IDisposable
@@ -435,6 +436,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _cutMaskReadyLayer = int.MinValue;
     private int _activeCutLayer = int.MinValue;
     private int _cutOverlayUnavailableLayer = int.MinValue;
+    private int _cutOverlayDrawnLayer = int.MinValue;
     private int _cutMaskDirty;
     private int _cutMaskWidth;
     private int _cutMaskDepth;
@@ -923,6 +925,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             DrawCutOverlay(field, renderCutHeightMeters);
             draws++;
+
+            if (_cutOverlayDrawnLayer != _activeCutLayer)
+            {
+                _cutOverlayDrawnLayer = _activeCutLayer;
+                _logger.Write(
+                    RenderLogMode.FrameSummary,
+                    "CUT_OVERLAY_DRAW",
+                    $"layer={_activeCutLayer} height={renderCutHeightMeters:0.000} " +
+                    $"maskTexture={_cutMaskTexture.Id} planeVao={_cutPlaneMesh.VaoId}");
+            }
         }
 
         _dynamicFragments.Draw(_material);
@@ -1767,7 +1779,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return draws;
     }
 
-    internal static void FillCutMask(
+    internal static int FillCutMask(
         IVoxelFieldSource field,
         int layer,
         Span<byte> pixels,
@@ -1783,6 +1795,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         int lowerY = layer - 1;
         int upperY = layer;
+        int solidPixels = 0;
         for (int z = 0; z < field.Depth; z++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1791,9 +1804,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             {
                 float density = (field.GetDensity(x, lowerY, z) +
                     field.GetDensity(x, upperY, z)) * 0.5f;
-                pixels[row + x] = density > 0f ? (byte)255 : (byte)0;
+                bool solid = density > 0f;
+                pixels[row + x] = solid ? (byte)255 : (byte)0;
+                if (solid) solidPixels++;
             }
         }
+
+        return solidPixels;
     }
 
     private void RequestCutMaskBuild(SparseVoxelField field, int layer)
@@ -1823,7 +1840,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             try
             {
                 pixels = ArrayPool<byte>.Shared.Rent(checked(width * depth));
-                FillCutMask(
+                int solidPixels = FillCutMask(
                     snapshot,
                     layer,
                     pixels.AsSpan(0, width * depth),
@@ -1833,7 +1850,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     return;
 
                 _cutMaskCompletions.Enqueue(new CutMaskBuildResult(
-                    generation, layer, width, depth, fieldVersion, pixels));
+                    generation, layer, width, depth, fieldVersion, solidPixels, pixels));
                 pixels = null;
             }
             catch (Exception exception) when (
@@ -1915,7 +1932,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 _logger.Write(
                     RenderLogMode.FrameSummary,
                     "CUT_MASK_READY",
-                    $"layer={result.Layer} size={result.Width}x{result.Depth} fieldVersion={result.FieldVersion}");
+                    $"layer={result.Layer} size={result.Width}x{result.Depth} " +
+                    $"solidPixels={result.SolidPixels}/{result.Width * result.Depth} " +
+                    $"fieldVersion={result.FieldVersion}");
             }
             catch (Exception exception)
             {
