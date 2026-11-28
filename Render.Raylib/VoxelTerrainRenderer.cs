@@ -949,20 +949,39 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _dynamicFragments.Draw(_material);
 
-        // Draw the real density-derived section after the outer surfaces and
-        // dynamic fragments. It writes depth like ordinary world geometry.
+        // Re-enter the same shader used by the indexed terrain pages. Upload
+        // the section uniforms and draw its cached VAOs directly through rlgl.
         if (activeCut)
         {
-            int capDraws = DrawCutSurfaceMeshes();
-            draws += capDraws;
-            if (capDraws > 0 && _cutSurfaceDrawnLayer != _activeCutLayer)
+            BeginShaderMode(_shader);
+            try
             {
-                _cutSurfaceDrawnLayer = _activeCutLayer;
-                _logger.Write(
-                    RenderLogMode.FrameSummary,
-                    "CUT_SURFACE_DRAW",
-                    $"layer={_activeCutLayer} meshes={capDraws} " +
-                    $"revision={_cutSurfaceReadyRevision}");
+                Matrix4x4 capView = Rlgl.GetMatrixModelview();
+                Matrix4x4 capProjection = Rlgl.GetMatrixProjection();
+                SetShaderValueMatrix(
+                    _shader,
+                    _mvpLocation,
+                    Raymath.MatrixMultiply(capView, capProjection));
+                SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
+                SetLighting();
+                SetCutShader(enabled: false, renderCutHeightMeters);
+                SetLodShader(-1, 0f);
+
+                int capDraws = DrawCutSurfaceMeshes();
+                draws += capDraws;
+                if (capDraws > 0 && _cutSurfaceDrawnLayer != _activeCutLayer)
+                {
+                    _cutSurfaceDrawnLayer = _activeCutLayer;
+                    _logger.Write(
+                        RenderLogMode.FrameSummary,
+                        "CUT_SURFACE_DRAW",
+                        $"layer={_activeCutLayer} meshes={capDraws} " +
+                        $"revision={_cutSurfaceReadyRevision}");
+                }
+            }
+            finally
+            {
+                EndShaderMode();
             }
         }
 
@@ -2115,11 +2134,33 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _cutHatchingLocation,
             _palette.ShowCutHatching ? 1 : 0,
             ShaderUniformDataType.Int);
+
+        int draws = 0;
         Rlgl.DisableBackfaceCulling();
         try
         {
             foreach (Mesh mesh in _cutSurfaceMeshes)
-                DrawMesh(mesh, _material, Matrix4x4.Identity);
+            {
+                if (mesh.VaoId == 0 || mesh.TriangleCount <= 0)
+                    continue;
+
+                if (!Rlgl.EnableVertexArray(mesh.VaoId))
+                    throw new InvalidOperationException(
+                        $"Could not bind cut surface VAO {mesh.VaoId}.");
+
+                try
+                {
+                    Rlgl.DrawVertexArrayElements(
+                        0,
+                        mesh.TriangleCount * 3,
+                        null);
+                    draws++;
+                }
+                finally
+                {
+                    Rlgl.DisableVertexArray();
+                }
+            }
         }
         finally
         {
@@ -2131,7 +2172,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 ShaderUniformDataType.Int);
         }
 
-        return _cutSurfaceMeshes.Length;
+        return draws;
     }
 
     private void TrimCompletedCutSurfaceTasks()
