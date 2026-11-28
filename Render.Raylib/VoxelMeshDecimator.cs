@@ -623,14 +623,6 @@ internal static class VoxelMeshDecimator
             outputTransferred = true;
             return true;
         }
-        catch
-        {
-            optimized?.ReturnCpuArrays();
-            optimized = null;
-            collapseCount = 0;
-            maximumAcceptedError = 0f;
-            return false;
-        }
         finally
         {
             ArrayPool<Vector3>.Shared.Return(positions, clearArray: false);
