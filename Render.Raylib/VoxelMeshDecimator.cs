@@ -822,7 +822,7 @@ internal static class VoxelMeshDecimator
         if (!ValidateIncidentFaces(
                 b, a, position, positions, triangles,
                 faceOffsets, faceIds, faceNormals, facePlaneOffsets,
-                triangleCount, errorLimitSquared, ref maximumError))
+                triangleCount, errorLimitSquared, cancellationToken, ref maximumError))
             return false;
 
         return true;
