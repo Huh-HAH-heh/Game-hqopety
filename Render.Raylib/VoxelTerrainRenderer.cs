@@ -442,6 +442,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _cutSurfaceReadyRevision = long.MinValue;
     private int _cutSurfaceReadyPaletteVersion = int.MinValue;
     private int _cutSurfaceDrawnLayer = int.MinValue;
+    private string _lastCutState = string.Empty;
 
     private long _totalBuildRequests;
     private long _totalBuildStarted;
@@ -733,15 +734,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         EvictInactiveLodChunks();
         CollectCompletedBuilds(field);
+        ProcessCutSurfaceCompletions();
+
+        // Give the section its own guaranteed progress before ordinary terrain
+        // uploads can consume the whole frame budget.
+        double cutUploadBudget = Math.Min(0.75d, GpuUploadBudgetMilliseconds * 0.25d);
+        GpuUploadMillisecondsLastFrame +=
+            UploadPendingCutSurfaceMeshes(cutUploadBudget);
+
         UploadReadyMeshes();
         RetryPendingGpuUploads();
         UploadDirtyGpuPages();
-
-        ProcessCutSurfaceCompletions();
-        double cutUploadBudget = Math.Max(
-            0d, GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
-        GpuUploadMillisecondsLastFrame +=
-            UploadPendingCutSurfaceMeshes(cutUploadBudget);
 
         bool baseCoverageReady = HasCompleteCachedLod(
             _baseCandidateEntriesScratch, field, BaseLodStep, out int baseReadyCount);
@@ -864,34 +867,29 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
 
-        bool cutTerrainReady = basePageReady || coarseCoverageReady;
-        bool cutMeshesCurrent = true;
-        if (drawCoarseFallback)
-        {
-            foreach ((Candidate _, ChunkEntry entry) in _coarseCandidateEntriesScratch)
-                if (!IsCurrentMeshReady(entry, field))
-                {
-                    cutMeshesCurrent = false;
-                    break;
-                }
-        }
-        if (cutMeshesCurrent)
-        {
-            foreach ((ChunkKey _, ChunkEntry entry) in _visible)
-                if (!IsCurrentMeshReady(entry, field))
-                {
-                    cutMeshesCurrent = false;
-                    break;
-                }
-        }
-
-        bool activeCut = cutEnabled &&
-            stableCutLayer >= 0 &&
+        long currentCutRevision = Interlocked.Read(ref _cutSurfaceRevision);
+        bool cutSurfaceCurrent = stableCutLayer >= 0 &&
             stableCutLayer == _activeCutLayer &&
-            _cutSurfaceReadyRevision == Interlocked.Read(ref _cutSurfaceRevision) &&
+            _cutSurfaceReadyRevision == currentCutRevision &&
             _cutSurfaceReadyPaletteVersion == _paletteVersion &&
-            cutTerrainReady &&
-            cutMeshesCurrent;
+            _cutSurfaceMeshes.Length > 0;
+
+        // A ready cap is the only prerequisite for clipping. Waiting for every
+        // visible LOD chunk used to keep the cut disabled on large/streaming maps.
+        bool activeCut = cutEnabled && cutSurfaceCurrent;
+
+        string cutState =
+            $"enabled={cutEnabled} requested={_requestedCutLayer} stable={stableCutLayer} " +
+            $"active={activeCut} capLayer={_activeCutLayer} capMeshes={_cutSurfaceMeshes.Length} " +
+            $"capRev={_cutSurfaceReadyRevision}/{currentCutRevision} " +
+            $"palette={_cutSurfaceReadyPaletteVersion}/{_paletteVersion} " +
+            $"pending={_pendingCutSurfaceUploadIndex}/{_pendingCutSurfaceData?.Length ?? 0} " +
+            $"retryFrame={_cutSurfaceRetryFrame}";
+        if (!string.Equals(cutState, _lastCutState, StringComparison.Ordinal))
+        {
+            _lastCutState = cutState;
+            _logger.Write(RenderLogMode.FrameSummary, "CUT_STATE", cutState);
+        }
         float renderCutHeightMeters = activeCut
             ? _activeCutLayer * SparseVoxelField.VoxelSizeMeters
             : 0f;
@@ -1979,10 +1977,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             return 0d;
 
         Stopwatch timer = Stopwatch.StartNew();
+        int firstUploadIndex = _pendingCutSurfaceUploadIndex;
         try
         {
             while (_pendingCutSurfaceUploadIndex < data.Length &&
-                timer.Elapsed.TotalMilliseconds < budgetMilliseconds)
+                (_pendingCutSurfaceUploadIndex == firstUploadIndex ||
+                 timer.Elapsed.TotalMilliseconds < budgetMilliseconds))
             {
                 int index = _pendingCutSurfaceUploadIndex++;
                 VoxelMeshData source = data[index];
