@@ -75,6 +75,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         uniform int uCutEnabled;
         uniform float uCutHeight;
         uniform int uCutSurfacePass;
+        uniform int uCutHatching;
         uniform vec3 uSunDirection;
         uniform float uAmbientLight;
         uniform float uSunIntensity;
@@ -93,9 +94,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (uCutSurfacePass != 0)
             {
                 // Fixed in world coordinates: the hatch does not swim with the camera.
-                float hatch = mod(
-                    floor((fragWorldPosition.x + fragWorldPosition.z) * 1.5),
-                    2.0);
+                float hatch = uCutHatching != 0
+                    ? mod(floor((fragWorldPosition.x + fragWorldPosition.z) * 1.5), 2.0)
+                    : 0.0;
                 float shade = mix(1.0, 0.91, hatch);
                 finalColor = vec4(fragColor.rgb * lighting * shade, fragColor.a);
                 return;
@@ -401,6 +402,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _cutEnabledLocation;
     private readonly int _cutHeightLocation;
     private readonly int _cutSurfacePassLocation;
+    private readonly int _cutHatchingLocation;
     private readonly int _sunDirectionLocation;
     private readonly int _ambientLightLocation;
     private readonly int _sunIntensityLocation;
@@ -530,6 +532,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
         _cutSurfacePassLocation = GetShaderLocation(_shader, "uCutSurfacePass");
+        _cutHatchingLocation = GetShaderLocation(_shader, "uCutHatching");
         _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
         _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
         _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
@@ -541,6 +544,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_cutEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
             _cutSurfacePassLocation < 0 ||
+            _cutHatchingLocation < 0 ||
             _sunDirectionLocation < 0 ||
             _ambientLightLocation < 0 ||
             _sunIntensityLocation < 0 ||
@@ -2031,6 +2035,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _activeCutLayer = _pendingCutSurfaceLayer;
         _cutSurfaceReadyRevision = _pendingCutSurfaceRevision;
         _cutSurfaceReadyPaletteVersion = _pendingCutSurfacePaletteVersion;
+        _cutSurfaceDrawnLayer = int.MinValue;
         RebuiltCutCaps++;
 
         foreach (Mesh mesh in previous)
@@ -2068,6 +2073,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _shader,
             _cutSurfacePassLocation,
             1,
+            ShaderUniformDataType.Int);
+        SetShaderValue(
+            _shader,
+            _cutHatchingLocation,
+            _palette.ShowCutHatching ? 1 : 0,
             ShaderUniformDataType.Int);
         Rlgl.DisableBackfaceCulling();
         try
@@ -3314,10 +3324,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     {
         int activeLayer = _activeCutLayer;
         int requestedLayer = _cutSurfaceRequestedLayer;
-        if ((activeLayer >= 0 &&
-             bounds.MinY <= activeLayer && bounds.MaxY > activeLayer - 1) ||
-            (requestedLayer >= 0 &&
-             bounds.MinY <= requestedLayer && bounds.MaxY > requestedLayer - 1))
+        int targetLayer = _requestedCutLayer;
+        bool intersectsActive = activeLayer >= 0 &&
+            bounds.MinY <= activeLayer && bounds.MaxY > activeLayer - 1;
+        bool intersectsRequested = requestedLayer >= 0 &&
+            bounds.MinY <= requestedLayer && bounds.MaxY > requestedLayer - 1;
+        bool intersectsTarget = targetLayer >= 0 &&
+            bounds.MinY <= targetLayer && bounds.MaxY > targetLayer - 1;
+        if (intersectsActive || intersectsRequested || intersectsTarget)
         {
             Interlocked.Increment(ref _cutSurfaceRevision);
             Interlocked.Exchange(ref _cutSurfaceDirty, 1);
