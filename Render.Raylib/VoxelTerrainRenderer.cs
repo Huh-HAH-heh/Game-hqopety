@@ -628,39 +628,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 ? _stableCutLayer
                 : -1;
 
+        long cutRevision = Interlocked.Read(ref _cutSurfaceRevision);
         if (stableCutLayer >= 0 &&
-            (stableCutLayer != _cutMaskRequestedLayer ||
-             Interlocked.Exchange(ref _cutMaskDirty, 0) != 0))
-            RequestCutMaskBuild(field, stableCutLayer);
-
-        ProcessCutMaskCompletions(field);
-        bool cutMaskReady = _cutMaskTexture.Id != 0;
-        bool cutPlaneReady = _cutPlaneMesh.VaoId != 0;
-        bool cutMaterialReady = _shader.Id != 0;
-        bool cutOverlayReady = cutMaskReady && cutPlaneReady && cutMaterialReady;
-        if (cutEnabled && _activeCutLayer >= 0 && !cutOverlayReady)
+            (_cutSurfaceRequestedLayer != stableCutLayer ||
+             _cutSurfaceRequestedRevision != cutRevision ||
+             _cutSurfaceRequestedPaletteVersion != _paletteVersion ||
+             Interlocked.Exchange(ref _cutSurfaceDirty, 0) != 0))
         {
-            if (_cutOverlayUnavailableLayer != _activeCutLayer)
-            {
-                _cutOverlayUnavailableLayer = _activeCutLayer;
-                _logger.Error(
-                    "CUT_OVERLAY_NOT_READY",
-                    $"layer={_activeCutLayer} mask={cutMaskReady} planeVao={_cutPlaneMesh.VaoId} materialMaps={cutMaterialReady}");
-            }
-        }
-        else
-        {
-            _cutOverlayUnavailableLayer = int.MinValue;
+            RequestCutSurfaceBuild(field, stableCutLayer);
         }
 
-        // Never clip the terrain unless the matching cap overlay can be drawn.
-        // Otherwise a missing quad/material map turns a valid slice into a hollow cut.
-        bool activeCut = cutEnabled &&
-            _activeCutLayer >= 0 &&
-            cutOverlayReady;
-        float activeCutHeightMeters = activeCut
-            ? _activeCutLayer * SparseVoxelField.VoxelSizeMeters
-            : 0f;
+        ProcessCutSurfaceCompletions(field);
 
         int frustumTests = 0;
         int macroFrustumTests = 0;
@@ -737,6 +715,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         UploadReadyMeshes();
         RetryPendingGpuUploads();
         UploadDirtyGpuPages();
+
+        ProcessCutSurfaceCompletions(field);
+        double cutUploadBudget = Math.Max(
+            0d, GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
+        if (cutUploadBudget > 0d)
+            GpuUploadMillisecondsLastFrame +=
+                UploadPendingCutSurfaceMeshes(cutUploadBudget);
 
         bool baseCoverageReady = HasCompleteCachedLod(
             _baseCandidateEntriesScratch, field, BaseLodStep, out int baseReadyCount);
@@ -858,7 +843,37 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
 
-        float renderCutHeightMeters = activeCutHeightMeters;
+        bool cutTerrainReady = basePageReady || coarseCoverageReady;
+        bool cutMeshesCurrent = true;
+        if (drawCoarseFallback)
+        {
+            foreach ((Candidate _, ChunkEntry entry) in _coarseCandidateEntriesScratch)
+                if (!IsCurrentMeshReady(entry, field))
+                {
+                    cutMeshesCurrent = false;
+                    break;
+                }
+        }
+        if (cutMeshesCurrent)
+        {
+            foreach ((ChunkKey _, ChunkEntry entry) in _visible)
+                if (!IsCurrentMeshReady(entry, field))
+                {
+                    cutMeshesCurrent = false;
+                    break;
+                }
+        }
+
+        bool activeCut = cutEnabled &&
+            stableCutLayer >= 0 &&
+            stableCutLayer == _activeCutLayer &&
+            _cutSurfaceReadyRevision == Interlocked.Read(ref _cutSurfaceRevision) &&
+            _cutSurfaceReadyPaletteVersion == _paletteVersion &&
+            cutTerrainReady &&
+            cutMeshesCurrent;
+        float renderCutHeightMeters = activeCut
+            ? _activeCutLayer * SparseVoxelField.VoxelSizeMeters
+            : 0f;
 
         float worldRadius = 0.5f * MathF.Sqrt(
             field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
@@ -908,22 +923,20 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _dynamicFragments.Draw(_material);
 
-        // Draw the section last among 3D geometry so it can cover the terrain cut
-        // and any fragments behind it, while the depth test still hides it behind
-        // genuinely nearer geometry.
+        // Draw the real density-derived section after the outer surfaces and
+        // dynamic fragments. It writes depth like ordinary world geometry.
         if (activeCut)
         {
-            DrawCutOverlay(field, renderCutHeightMeters);
-            draws++;
-
-            if (_cutOverlayDrawnLayer != _activeCutLayer)
+            int capDraws = DrawCutSurfaceMeshes();
+            draws += capDraws;
+            if (capDraws > 0 && _cutSurfaceDrawnLayer != _activeCutLayer)
             {
-                _cutOverlayDrawnLayer = _activeCutLayer;
+                _cutSurfaceDrawnLayer = _activeCutLayer;
                 _logger.Write(
                     RenderLogMode.FrameSummary,
-                    "CUT_OVERLAY_DRAW",
-                    $"layer={_activeCutLayer} height={renderCutHeightMeters:0.000} " +
-                    $"maskTexture={_cutMaskTexture.Id} planeVao={_cutPlaneMesh.VaoId}");
+                    "CUT_SURFACE_DRAW",
+                    $"layer={_activeCutLayer} meshes={capDraws} " +
+                    $"revision={_cutSurfaceReadyRevision}");
             }
         }
 
