@@ -351,6 +351,32 @@ internal static class VoxelChunkMesher
             _indexCount = 0;
         }
 
+        public void AddTriangle(
+            Vector3 p0,
+            Vector3 p1,
+            Vector3 p2,
+            Vector3 normal,
+            Color color,
+            bool frontFace)
+        {
+            if (_vertexCount + 3 > MaximumVerticesPerMesh ||
+                _indexCount + 3 > MaximumIndicesPerMesh)
+                Flush();
+
+            ushort start = checked((ushort)_vertexCount);
+            AddVertex(p0, normal, color);
+            AddVertex(p1, normal, color);
+            AddVertex(p2, normal, color);
+
+            _indices[_indexCount++] = start;
+            _indices[_indexCount++] = frontFace
+                ? (ushort)(start + 1)
+                : (ushort)(start + 2);
+            _indices[_indexCount++] = frontFace
+                ? (ushort)(start + 2)
+                : (ushort)(start + 1);
+        }
+
         public void AddIndexedQuad(
             int i0,
             int i1,
@@ -1048,6 +1074,401 @@ internal static class VoxelChunkMesher
             ArrayPool<Vector3>.Shared.Return(positions, clearArray: false);
             ArrayPool<Vector3>.Shared.Return(normals, clearArray: false);
             ArrayPool<byte>.Shared.Return(materials, clearArray: false);
+        }
+    }
+
+    private readonly record struct CutRunKey(
+        int StartSampleX,
+        int EndSampleX,
+        byte MaterialId);
+
+    private struct CutRunRectangle
+    {
+        public int StartSampleZ;
+        public int EndSampleZ;
+    }
+
+    private readonly record struct CutVertex(Vector3 Position, float Density);
+
+    /// <summary>
+    /// Builds the filled horizontal section directly from the authoritative density field.
+    /// Fully solid cells are greedily merged into rectangles; contour cells are clipped
+    /// against density zero and triangulated locally, so air pockets remain open.
+    /// </summary>
+    public static VoxelMeshData[] BuildCutSurfaceData(
+        IVoxelFieldSource field,
+        int layer,
+        TerrainPalette palette,
+        int step = 4,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentNullException.ThrowIfNull(palette);
+        if ((uint)layer > (uint)field.Height)
+            throw new ArgumentOutOfRangeException(nameof(layer));
+        if (step is not (1 or 2 or 4 or 8 or 16 or 32 or 64))
+            throw new ArgumentOutOfRangeException(nameof(step));
+
+        int lowerY = layer - 1;
+        int upperY = layer;
+        int cellsX = (field.Width + step - 1) / step + 1;
+        int cellsZ = (field.Depth + step - 1) / step + 1;
+        int nodesX = cellsX + 1;
+
+        float[] previous = ArrayPool<float>.Shared.Rent(nodesX);
+        float[] current = ArrayPool<float>.Shared.Rent(nodesX);
+        List<VoxelMeshData> output = new(8);
+        Dictionary<CutRunKey, CutRunRectangle> activeRuns =
+            new(Math.Max(16, cellsX / 4));
+        Dictionary<CutRunKey, CutRunRectangle> nextRuns =
+            new(Math.Max(16, cellsX / 4));
+
+        using MeshBatch batch = new(
+            output,
+            Array.Empty<int>(),
+            Array.Empty<int>());
+
+        try
+        {
+            IVoxelColumnDensitySource? columnSource =
+                field as IVoxelColumnDensitySource;
+
+            SampleCutDensityRow(
+                field, columnSource, lowerY, -step, step,
+                previous, nodesX, cancellationToken);
+
+            for (int row = 0; row < cellsZ; row++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                int sampleZ0 = (row - 1) * step;
+                int sampleZ1 = row * step;
+                SampleCutDensityRow(
+                    field, columnSource, lowerY, sampleZ1, step,
+                    current, nodesX, cancellationToken);
+
+                nextRuns.Clear();
+                int x = 0;
+                while (x < cellsX)
+                {
+                    float d0 = previous[x];
+                    float d1 = current[x];
+                    float d2 = current[x + 1];
+                    float d3 = previous[x + 1];
+
+                    if (d0 > 0f && d1 > 0f && d2 > 0f && d3 > 0f)
+                    {
+                        int runStart = x;
+                        byte materialId = GetCutMaterial(
+                            field,
+                            (x - 1) * step,
+                            sampleZ0,
+                            (x * step),
+                            sampleZ1,
+                            lowerY,
+                            upperY,
+                            d0, d1, d2, d3);
+
+                        x++;
+                        while (x < cellsX)
+                        {
+                            float a = previous[x];
+                            float b = current[x];
+                            float c = current[x + 1];
+                            float d = previous[x + 1];
+                            if (a <= 0f || b <= 0f || c <= 0f || d <= 0f)
+                                break;
+
+                            byte nextMaterial = GetCutMaterial(
+                                field,
+                                (x - 1) * step,
+                                sampleZ0,
+                                x * step,
+                                sampleZ1,
+                                lowerY,
+                                upperY,
+                                a, b, c, d);
+                            if (nextMaterial != materialId)
+                                break;
+
+                            x++;
+                        }
+
+                        int startSampleX = (runStart - 1) * step;
+                        int endSampleX = (x - 1) * step;
+                        CutRunKey key = new(
+                            startSampleX,
+                            endSampleX,
+                            materialId);
+
+                        CutRunRectangle rectangle = activeRuns.TryGetValue(
+                            key, out CutRunRectangle existing)
+                                ? existing
+                                : new CutRunRectangle { StartSampleZ = sampleZ0 };
+
+                        rectangle.EndSampleZ = sampleZ1;
+                        nextRuns.Add(key, rectangle);
+                        continue;
+                    }
+
+                    if (d0 > 0f || d1 > 0f || d2 > 0f || d3 > 0f)
+                    {
+                        AddCutContourCell(
+                            batch,
+                            field,
+                            palette,
+                            lowerY,
+                            upperY,
+                            step,
+                            (x - 1) * step,
+                            sampleZ0,
+                            sampleZ1,
+                            d0, d1, d2, d3);
+                    }
+
+                    x++;
+                }
+
+                foreach ((CutRunKey key, CutRunRectangle rectangle) in activeRuns)
+                {
+                    if (nextRuns.ContainsKey(key))
+                        continue;
+
+                    AddCutRectangle(batch, palette, key, rectangle, layer);
+                }
+
+                (activeRuns, nextRuns) = (nextRuns, activeRuns);
+                (previous, current) = (current, previous);
+            }
+
+            foreach ((CutRunKey key, CutRunRectangle rectangle) in activeRuns)
+                AddCutRectangle(batch, palette, key, rectangle, layer);
+
+            batch.Flush();
+            return output.ToArray();
+        }
+        catch
+        {
+            foreach (VoxelMeshData mesh in output)
+                mesh.ReturnCpuArrays();
+            throw;
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(previous, clearArray: false);
+            ArrayPool<float>.Shared.Return(current, clearArray: false);
+        }
+    }
+
+    private static void SampleCutDensityRow(
+        IVoxelFieldSource field,
+        IVoxelColumnDensitySource? columnSource,
+        int lowerY,
+        int sampleZ,
+        int step,
+        float[] destination,
+        int count,
+        CancellationToken cancellationToken)
+    {
+        Span<float> vertical = stackalloc float[2];
+        int upperY = lowerY + 1;
+
+        for (int i = 0; i < count; i++)
+        {
+            if ((i & 127) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
+            int sampleX = (i - 1) * step;
+            float lower;
+            float upper;
+
+            if (columnSource != null &&
+                columnSource.TryGetDensityColumn(
+                    sampleX, sampleZ, lowerY, 1, vertical))
+            {
+                lower = vertical[0];
+                upper = vertical[1];
+            }
+            else
+            {
+                lower = field.GetDensity(sampleX, lowerY, sampleZ);
+                upper = field.GetDensity(sampleX, upperY, sampleZ);
+            }
+
+            // Density samples live at voxel centres. An integer cut layer is
+            // exactly halfway between the samples on either side of the plane.
+            destination[i] = (lower + upper) * 0.5f;
+        }
+    }
+
+    private static byte GetCutMaterial(
+        IVoxelFieldSource field,
+        int x0,
+        int z0,
+        int x1,
+        int z1,
+        int lowerY,
+        int upperY,
+        float d0,
+        float d1,
+        float d2,
+        float d3)
+    {
+        float maximum = d0;
+        int sampleX = x0;
+        int sampleZ = z0;
+
+        if (d1 > maximum) { maximum = d1; sampleZ = z1; }
+        if (d2 > maximum) { maximum = d2; sampleX = x1; sampleZ = z1; }
+        if (d3 > maximum) { maximum = d3; sampleX = x1; sampleZ = z0; }
+
+        if (maximum <= 0f)
+            return 1;
+
+        ushort material = field.GetMaterialId(sampleX, lowerY, sampleZ);
+        if (material == 0)
+            material = field.GetMaterialId(sampleX, upperY, sampleZ);
+
+        return material == 0 ? (byte)1 : checked((byte)material);
+    }
+
+    private static void AddCutRectangle(
+        MeshBatch batch,
+        TerrainPalette palette,
+        CutRunKey key,
+        CutRunRectangle rectangle,
+        int layer)
+    {
+        float voxel = SparseVoxelField.VoxelSizeMeters;
+        float y = layer * voxel;
+        float x0 = (key.StartSampleX + 0.5f) * voxel;
+        float x1 = (key.EndSampleX + 0.5f) * voxel;
+        float z0 = (rectangle.StartSampleZ + 0.5f) * voxel;
+        float z1 = (rectangle.EndSampleZ + 0.5f) * voxel;
+        Color color = GetMaterialColor(palette, key.MaterialId);
+
+        batch.AddQuad(
+            new Vector3(x0, y, z0),
+            new Vector3(x0, y, z1),
+            new Vector3(x1, y, z1),
+            new Vector3(x1, y, z0),
+            Vector3.UnitY,
+            color,
+            frontFace: true);
+    }
+
+    private static void AddCutContourCell(
+        MeshBatch batch,
+        IVoxelFieldSource field,
+        TerrainPalette palette,
+        int lowerY,
+        int upperY,
+        int step,
+        int sampleX,
+        int sampleZ0,
+        int sampleZ1,
+        float d0,
+        float d1,
+        float d2,
+        float d3)
+    {
+        float voxel = SparseVoxelField.VoxelSizeMeters;
+        float y = (lowerY + 1) * voxel;
+        float x0 = (sampleX + 0.5f) * voxel;
+        float x1 = (sampleX + step + 0.5f) * voxel;
+        float z0 = (sampleZ0 + 0.5f) * voxel;
+        float z1 = (sampleZ1 + 0.5f) * voxel;
+
+        CutVertex p0 = new(new Vector3(x0, y, z0), d0);
+        CutVertex p1 = new(new Vector3(x0, y, z1), d1);
+        CutVertex p2 = new(new Vector3(x1, y, z1), d2);
+        CutVertex p3 = new(new Vector3(x1, y, z0), d3);
+
+        byte materialId = GetCutMaterial(
+            field,
+            sampleX,
+            sampleZ0,
+            sampleX + step,
+            sampleZ1,
+            lowerY,
+            upperY,
+            d0, d1, d2, d3);
+        Color color = GetMaterialColor(palette, materialId);
+
+        bool alternating =
+            (d0 > 0f) == (d2 > 0f) &&
+            (d1 > 0f) == (d3 > 0f) &&
+            (d0 > 0f) != (d1 > 0f);
+
+        bool diagonal02 = true;
+        if (alternating)
+        {
+            float asymptoticDecider = d0 * d2 - d1 * d3;
+            diagonal02 = asymptoticDecider > 0f ||
+                (asymptoticDecider == 0f &&
+                 (((sampleX / step) ^ (sampleZ0 / step)) & 1) == 0);
+        }
+
+        Span<CutVertex> polygon = stackalloc CutVertex[4];
+        if (diagonal02)
+        {
+            AddClippedCutTriangle(batch, p0, p1, p2, polygon, color);
+            AddClippedCutTriangle(batch, p0, p2, p3, polygon, color);
+        }
+        else
+        {
+            AddClippedCutTriangle(batch, p0, p1, p3, polygon, color);
+            AddClippedCutTriangle(batch, p1, p2, p3, polygon, color);
+        }
+    }
+
+    private static void AddClippedCutTriangle(
+        MeshBatch batch,
+        CutVertex a,
+        CutVertex b,
+        CutVertex c,
+        Span<CutVertex> output,
+        Color color)
+    {
+        Span<CutVertex> triangle = stackalloc CutVertex[3];
+        triangle[0] = a;
+        triangle[1] = b;
+        triangle[2] = c;
+
+        int count = 0;
+        CutVertex previous = triangle[2];
+        bool previousInside = previous.Density > 0f;
+
+        for (int i = 0; i < 3; i++)
+        {
+            CutVertex current = triangle[i];
+            bool currentInside = current.Density > 0f;
+
+            if (currentInside != previousInside)
+            {
+                float t = previous.Density /
+                    (previous.Density - current.Density);
+                output[count++] = new CutVertex(
+                    Vector3.Lerp(previous.Position, current.Position, t),
+                    0f);
+            }
+
+            if (currentInside)
+                output[count++] = current;
+
+            previous = current;
+            previousInside = currentInside;
+        }
+
+        for (int i = 1; i + 1 < count; i++)
+        {
+            batch.AddTriangle(
+                output[0].Position,
+                output[i].Position,
+                output[i + 1].Position,
+                Vector3.UnitY,
+                color,
+                frontFace: true);
         }
     }
 
