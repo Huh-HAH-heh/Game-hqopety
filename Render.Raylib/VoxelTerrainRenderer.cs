@@ -745,9 +745,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _coarseVisiblePages.Clear();
         GpuPageKey coarsePageKey = new(FallbackLodStep);
-        bool basePageReady = baseCoverageReady &&
-            _gpuPages.TryGetValue(new GpuPageKey(BaseLodStep), out GpuMeshPage? basePage) &&
-            basePage.HasMesh && !basePage.Dirty;
         if (coarseCoverageReady && !basePageReady &&
             _gpuPages.TryGetValue(coarsePageKey, out GpuMeshPage? coarsePage) &&
             coarsePage.HasMesh && !coarsePage.Dirty)
