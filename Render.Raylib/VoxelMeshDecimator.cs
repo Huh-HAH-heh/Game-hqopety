@@ -511,7 +511,8 @@ internal static class VoxelMeshDecimator
                 if (edge.FaceCount != 2 ||
                     boundary[a] != 0 || boundary[b] != 0 ||
                     materialFeature[a] != 0 || materialFeature[b] != 0 ||
-                    !SameColor(colors, a, b))
+                    !SameColor(colors, a, b) ||
+                    Vector3.Dot(normals[a], normals[b]) < 0.5f)
                     continue;
 
                 if (!SatisfiesLinkCondition(
