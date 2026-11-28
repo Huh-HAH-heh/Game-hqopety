@@ -48,6 +48,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec3 vertexNormal;
         uniform mat4 mvp;
         uniform mat4 matModel;
+        uniform float uLodDepthBias;
         out vec3 fragWorldPosition;
         out vec3 fragWorldNormal;
         out vec4 fragColor;
@@ -75,7 +76,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         uniform float uSunIntensity;
         uniform float uLodFade;
         uniform int uLodRole;
-        uniform float uLodDepthBias;
+        
         out vec4 finalColor;
         void main()
         {
