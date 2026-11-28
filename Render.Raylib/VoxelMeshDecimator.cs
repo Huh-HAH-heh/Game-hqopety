@@ -215,8 +215,10 @@ internal static class VoxelMeshDecimator
 
         VoxelMeshData[] result = new VoxelMeshData[source.Length];
 
-        for (int i = 0; i < source.Length; i++)
+        try
         {
+            for (int i = 0; i < source.Length; i++)
+            {
             VoxelMeshData mesh = source[i];
             originalVertices += mesh.VertexCount;
             originalIndices += mesh.IndexCount;
@@ -247,7 +249,15 @@ internal static class VoxelMeshDecimator
             optimizedVertices += output.VertexCount;
             optimizedIndices += output.IndexCount;
             optimizedTriangles += output.TriangleCount;
-            optimizedBytes += EstimateBytes(output.VertexCount, output.IndexCount);
+                optimizedBytes += EstimateBytes(output.VertexCount, output.IndexCount);
+            }
+        }
+        catch
+        {
+            for (int i = 0; i < result.Length; i++)
+                if (result[i] != null && !ReferenceEquals(result[i], source[i]))
+                    result[i].ReturnCpuArrays();
+            throw;
         }
 
         stats = new VoxelMeshDecimationStats(
