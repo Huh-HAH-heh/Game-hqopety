@@ -84,6 +84,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         uniform int uCutEnabled;
         uniform int uCutHatchingEnabled;
         uniform float uCutHeight;
+        uniform sampler2D uCutMask;
+        uniform int uCutOverlayPass;
+        uniform vec2 uCutWorldSize;
+        uniform vec4 uCutColor;
         uniform vec3 uSunDirection;
         uniform float uAmbientLight;
         uniform float uSunIntensity;
@@ -93,6 +97,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         out vec4 finalColor;
         void main()
         {
+            if (uCutOverlayPass != 0)
+            {
+                vec2 uv = fragWorldPosition.xz / uCutWorldSize;
+                if (any(lessThan(uv, vec2(0.0))) ||
+                    any(greaterThan(uv, vec2(1.0))) ||
+                    texture(uCutMask, uv).r < 0.5)
+                    discard;
+
+                finalColor = uCutColor;
+                return;
+            }
+
             if (uCutEnabled != 0 && fragWorldPosition.y > uCutHeight + 0.0001)
                 discard;
 
@@ -161,6 +177,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int Step,
         int IndexOffset,
         int IndexCount);
+    private readonly record struct CutMaskBuildResult(
+        long Generation,
+        int Layer,
+        int Width,
+        int Depth,
+        long FieldVersion,
+        byte[] Pixels);
 
     private sealed class GpuMeshBuffer : IDisposable
     {
@@ -402,6 +425,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _cutEnabledLocation;
     private readonly int _cutHatchingEnabledLocation;
     private readonly int _cutHeightLocation;
+    private readonly int _cutMaskLocation;
+    private readonly int _cutOverlayPassLocation;
+    private readonly int _cutWorldSizeLocation;
+    private readonly int _cutColorLocation;
     private readonly int _sunDirectionLocation;
     private readonly int _ambientLightLocation;
     private readonly int _sunIntensityLocation;
@@ -423,6 +450,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _requestedCutLayer = int.MinValue;
     private int _stableCutLayer = int.MinValue;
     private int _cutLayerStableFrames;
+    private int _cutMaskRequestedLayer = int.MinValue;
+    private int _cutMaskReadyLayer = int.MinValue;
+    private int _activeCutLayer = int.MinValue;
+    private int _cutMaskDirty;
+    private int _cutMaskWidth;
+    private int _cutMaskDepth;
+    private long _cutMaskGeneration;
+    private CancellationTokenSource? _cutMaskCancellation;
+    private readonly ConcurrentQueue<CutMaskBuildResult> _cutMaskCompletions = new();
+    private Texture2D _cutMaskTexture;
+    private Mesh _cutPlaneMesh;
+    private float _cutPlaneWorldWidth;
+    private float _cutPlaneWorldDepth;
 
     private long _totalBuildRequests;
     private long _totalBuildStarted;
@@ -514,6 +554,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
         _cutHatchingEnabledLocation = GetShaderLocation(_shader, "uCutHatchingEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
+        _cutMaskLocation = GetShaderLocation(_shader, "uCutMask");
+        _cutOverlayPassLocation = GetShaderLocation(_shader, "uCutOverlayPass");
+        _cutWorldSizeLocation = GetShaderLocation(_shader, "uCutWorldSize");
+        _cutColorLocation = GetShaderLocation(_shader, "uCutColor");
         _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
         _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
         _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
@@ -529,6 +573,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_cutEnabledLocation < 0 ||
             _cutHatchingEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
+            _cutMaskLocation < 0 ||
+            _cutOverlayPassLocation < 0 ||
+            _cutWorldSizeLocation < 0 ||
+            _cutColorLocation < 0 ||
             _sunDirectionLocation < 0 ||
             _ambientLightLocation < 0 ||
             _sunIntensityLocation < 0 ||
