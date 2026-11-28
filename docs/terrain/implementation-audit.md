@@ -33,12 +33,18 @@ The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint
 | Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
 | Horizontal cutaway | Shader clips the existing outer mesh; a separate cap mesh is extracted from the same density field. Full solid runs are merged, contour cells are clipped/interpolated, and air cells remain open. XZ step is 4 voxels (0.4 m); Y level remains 0.1 m. | CPU tests pass for solid coverage, tunnel opening and linear contour interpolation; target-GPU visuals and sub-0.4 m features remain pending |
 | Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
-| Distance LOD | Adaptive density sampling uses a Step=64 fallback, Step=16 base and Step=8/4 detail; minimum detail step is 4 | Implemented in source; target-PC frame/memory measurements pending |
+| Distance LOD | Adaptive density sampling uses a Step=64 fallback, Step=16 base and Step=8/4 detail; minimum detail step is 4 | Selection/building exists, but adjacent chunks at different steps have no transition mesh. Mixed-LOD boundaries can show T-junctions/cracks; acceptance is failed until transition stitching is implemented |
 | Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs local 0.5 m A* on `(X,Y,floor)` nodes; portal-linked routes cross adjacent 128 m regions and local edits invalidate only affected routes | Partially met: portal corridor selection tries two Manhattan orders, not a global portal-graph optimum |
 | Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; unsupported pawns integrate gravity and land on voxel floors | Partially met: pawn-pawn contact remains the horizontal crowd solver; no rigid-body/rolling terrain debris |
 | Save/load of edited chunks | Compressed versioned chunk serializer plus atomic world-file save/load; Raylib viewer autosaves edits and restores them at startup | Met for the Raylib terrain viewer; campaign/world seed migration still needs integration |
 | Undo/redo and edit history | Bounded 16-step / 64 MiB chunk-snapshot history; F7 undo and F8 redo in the Raylib editor | Met for in-session edit operations; history is intentionally not persisted between launches |
 | Measured performance | Sparse storage and per-frame build budgets exist; no target-PC benchmark has been run | Unverified |
+
+## Known visual defect: mixed-LOD boundaries
+
+The current adaptive selector can display Step=4 or Step=8 child chunks beside Step=16 parent chunks. The Surface Nets builder emits ordinary same-step cell faces only; it does not generate a transition strip between two different sampling lattices. Shared-halo tests verify identical density values for neighbouring chunks at the **same** step, but do not prove watertight geometry between different steps.
+
+The visible seams are therefore an architectural LOD-stitching defect, not a camera-frustum or GPU-page upload problem. The correct fix is transition geometry at every coarse/fine boundary (Transvoxel-style transition cells or an equivalent Surface Nets seam builder). Do not hide the defect by claiming that same-step halo tests validate mixed-LOD seams.
 
 ## Architecture
 
