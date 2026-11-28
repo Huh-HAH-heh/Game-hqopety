@@ -196,14 +196,6 @@ internal sealed class VoxelChunkBuildInput : IDisposable
                         ? densityColumn[sampleY]
                         : source.GetDensity(worldX, worldY, worldZ);
 
-                    if (CutLayer != int.MinValue)
-                    {
-                        // Apply the cut after reading the authoritative density,
-                        // including sparse edits restored by the column sampler.
-                        float cutDensity = CutLayer - (worldY + 0.5f);
-                        density = MathF.Min(density, cutDensity);
-                    }
-
                     Densities[columnOffset + sampleY] = density;
                     hasSolid |= density > 0f;
                     hasAir |= density <= 0f;
