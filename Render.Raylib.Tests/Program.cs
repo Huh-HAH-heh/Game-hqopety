@@ -15,8 +15,8 @@ internal static class Program
         Run("Chunk input captures a flat 67^3 density window", TestDensityCapture, ref failures);
         Run("Adjacent chunks sample the same shared halo plane", TestSharedHalo, ref failures);
         Run("Flat procedural density produces a continuous horizontal surface", TestFlatSurface, ref failures);
-        Run("Voxel cut creates a horizontal cap at the requested world height", TestCutSurface, ref failures);
-        Run("Voxel cut preserves a tunnel opening through the section", TestCutPreservesTunnelOpening, ref failures);
+        Run("Cut plane does not modify or regenerate the terrain surface", TestCutSurface, ref failures);
+        Run("Cut occupancy mask fills solids and preserves tunnel openings", TestCutOccupancyMask, ref failures);
         Run("Enclosed solid chunk exits without creating a surface", TestEnclosedSolid, ref failures);
         Run("Three-dimensional tunnel walls are meshed inside solid terrain", TestTunnelSurface, ref failures);
         Run("Empty chunks exit before Surface Nets", TestEmptyField, ref failures);
@@ -112,21 +112,24 @@ internal static class Program
 
     private static (bool Passed, string Detail) TestCutSurface()
     {
-        const int cutLayer = 50;
-        const float cutHeightMeters = cutLayer * SparseVoxelField.VoxelSizeMeters;
+        const float cutHeightMeters = 5f;
+        const float terrainHeightMeters = 8f;
         SyntheticDensityField field = new(256, 256, 256, surfaceHeight: 80);
 
         using VoxelChunkBuildInput input = new(
-            field, 1, 0, 1, cutLayer, cellsPerAxis: 64);
+            field, 1, 1, 1, cellsPerAxis: 64);
         input.CaptureAll(field);
 
         VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(input, new TerrainPalette());
         try
         {
-            bool hasCap = HasUpwardSurfaceAtHeight(meshes, cutHeightMeters);
+            bool originalSurfaceRemains = AllVerticesAtHeight(meshes, terrainHeightMeters);
+            bool noGeneratedCutGeometry = !HasUpwardSurfaceAtHeight(meshes, cutHeightMeters);
             return (
-                hasCap,
-                $"cut={cutHeightMeters:0.0}m horizontalCap={hasCap} vertices={CountVertices(meshes)}");
+                originalSurfaceRemains && noGeneratedCutGeometry,
+                $"terrainY={terrainHeightMeters:0.0}m cutY={cutHeightMeters:0.0}m " +
+                $"originalSurface={originalSurfaceRemains} generatedCutMesh={HasUpwardSurfaceAtHeight(meshes, cutHeightMeters)} " +
+                $"vertices={CountVertices(meshes)}");
         }
         finally
         {
@@ -134,36 +137,25 @@ internal static class Program
         }
     }
 
-    private static (bool Passed, string Detail) TestCutPreservesTunnelOpening()
+    private static (bool Passed, string Detail) TestCutOccupancyMask()
     {
         const int cutLayer = 50;
-        const float cutHeightMeters = cutLayer * SparseVoxelField.VoxelSizeMeters;
         SyntheticDensityField field = new(
             256, 256, 256,
             surfaceHeight: 80,
             sectionTunnel: true);
+        byte[] pixels = new byte[field.Width * field.Depth];
 
-        using VoxelChunkBuildInput input = new(
-            field, 1, 0, 1, cutLayer, cellsPerAxis: 64);
-        input.CaptureAll(field);
+        VoxelTerrainRenderer.FillCutMask(field, cutLayer, pixels);
 
-        VoxelMeshData[] meshes = VoxelChunkMesher.BuildSurfaceData(
-            input, new TerrainPalette());
-        try
-        {
-            bool solidAreaClosed = HasHorizontalTriangleCoveringXZ(
-                meshes, cutHeightMeters, 8.0f, 8.0f);
-            bool tunnelRemainsOpen = !HasHorizontalTriangleCoveringXZ(
-                meshes, cutHeightMeters, 9.4f, 9.4f);
+        byte solid = pixels[80 + 80 * field.Width];
+        byte tunnel = pixels[94 + 94 * field.Width];
+        bool solidIsPainted = solid == byte.MaxValue;
+        bool tunnelRemainsTransparent = tunnel == 0;
 
-            return (
-                solidAreaClosed && tunnelRemainsOpen,
-                $"solidArea={solidAreaClosed} tunnelOpening={tunnelRemainsOpen} vertices={CountVertices(meshes)}");
-        }
-        finally
-        {
-            ReturnMeshData(meshes);
-        }
+        return (
+            solidIsPainted && tunnelRemainsTransparent,
+            $"solidMask={solid} tunnelMask={tunnel} size={field.Width}x{field.Depth}");
     }
 
     private static (bool Passed, string Detail) TestEnclosedSolid()
@@ -391,10 +383,9 @@ internal static class Program
         IVoxelFieldSource source,
         int chunkX,
         int chunkY,
-        int chunkZ,
-        int cutLayer = int.MinValue)
+        int chunkZ)
     {
-        VoxelChunkBuildInput input = new(source, chunkX, chunkY, chunkZ, cutLayer);
+        VoxelChunkBuildInput input = new(source, chunkX, chunkY, chunkZ);
         input.CaptureAll(source);
         return input;
     }
