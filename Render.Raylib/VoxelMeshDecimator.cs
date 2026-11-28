@@ -259,8 +259,17 @@ internal static class VoxelMeshDecimator
         catch
         {
             for (int i = 0; i < result.Length; i++)
-                if (result[i] != null && !ReferenceEquals(result[i], source[i]))
-                    result[i].ReturnCpuArrays();
+            {
+                VoxelMeshData? output = result[i];
+                if (output != null && !ReferenceEquals(output, source[i]))
+                    output.ReturnCpuArrays();
+
+                // A packet that was not assigned to result still belongs to
+                // the original input array and must be returned on cancellation.
+                if (output == null || ReferenceEquals(output, source[i]))
+                    source[i].ReturnCpuArrays();
+            }
+
             throw;
         }
 
