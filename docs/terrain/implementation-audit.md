@@ -22,7 +22,7 @@ The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint
 | Sparse large-world storage | 16³ bricks only where edits exist; sparse entries per channel with dense promotion/demotion | Implemented in source; target memory measurement pending |
 | Expandable voxel bounds | Field grows logically without allocating full volume; new space is air | Implemented; legacy tile/nav dimensions remain fixed |
 | Save migration | Compact v3 overrides; v2 dense-brick saves accepted by loader | Implemented in source; existing files not locally exercised |
-| Real 3D surface | Marching-tetrahedra isosurface from eight density samples per source cube, not XY height extrusion | Met |
+| Real 3D surface | Surface Nets isosurface from the signed-density field, not XY height extrusion | Met in source; visual seam acceptance remains pending |
 | Smooth surface normals | Density-gradient normals | Met in source; visual verification pending |
 | Overhangs and arches | Additive sphere/capsule/box CSG can create disconnected solid volumes and air underneath | Met in source |
 | Tunnels and caves | Subtractive sphere/capsule/box CSG | Met in source |
@@ -31,9 +31,9 @@ The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint
 | Flatten / plane | Plane projection with smooth radial falloff in the same signed-density field | Met in source |
 | Ramp | Additive and subtractive sloped triangular-prism CSG brushes with material assignment | Met in source |
 | Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
-| Horizontal cutaway | Cut cap clips/intersects the same density field | Implemented in source; flicker/seam test pending |
+| Horizontal cutaway | Shader clips the existing outer mesh; a separate cap mesh is extracted from the same density field. Full solid runs are merged, contour cells are clipped/interpolated, and air cells remain open. XZ step is 4 voxels (0.4 m); Y level remains 0.1 m. | CPU tests pass for solid coverage, tunnel opening and linear contour interpolation; target-GPU visuals and sub-0.4 m features remain pending |
 | Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
-| Distance LOD | Current Raylib voxel mesher is fixed Step=1 with 16³ greedy chunks; no active Step4/Step16 LOD path | Not implemented in current branch |
+| Distance LOD | Adaptive density sampling uses a Step=64 fallback, Step=16 base and Step=8/4 detail; minimum detail step is 4 | Implemented in source; target-PC frame/memory measurements pending |
 | Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs local 0.5 m A* on `(X,Y,floor)` nodes; portal-linked routes cross adjacent 128 m regions and local edits invalidate only affected routes | Partially met: portal corridor selection tries two Manhattan orders, not a global portal-graph optimum |
 | Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; unsupported pawns integrate gravity and land on voxel floors | Partially met: pawn-pawn contact remains the horizontal crowd solver; no rigid-body/rolling terrain debris |
 | Save/load of edited chunks | Compressed versioned chunk serializer plus atomic world-file save/load; Raylib viewer autosaves edits and restores them at startup | Met for the Raylib terrain viewer; campaign/world seed migration still needs integration |
@@ -56,9 +56,9 @@ The signed-distance value is not the material's physical mass density. Physical 
 
 ### Geometry
 
-`Render.Raylib/VoxelChunkMesher.cs` extracts isosurfaces from 3D density samples using marching tetrahedra and computes normals from density gradients. LOD skips source samples but does not modify the source field resolution.
+`Render.Raylib/VoxelChunkMesher.cs` extracts the outer isosurface from the signed-density field using Surface Nets and computes normals from density gradients. LOD changes the sampling interval, not the source field.
 
-`Render.Raylib/VoxelTerrainRenderer.cs` caches 3D chunk meshes, applies frustum/distance selection, clips with the horizontal cut plane and rebuilds dirty chunks within per-frame budgets.
+`Render.Raylib/VoxelTerrainRenderer.cs` keeps the outer surface in indexed GPU pages keyed by LOD step. Horizontal clipping is a shader uniform and does not invalidate those pages. The cap is a separate density-derived mesh: full solid runs are greedily merged into rectangles, mixed contour cells are clipped at density zero with linear edge interpolation, and saddle cells use a consistent asymptotic decision. The cap is built from an immutable field snapshot on a cancellable worker, versioned independently from the outer surface, uploaded within the existing GPU budget and swapped only after all packets are ready. Moving the cut does not rebuild or upload the outer terrain.
 
 ### Editing
 
@@ -70,13 +70,13 @@ The base canyon profile is still generated from the existing 1 m XY surface data
 
 ## Remaining acceptance work
 
-1. Build the full .NET solution and resolve any compile/API issues.
-2. Run the Raylib viewer at close, medium and far zoom. Current renderer remains fixed Step=1; record frame time, number of surface candidates, capture time, mesh time and memory. LOD seam acceptance starts only after the multi-resolution path exists.
+1. Keep the full .NET solution build green and resolve compile/API regressions.
+2. Run the Raylib viewer at close, medium and far zoom. Record frame time, number of surface candidates, capture time, mesh time and memory; inspect transitions among Step=64/16/8/4.
 3. Sculpt a sphere, long capsule, box cut, additive arch and sloped ramp. Confirm a bridge/overhang and an air gap below it can exist at the same X/Z coordinates.
-4. Move the cut plane through a carved cave and the upper/lower passages. Check for caps, holes, flicker and seams across 3D chunk boundaries.
+4. Move the cut plane through a carved cave and the upper/lower passages. Check the actual cap, holes, contour edge, flicker and seams across 3D chunk boundaries. Include features narrower than 0.4 m to determine whether local XZ refinement is needed.
 5. Measure frame time and memory while moving the camera and editing at close range. Current per-frame budgets are source-level safeguards, not measured performance results.
 6. Extend multi-level routes across 128 m navigation-region boundaries and integrate vertical pawn-to-pawn contacts.
 7. Integrate the voxel edit file with the campaign save-slot/seed lifecycle.
 8. Run the Raylib viewer on the target GPU and capture seam, cutaway, tunnel/bridge and memory/FPS evidence.
 
-Current status: the world has a **single adaptive sparse/dense 3D edit store**, a procedural 1 m heightfield base, compact v3 saves with v2 migration, expandable voxel bounds, immutable worker snapshots and a vertical surface index. Local volume edits, support queries, cutaway and navigation consumers still use the same density field. However, untouched base terrain is not a hierarchy of full 3D voxels, and the current greedy renderer has no active multi-resolution LOD. Target-hardware performance and visual acceptance remain unverified.
+Current status: the world has a **single adaptive sparse/dense 3D edit store**, a procedural 1 m heightfield base, compact v3 saves with v2 migration, expandable voxel bounds, immutable worker snapshots and a vertical surface index. The outer renderer uses Surface Nets and adaptive sample steps; the section cap is a separate, versioned mesh from the same density field. Untouched base terrain is still not a hierarchy of fully materialized 3D voxels. Target-hardware performance and visual acceptance of the new cap remain unverified.
