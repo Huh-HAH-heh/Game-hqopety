@@ -35,6 +35,8 @@ public static class RaylibTerrainViewer
         ArgumentNullException.ThrowIfNull(worldMap);
 
         RaylibViewerSettings settings = RaylibViewerSettings.Load();
+        settings.CutawayEnabled = false;
+        settings.Save();
         using TerrainPipelineLogger renderLogger = new(
             settings.RenderLoggingEnabled,
             settings.LogMode);
@@ -109,8 +111,6 @@ public static class RaylibTerrainViewer
         RaylibPauseMenu menu = new(settings);
         RaylibLayerSlicePanel layerPanel = new();
         RaylibTerrainRenderer? renderer = null;
-        settings.CutawayEnabled = false;
-        settings.Save();
         bool cutawayMode = false;
         float maximumCutHeight = Math.Max(
             0f,
@@ -120,7 +120,6 @@ public static class RaylibTerrainViewer
             settings.CutawayHeightMeters,
             0f,
             maximumCutHeight);
-        bool cutHeightKeyWasHeld = false;
         string focusName = "SURFACE";
         VoxelEditMode voxelEditMode = VoxelEditMode.Off;
         float voxelBrushRadiusMeters = 1.5f;
@@ -152,9 +151,8 @@ public static class RaylibTerrainViewer
                 $"[Settings] Saved viewer profile: {RaylibViewerSettings.GetSettingsPath()}");
 
             Console.WriteLine(
-                "[Raylib] Cave at map centre (1152,1152): lower tunnel X 1076-1228, ",
-                "Z about 1140-1164, H 13-21m; upper passage near X 1152, Z 1136-1168, " +
-                "H 25-33m. F1/F2 focus, C surface.");
+                "[Raylib] Cutaway controls are temporarily disabled. " +
+                "Voxel editing: F3 mode, F4 material, F5/F6 brush radius.");
 
             bool exitRequested = false;
             long frameNumber = 0;
@@ -198,22 +196,6 @@ public static class RaylibTerrainViewer
                     layerPanel.Update(menu.Settings, maximumCutHeight);
                     menu.Settings.CutawayEnabled = false;
                     menu.CutawayEnabled = false;
-                    cutawayMode = false;
-                    focusName = "SURFACE";
-                    if (menu.Settings.CutawayEnabled != cutawayMode)
-                    {
-                        cutawayMode = menu.Settings.CutawayEnabled;
-                        if (cutawayMode)
-                        {
-                            focusName = "HORIZONTAL SECTION";
-                        }
-                        else
-                        {
-                            focusName = "SURFACE";
-                            terrain.DisableCutaway();
-                            renderer?.Synchronize(terrain);
-                        }
-                    }
 
                     if (layerPanel.ConsumeSettingsCommit())
                         menu.SaveSettings();
@@ -304,11 +286,7 @@ public static class RaylibTerrainViewer
                 if (menu.IsOpen)
                 {
                     camera.ReleaseMouse();
-                    if (cutHeightKeyWasHeld)
-                    {
-                        menu.SaveSettings();
-                        cutHeightKeyWasHeld = false;
-                    }
+
                 }
                 else
                 {
