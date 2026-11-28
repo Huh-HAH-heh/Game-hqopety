@@ -73,7 +73,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec4 fragColor;
         uniform int uCutEnabled;
         uniform float uCutHeight;
-        uniform sampler2D uCutMask;
+        uniform sampler2D texture0;
         uniform int uCutOverlayPass;
         uniform vec2 uCutWorldSize;
         uniform vec4 uCutColor;
@@ -91,7 +91,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 vec2 uv = fragWorldPosition.xz / uCutWorldSize;
                 if (any(lessThan(uv, vec2(0.0))) ||
                     any(greaterThan(uv, vec2(1.0))) ||
-                    texture(uCutMask, uv).r < 0.5)
+                    texture(texture0, uv).r < 0.5)
                     discard;
 
                 finalColor = uCutColor;
@@ -404,7 +404,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Shader _shader;
     private readonly int _cutEnabledLocation;
     private readonly int _cutHeightLocation;
-    private readonly int _cutMaskLocation;
     private readonly int _cutOverlayPassLocation;
     private readonly int _cutWorldSizeLocation;
     private readonly int _cutColorLocation;
@@ -528,7 +527,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
-        _cutMaskLocation = GetShaderLocation(_shader, "uCutMask");
         _cutOverlayPassLocation = GetShaderLocation(_shader, "uCutOverlayPass");
         _cutWorldSizeLocation = GetShaderLocation(_shader, "uCutWorldSize");
         _cutColorLocation = GetShaderLocation(_shader, "uCutColor");
@@ -542,7 +540,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (_cutEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
-            _cutMaskLocation < 0 ||
             _cutOverlayPassLocation < 0 ||
             _cutWorldSizeLocation < 0 ||
             _cutColorLocation < 0 ||
@@ -1925,40 +1922,53 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _cutPlaneWorldDepth = worldDepth;
     }
 
-    private void DrawCutOverlay(SparseVoxelField field, float heightMeters)
+    private unsafe void DrawCutOverlay(SparseVoxelField field, float heightMeters)
     {
-        if (_cutMaskTexture.Id == 0 || _cutPlaneMesh.VaoId == 0)
+        if (_cutMaskTexture.Id == 0 || _cutPlaneMesh.VaoId == 0 ||
+            _material.Maps == null)
             return;
 
-        SetShaderValueTexture(_shader, _cutMaskLocation, _cutMaskTexture);
-        SetShaderValue(
-            _shader,
-            _cutOverlayPassLocation,
-            1,
-            ShaderUniformDataType.Int);
-        SetShaderValue(
-            _shader,
-            _cutWorldSizeLocation,
-            new Vector2(
-                field.Width * SparseVoxelField.VoxelSizeMeters,
-                field.Depth * SparseVoxelField.VoxelSizeMeters),
-            ShaderUniformDataType.Vec2);
-        SetShaderValue(
-            _shader,
-            _cutColorLocation,
-            new Vector4(0.31f, 0.23f, 0.16f, 1f),
-            ShaderUniformDataType.Vec4);
+        int diffuseMap = (int)MaterialMapIndex.Albedo;
+        MaterialMap* maps = _material.Maps;
+        Texture2D previousTexture = maps[diffuseMap].Texture;
+        maps[diffuseMap].Texture = _cutMaskTexture;
 
-        DrawMesh(
-            _cutPlaneMesh,
-            _material,
-            Raymath.MatrixTranslate(0f, heightMeters, 0f));
+        try
+        {
+            SetShaderValue(
+                _shader,
+                _cutOverlayPassLocation,
+                1,
+                ShaderUniformDataType.Int);
+            SetShaderValue(
+                _shader,
+                _cutWorldSizeLocation,
+                new Vector2(
+                    field.Width * SparseVoxelField.VoxelSizeMeters,
+                    field.Depth * SparseVoxelField.VoxelSizeMeters),
+                ShaderUniformDataType.Vec2);
+            SetShaderValue(
+                _shader,
+                _cutColorLocation,
+                new Vector4(0.31f, 0.23f, 0.16f, 1f),
+                ShaderUniformDataType.Vec4);
 
-        SetShaderValue(
-            _shader,
-            _cutOverlayPassLocation,
-            0,
-            ShaderUniformDataType.Int);
+            // DrawMesh binds the diffuse material map to texture unit zero.
+            maps[diffuseMap].Texture = _cutMaskTexture;
+            DrawMesh(
+                _cutPlaneMesh,
+                _material,
+                Raymath.MatrixTranslate(0f, heightMeters, 0f));
+        }
+        finally
+        {
+            maps[diffuseMap].Texture = previousTexture;
+            SetShaderValue(
+                _shader,
+                _cutOverlayPassLocation,
+                0,
+                ShaderUniformDataType.Int);
+        }
     }
 
     private void GetGpuVertexUsage(
