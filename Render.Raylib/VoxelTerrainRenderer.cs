@@ -2084,11 +2084,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         }
                         else
                         {
-                            // Upload the replacement first. The old indexed ranges remain
-                            // valid until every new packet has reached its GPU buffer.
-                            GpuMeshRegion[] nextRegions = AppendGpuRegions(page, pending);
+                            // Reuse the old region capacity before requesting new global
+                            // GPU storage. CanUpdateGpuRegions above is the zero-reallocation
+                            // fast path for replacements that fit in the existing ranges.
                             if (hadRegions)
+                            {
+                                page.Regions.Remove(key);
                                 ReleaseGpuRegions(page, oldRegions!);
+                            }
+
+                            GpuMeshRegion[] nextRegions = AppendGpuRegions(page, pending);
                             page.Regions[key] = nextRegions;
                         }
                     }
