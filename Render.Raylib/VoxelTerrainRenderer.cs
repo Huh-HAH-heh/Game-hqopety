@@ -48,6 +48,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec3 vertexNormal;
         uniform mat4 mvp;
         uniform mat4 matModel;
+        uniform vec3 uCameraPosition;
+        uniform vec3 uCameraForward;
+        uniform float uNearPlane;
         uniform float uLodDepthBias;
         out vec3 fragWorldPosition;
         out vec3 fragWorldNormal;
@@ -58,8 +61,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             fragWorldPosition = worldPosition.xyz;
             fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
             fragColor = vertexColor;
-            gl_Position = mvp * vec4(vertexPosition, 1.0);
-            gl_Position.z -= uLodDepthBias * gl_Position.w;
+            vec4 clipPosition = mvp * vec4(vertexPosition, 1.0);
+            float viewDepth = max(
+                dot(worldPosition.xyz - uCameraPosition, uCameraForward),
+                uNearPlane);
+            float clipDepthBias =
+                (2.0 * uNearPlane * uLodDepthBias) / (viewDepth * viewDepth);
+            gl_Position = clipPosition;
+            gl_Position.z -= clipDepthBias * clipPosition.w;
         }
         """;
 
@@ -372,6 +381,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _lodFadeLocation;
     private readonly int _lodRoleLocation;
     private readonly int _lodDepthBiasLocation;
+    private readonly int _cameraPositionLocation;
+    private readonly int _cameraForwardLocation;
+    private readonly int _nearPlaneLocation;
 
     private TerrainPalette _palette;
     private SparseVoxelField? _observedField;
@@ -479,6 +491,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _lodFadeLocation = GetShaderLocation(_shader, "uLodFade");
         _lodRoleLocation = GetShaderLocation(_shader, "uLodRole");
         _lodDepthBiasLocation = GetShaderLocation(_shader, "uLodDepthBias");
+        _cameraPositionLocation = GetShaderLocation(_shader, "uCameraPosition");
+        _cameraForwardLocation = GetShaderLocation(_shader, "uCameraForward");
+        _nearPlaneLocation = GetShaderLocation(_shader, "uNearPlane");
 
         if (_cutEnabledLocation < 0 ||
             _cutHatchingEnabledLocation < 0 ||
@@ -488,7 +503,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _sunIntensityLocation < 0 ||
             _lodFadeLocation < 0 ||
             _lodRoleLocation < 0 ||
-            _lodDepthBiasLocation < 0)
+            _lodDepthBiasLocation < 0 ||
+            _cameraPositionLocation < 0 ||
+            _cameraForwardLocation < 0 ||
+            _nearPlaneLocation < 0)
         {
             UnloadShader(_shader);
             throw new InvalidOperationException("The 3D voxel shader is missing a required uniform.");
@@ -753,12 +771,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         BeginMode3D(camera);
         int draws = 0;
+        Vector3 cameraForward = camera.Target - camera.Position;
+        cameraForward = cameraForward.LengthSquared() > 1e-8f
+            ? Vector3.Normalize(cameraForward)
+            : -Vector3.UnitY;
+        SetLodDepthCamera(camera.Position, cameraForward, nearPlane);
         SetLodShader(-1, 0f);
 
         // Draw far-to-near. Coarse surfaces fill gaps while detailed pages win depth.
         foreach ((GpuPageKey key, GpuMeshPage page) in _coarseVisiblePages)
         {
-            SetLodDepthBias(GetLodDepthBias(key.Step, cameraDistance, nearPlane));
+            SetLodDepthBias(GetLodDepthBias(key.Step));
             draws += DrawGpuPage(page, _material);
         }
 
@@ -769,7 +792,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 (key.Step == BaseLodStep && !basePageReady))
                 continue;
 
-            SetLodDepthBias(GetLodDepthBias(key.Step, cameraDistance, nearPlane));
+            SetLodDepthBias(GetLodDepthBias(key.Step));
             draws += DrawGpuPage(page, _material);
         }
 
@@ -2507,19 +2530,30 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             fade, ShaderUniformDataType.Float);
     }
 
-    private void SetLodDepthBias(float bias)
+    private void SetLodDepthCamera(Vector3 position, Vector3 forward, float nearPlane)
+    {
+        SetShaderValue(
+            _shader, _cameraPositionLocation,
+            position, ShaderUniformDataType.Vec3);
+        SetShaderValue(
+            _shader, _cameraForwardLocation,
+            forward, ShaderUniformDataType.Vec3);
+        SetShaderValue(
+            _shader, _nearPlaneLocation,
+            nearPlane, ShaderUniformDataType.Float);
+    }
+
+    private void SetLodDepthBias(float offsetMeters)
     {
         SetShaderValue(
             _shader, _lodDepthBiasLocation,
-            bias, ShaderUniformDataType.Float);
+            offsetMeters, ShaderUniformDataType.Float);
     }
 
-    private static float GetLodDepthBias(int step, float cameraDistance, float nearPlane)
+    private static float GetLodDepthBias(int step)
     {
         float detailLevels = MathF.Log2(FallbackLodStep / (float)step);
-        float depthOffsetMeters = detailLevels / MathF.Log2(FallbackLodStep) * 0.05f;
-        float distanceSquared = MathF.Max(1f, cameraDistance * cameraDistance);
-        return 2f * nearPlane * depthOffsetMeters / distanceSquared;
+        return detailLevels / MathF.Log2(FallbackLodStep) * 0.05f;
     }
 
     private void DiscardLegacyCutCap(ChunkKey key, ChunkEntry entry)
