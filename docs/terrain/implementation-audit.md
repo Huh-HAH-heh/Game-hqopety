@@ -33,11 +33,14 @@ The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint
 | Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
 | Horizontal cutaway | Temporarily disabled in the renderer acceptance path. Shader clipping is forced off; cut-cap build, upload and draw are not scheduled. Previous cap implementation remains dormant for later rework. | Intentionally disabled while validating full-field rendering |
 | Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
-| Distance LOD | Temporarily disabled. Every chunk across the complete field bounds is built at fixed Step=4 (0.4 m sample interval), independent of camera distance. Camera distance only prioritizes build order; it does not cull chunks. | Fixed-step source path committed; compile, runtime coverage and target-GPU performance still require verification |
+| Feature-preserving mesh decimation | Per-packet conservative QEM after Surface Nets. Only manifold interior edges are candidates; packet boundaries/non-manifold edges and per-vertex material/color seams are locked. Link condition, incident-face normal/area checks and a 0.02 m plane-deviation ceiling gate collapses. | Implemented in source; synthetic planar-hole/material-seam test and CI verification pending |
+| Distance LOD | Temporarily disabled. Every chunk across the complete field bounds is built at fixed Step=4 (0.4 m sample interval), independent of camera distance. Camera distance only prioritizes build order; it does not cull chunks. | Fixed-step mode retained; compile/runtime verification belongs to the active CI run |
 | Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs local 0.5 m A* on `(X,Y,floor)` nodes; portal-linked routes cross adjacent 128 m regions and local edits invalidate only affected routes | Partially met: portal corridor selection tries two Manhattan orders, not a global portal-graph optimum |
 | Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; unsupported pawns integrate gravity and land on voxel floors | Partially met: pawn-pawn contact remains the horizontal crowd solver; no rigid-body/rolling terrain debris |
 | Save/load of edited chunks | Compressed versioned chunk serializer plus atomic world-file save/load; Raylib viewer autosaves edits and restores them at startup | Met for the Raylib terrain viewer; campaign/world seed migration still needs integration |
 | Undo/redo and edit history | Bounded 16-step / 64 MiB chunk-snapshot history; F7 undo and F8 redo in the Raylib editor | Met for in-session edit operations; history is intentionally not persisted between launches |
+| Indexed mesh packets | `MaximumVerticesPerMesh=60,000`, `MaximumIndicesPerMesh=270,000`; Surface Nets reuses existing packet vertices before flushing; QEM can lower packet index payload without changing Step=4 | Source change committed; verify Raylib upload/draw and target-GPU behavior in CI/runtime |
+| GPU page allocator | Region reserve reduced from 12.5% to about 3.125%; same-mesh cache/hash path retained; replacement appends new ranges before releasing old regions; frame diagnostics separate actual, reserved and physical counts | Implemented in source; index-space fragmentation and transactional replacement still need runtime measurements |
 | Measured performance | Sparse storage and per-frame build budgets exist; no target-PC benchmark has been run | Unverified |
 
 ## Temporary full-field acceptance mode
@@ -64,9 +67,9 @@ The signed-distance value is not the material's physical mass density. Physical 
 
 ### Geometry
 
-`Render.Raylib/VoxelChunkMesher.cs` extracts the outer isosurface from the signed-density field using Surface Nets and computes normals from density gradients. LOD changes the sampling interval, not the source field.
+`Render.Raylib/VoxelChunkMesher.cs` extracts the outer isosurface from the signed-density field using Surface Nets and computes normals from density gradients. In the temporary whole-field path, every chunk remains at fixed Step=4. Completed packet geometry passes through `VoxelMeshDecimator` before GPU upload: conservative QEM preserves open/non-manifold packet boundaries and material-color transitions, rejects invalid/flip-producing collapses, and enforces a 0.02 m incident-plane deviation ceiling. `MaximumIndicesPerMesh` is 270,000 while the per-mesh vertex limit remains 60,000.
 
-`Render.Raylib/VoxelTerrainRenderer.cs` currently bypasses both cutaway and adaptive LOD. It enumerates the full field at a fixed Step=4, prioritizes nearby chunks for background construction without camera-culling other chunks, and packs indexed chunk regions into reusable GPU pages. Mesh hashes and the existing cache prevent unchanged terrain from being uploaded again. The former cut-cap and adaptive-LOD implementation remains dormant while full-field rendering is validated.
+`Render.Raylib/VoxelTerrainRenderer.cs` currently bypasses both cutaway and adaptive LOD. It enumerates the full field at a fixed Step=4, prioritizes nearby chunks for background construction without camera-culling other chunks, and packs indexed chunk regions into reusable GPU pages. Mesh hashes and the existing cache prevent unchanged terrain from being uploaded again. GPU page diagnostics report actual live geometry, reserved ranges, physical capacity and free-range fragmentation. Chunk replacement keeps the previous GPU regions until the new ranges have been appended successfully. The former cut-cap and adaptive-LOD implementation remains dormant while full-field rendering is validated.
 
 ### Editing
 
@@ -78,7 +81,7 @@ The base canyon profile is still generated from the existing 1 m XY surface data
 
 ## Remaining acceptance work
 
-1. Keep the full .NET solution build green and resolve compile/API regressions.
+1. Keep the full .NET solution build green and resolve compile/API regressions; confirm the new QEM synthetic planar-hole/material-seam test passes.
 2. Run the Raylib viewer at close, medium and far zoom. Record frame time, number of surface candidates, capture time, mesh time and memory; inspect transitions among Step=64/16/8/4.
 3. Sculpt a sphere, long capsule, box cut, additive arch and sloped ramp. Confirm a bridge/overhang and an air gap below it can exist at the same X/Z coordinates.
 4. Move the cut plane through a carved cave and the upper/lower passages. Check the actual cap, holes, contour edge, flicker and seams across 3D chunk boundaries. Include features narrower than 0.4 m to determine whether local XZ refinement is needed.
