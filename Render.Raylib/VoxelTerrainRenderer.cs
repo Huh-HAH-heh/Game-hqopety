@@ -1781,297 +1781,314 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return draws;
     }
 
-    internal static int FillCutMask(
-        IVoxelFieldSource field,
-        int layer,
-        Span<byte> pixels,
-        CancellationToken cancellationToken = default)
+    private void RequestCutSurfaceBuild(SparseVoxelField field, int layer)
     {
-        ArgumentNullException.ThrowIfNull(field);
         if ((uint)layer > (uint)field.Height)
-            throw new ArgumentOutOfRangeException(nameof(layer));
-
-        int required = checked(field.Width * field.Depth);
-        if (pixels.Length < required)
-            throw new ArgumentException("Cut mask destination is too small.", nameof(pixels));
-
-        int lowerY = layer - 1;
-        int upperY = layer;
-        int solidPixels = 0;
-        for (int z = 0; z < field.Depth; z++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            int row = z * field.Width;
-            for (int x = 0; x < field.Width; x++)
-            {
-                float density = (field.GetDensity(x, lowerY, z) +
-                    field.GetDensity(x, upperY, z)) * 0.5f;
-                bool solid = density > 0f;
-                pixels[row + x] = solid ? (byte)255 : (byte)0;
-                if (solid) solidPixels++;
-            }
-        }
-
-        return solidPixels;
-    }
-
-    private void RequestCutMaskBuild(SparseVoxelField field, int layer)
-    {
-        if (layer < 0 || layer > field.Height)
             return;
 
-        if (_cutMaskCancellation != null)
-        {
-            try { _cutMaskCancellation.Cancel(); }
-            catch (ObjectDisposedException) { }
-        }
+        CancelPendingCutSurfaceBuild();
 
-        _cutMaskRequestedLayer = layer;
-        long generation = Interlocked.Increment(ref _cutMaskGeneration);
-        int width = field.Width;
-        int depth = field.Depth;
+        long generation = Interlocked.Increment(ref _cutSurfaceGeneration);
+        long revision = Interlocked.Read(ref _cutSurfaceRevision);
+        int paletteVersion = _paletteVersion;
         IVoxelFieldSource snapshot = GetWorldBuildSnapshot(field);
-        long fieldVersion = field.Version;
+        TerrainPalette palette = _palette;
         CancellationTokenSource cancellation = new();
         CancellationToken token = cancellation.Token;
-        _cutMaskCancellation = cancellation;
 
-        _ = Task.Run(() =>
+        _cutSurfaceRequestedLayer = layer;
+        _cutSurfaceRequestedRevision = revision;
+        _cutSurfaceRequestedPaletteVersion = paletteVersion;
+        _cutSurfaceCancellation = cancellation;
+        Interlocked.Exchange(ref _cutSurfaceDirty, 0);
+
+        _logger.Write(
+            RenderLogMode.FrameSummary,
+            "CUT_SURFACE_BUILD_REQUEST",
+            $"layer={layer} step={MinimumDetailStep} generation={generation} " +
+            $"revision={revision} palette={paletteVersion}");
+
+        Task task = Task.Run(() =>
         {
-            byte[]? pixels = null;
+            VoxelMeshData[] meshes = Array.Empty<VoxelMeshData>();
             try
             {
-                pixels = ArrayPool<byte>.Shared.Rent(checked(width * depth));
-                int solidPixels = FillCutMask(
+                long started = Stopwatch.GetTimestamp();
+                meshes = VoxelChunkMesher.BuildCutSurfaceData(
                     snapshot,
                     layer,
-                    pixels.AsSpan(0, width * depth),
+                    palette,
+                    MinimumDetailStep,
                     token);
+                double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
-                if (generation != Volatile.Read(ref _cutMaskGeneration))
+                if (generation != Volatile.Read(ref _cutSurfaceGeneration))
                     return;
 
-                _cutMaskCompletions.Enqueue(new CutMaskBuildResult(
-                    generation, layer, width, depth, fieldVersion, solidPixels, pixels));
-                pixels = null;
+                _cutSurfaceCompletions.Enqueue(new CutSurfaceBuildResult(
+                    generation,
+                    layer,
+                    revision,
+                    paletteVersion,
+                    meshes,
+                    elapsed,
+                    null));
+                meshes = Array.Empty<VoxelMeshData>();
             }
-            catch (Exception exception) when (
-                exception is OperationCanceledException ||
-                exception is ObjectDisposedException)
+            catch (OperationCanceledException)
             {
             }
             catch (Exception exception)
             {
-                _logger.Error(
-                    "CUT_MASK_BUILD_FAILED",
-                    $"layer={layer} generation={generation} error={exception}");
+                if (generation == Volatile.Read(ref _cutSurfaceGeneration))
+                {
+                    _cutSurfaceCompletions.Enqueue(new CutSurfaceBuildResult(
+                        generation,
+                        layer,
+                        revision,
+                        paletteVersion,
+                        Array.Empty<VoxelMeshData>(),
+                        0d,
+                        exception));
+                }
             }
             finally
             {
-                if (pixels != null)
-                    ArrayPool<byte>.Shared.Return(pixels, clearArray: false);
+                ReturnMeshData(meshes);
                 cancellation.Dispose();
             }
         });
+        _cutSurfaceBuildTasks.Enqueue(task);
     }
 
-    private unsafe void ProcessCutMaskCompletions(SparseVoxelField field)
+    private void CancelPendingCutSurfaceBuild()
     {
-        while (_cutMaskCompletions.TryDequeue(out CutMaskBuildResult result))
+        Interlocked.Increment(ref _cutSurfaceGeneration);
+
+        if (_cutSurfaceCancellation != null)
         {
-            if (result.Generation != Volatile.Read(ref _cutMaskGeneration) ||
-                result.Layer != _cutMaskRequestedLayer ||
-                result.FieldVersion != field.Version)
+            try { _cutSurfaceCancellation.Cancel(); }
+            catch (ObjectDisposedException) { }
+            _cutSurfaceCancellation = null;
+        }
+
+        if (_pendingCutSurfaceData != null)
+        {
+            ReturnMeshData(_pendingCutSurfaceData);
+            _pendingCutSurfaceData = null;
+        }
+
+        _pendingCutSurfaceUploadIndex = 0;
+        _pendingCutSurfaceLayer = int.MinValue;
+        _pendingCutSurfaceRevision = long.MinValue;
+        _pendingCutSurfacePaletteVersion = int.MinValue;
+        _pendingCutSurfaceBuildMilliseconds = 0d;
+
+        foreach (Mesh mesh in _uploadingCutSurfaceMeshes)
+        {
+            if (mesh.VaoId != 0)
             {
-                ArrayPool<byte>.Shared.Return(result.Pixels, clearArray: false);
-                if (result.FieldVersion != field.Version)
-                    Interlocked.Exchange(ref _cutMaskDirty, 1);
+                UnloadMesh(mesh);
+                _totalGpuUnloads++;
+            }
+        }
+        _uploadingCutSurfaceMeshes.Clear();
+
+        while (_cutSurfaceCompletions.TryDequeue(out CutSurfaceBuildResult completion))
+            ReturnMeshData(completion.Meshes);
+    }
+
+    private void ProcessCutSurfaceCompletions(SparseVoxelField field)
+    {
+        while (_cutSurfaceCompletions.TryDequeue(out CutSurfaceBuildResult result))
+        {
+            bool current = result.Generation == Volatile.Read(ref _cutSurfaceGeneration) &&
+                result.Layer == _cutSurfaceRequestedLayer &&
+                result.Revision == Interlocked.Read(ref _cutSurfaceRevision) &&
+                result.PaletteVersion == _paletteVersion;
+
+            if (!current)
+            {
+                ReturnMeshData(result.Meshes);
+                if (result.Revision != Interlocked.Read(ref _cutSurfaceRevision))
+                    Interlocked.Exchange(ref _cutSurfaceDirty, 1);
                 continue;
             }
 
-            try
+            if (result.Error != null)
             {
-                if (_cutMaskTexture.Id == 0 ||
-                    _cutMaskWidth != result.Width ||
-                    _cutMaskDepth != result.Depth)
-                {
-                    fixed (byte* pixels = result.Pixels)
-                    {
-                        Image image = new()
-                        {
-                            Data = pixels,
-                            Width = result.Width,
-                            Height = result.Depth,
-                            Mipmaps = 1,
-                            Format = PixelFormat.UncompressedGrayscale
-                        };
-                        Texture2D nextTexture = LoadTextureFromImage(image);
-                        if (nextTexture.Id == 0)
-                            throw new InvalidOperationException(
-                                "Could not upload voxel cut mask texture.");
-
-                        SetTextureFilter(nextTexture, TextureFilter.Bilinear);
-                        SetTextureWrap(nextTexture, TextureWrap.Clamp);
-
-                        if (_cutMaskTexture.Id != 0)
-                            UnloadTexture(_cutMaskTexture);
-                        _cutMaskTexture = nextTexture;
-                    }
-
-                    _cutMaskWidth = result.Width;
-                    _cutMaskDepth = result.Depth;
-                }
-                else
-                {
-                    fixed (byte* pixels = result.Pixels)
-                        UpdateTexture(_cutMaskTexture, pixels);
-                }
-
-                EnsureCutPlaneMesh(result.Width, result.Depth);
-                _cutMaskReadyLayer = result.Layer;
-                _activeCutLayer = result.Layer;
-
-                _logger.Write(
-                    RenderLogMode.FrameSummary,
-                    "CUT_MASK_READY",
-                    $"layer={result.Layer} size={result.Width}x{result.Depth} " +
-                    $"solidPixels={result.SolidPixels}/{result.Width * result.Depth} " +
-                    $"fieldVersion={result.FieldVersion}");
-            }
-            catch (Exception exception)
-            {
+                ReturnMeshData(result.Meshes);
                 _logger.Error(
-                    "CUT_MASK_UPLOAD_FAILED",
-                    $"layer={result.Layer} generation={result.Generation} error={exception}");
-                Interlocked.Exchange(ref _cutMaskDirty, 1);
+                    "CUT_SURFACE_BUILD_FAILED",
+                    $"layer={result.Layer} generation={result.Generation} error={result.Error}");
+                continue;
             }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(result.Pixels, clearArray: false);
-            }
+
+            if (_pendingCutSurfaceData != null)
+                ReturnMeshData(_pendingCutSurfaceData);
+
+            _pendingCutSurfaceData = result.Meshes;
+            _pendingCutSurfaceUploadIndex = 0;
+            _pendingCutSurfaceLayer = result.Layer;
+            _pendingCutSurfaceRevision = result.Revision;
+            _pendingCutSurfacePaletteVersion = result.PaletteVersion;
+            _pendingCutSurfaceBuildMilliseconds = result.BuildMilliseconds;
+
+            _logger.Write(
+                RenderLogMode.FrameSummary,
+                "CUT_SURFACE_BUILD_READY",
+                $"layer={result.Layer} meshes={result.Meshes.Length} " +
+                $"vertices={SumVertices(result.Meshes)} triangles={SumTriangles(result.Meshes)} " +
+                $"buildMs={result.BuildMilliseconds:0.000} revision={result.Revision}");
         }
     }
 
-    private void EnsureCutPlaneMesh(int width, int depth)
+    private double UploadPendingCutSurfaceMeshes(double budgetMilliseconds)
     {
-        float worldWidth = width * SparseVoxelField.VoxelSizeMeters;
-        float worldDepth = depth * SparseVoxelField.VoxelSizeMeters;
-        if (_cutPlaneMesh.VaoId != 0 &&
-            _cutPlaneWorldWidth == worldWidth &&
-            _cutPlaneWorldDepth == worldDepth)
-            return;
+        VoxelMeshData[]? data = _pendingCutSurfaceData;
+        if (data == null)
+            return 0d;
 
-        if (_cutPlaneMesh.VaoId != 0)
-            UnloadMesh(_cutPlaneMesh);
+        Stopwatch timer = Stopwatch.StartNew();
+        try
+        {
+            while (_pendingCutSurfaceUploadIndex < data.Length &&
+                timer.Elapsed.TotalMilliseconds < budgetMilliseconds)
+            {
+                int index = _pendingCutSurfaceUploadIndex++;
+                VoxelMeshData source = data[index];
+                try
+                {
+                    Mesh mesh = VoxelChunkMesher.UploadOne(source);
+                    _uploadingCutSurfaceMeshes.Add(mesh);
+                    GpuUploadsLastFrame++;
+                    _totalGpuUploads++;
+                }
+                finally
+                {
+                    source.ReturnCpuArrays();
+                }
+            }
 
-        Mesh mesh = new(4, 2);
-        mesh.AllocVertices();
-        mesh.AllocNormals();
-        mesh.AllocColors();
-        mesh.AllocIndices();
+            if (_pendingCutSurfaceUploadIndex >= data.Length)
+                CommitPendingCutSurfaceMeshes();
+        }
+        catch (Exception exception)
+        {
+            ReturnMeshData(data);
+            _pendingCutSurfaceData = null;
+            _pendingCutSurfaceUploadIndex = 0;
 
-        Span<Vector3> vertices = mesh.VerticesAs<Vector3>();
-        vertices[0] = new Vector3(0f, 0f, 0f);
-        vertices[1] = new Vector3(0f, 0f, worldDepth);
-        vertices[2] = new Vector3(worldWidth, 0f, worldDepth);
-        vertices[3] = new Vector3(worldWidth, 0f, 0f);
+            foreach (Mesh mesh in _uploadingCutSurfaceMeshes)
+            {
+                if (mesh.VaoId == 0)
+                    continue;
+                UnloadMesh(mesh);
+                _totalGpuUnloads++;
+            }
+            _uploadingCutSurfaceMeshes.Clear();
 
-        Span<Vector3> normals = mesh.NormalsAs<Vector3>();
-        normals.Fill(Vector3.UnitY);
+            _logger.Error(
+                "CUT_SURFACE_GPU_UPLOAD_FAILED",
+                $"layer={_pendingCutSurfaceLayer} error={exception}");
+        }
 
-        Span<byte> colors = mesh.ColorsAs<byte>();
-        colors.Fill(255);
-
-        Span<ushort> indices = mesh.IndicesAs<ushort>();
-        indices[0] = 0;
-        indices[1] = 1;
-        indices[2] = 2;
-        indices[3] = 0;
-        indices[4] = 2;
-        indices[5] = 3;
-
-        UploadMesh(ref mesh, false);
-        _cutPlaneMesh = mesh;
-        _cutPlaneWorldWidth = worldWidth;
-        _cutPlaneWorldDepth = worldDepth;
+        return timer.Elapsed.TotalMilliseconds;
     }
 
-    private unsafe void DrawCutOverlay(SparseVoxelField field, float heightMeters)
+    private void CommitPendingCutSurfaceMeshes()
     {
-        if (_cutMaskTexture.Id == 0 || _cutPlaneMesh.VaoId == 0)
+        VoxelMeshData[]? pending = _pendingCutSurfaceData;
+        if (pending == null)
             return;
 
-        bool vertexArrayBound = false;
-        Rlgl.DisableDepthMask();
+        if (_pendingCutSurfaceRevision != Interlocked.Read(ref _cutSurfaceRevision) ||
+            _pendingCutSurfacePaletteVersion != _paletteVersion ||
+            _pendingCutSurfaceLayer != _cutSurfaceRequestedLayer)
+        {
+            ReturnMeshData(pending);
+            _pendingCutSurfaceData = null;
+            _pendingCutSurfaceUploadIndex = 0;
+            foreach (Mesh mesh in _uploadingCutSurfaceMeshes)
+            {
+                if (mesh.VaoId == 0)
+                    continue;
+                UnloadMesh(mesh);
+                _totalGpuUnloads++;
+            }
+            _uploadingCutSurfaceMeshes.Clear();
+            Interlocked.Exchange(ref _cutSurfaceDirty, 1);
+            return;
+        }
+
+        Mesh[] previous = _cutSurfaceMeshes;
+        _cutSurfaceMeshes = _uploadingCutSurfaceMeshes.ToArray();
+        _uploadingCutSurfaceMeshes.Clear();
+
+        _activeCutLayer = _pendingCutSurfaceLayer;
+        _cutSurfaceReadyRevision = _pendingCutSurfaceRevision;
+        _cutSurfaceReadyPaletteVersion = _pendingCutSurfacePaletteVersion;
+        RebuiltCutCaps++;
+
+        foreach (Mesh mesh in previous)
+        {
+            if (mesh.VaoId == 0)
+                continue;
+            UnloadMesh(mesh);
+            _totalGpuUnloads++;
+        }
+
+        int vertices = SumVertices(pending);
+        int triangles = SumTriangles(pending);
+        _logger.Write(
+            RenderLogMode.FrameSummary,
+            "CUT_SURFACE_READY",
+            $"layer={_activeCutLayer} meshes={_cutSurfaceMeshes.Length} " +
+            $"vertices={vertices} triangles={triangles} " +
+            $"buildMs={_pendingCutSurfaceBuildMilliseconds:0.000} " +
+            $"revision={_cutSurfaceReadyRevision}");
+
+        _pendingCutSurfaceData = null;
+        _pendingCutSurfaceUploadIndex = 0;
+        _pendingCutSurfaceLayer = int.MinValue;
+        _pendingCutSurfaceRevision = long.MinValue;
+        _pendingCutSurfacePaletteVersion = int.MinValue;
+        _pendingCutSurfaceBuildMilliseconds = 0d;
+    }
+
+    private int DrawCutSurfaceMeshes()
+    {
+        if (_cutSurfaceMeshes.Length == 0)
+            return 0;
+
+        SetShaderValue(
+            _shader,
+            _cutSurfacePassLocation,
+            1,
+            ShaderUniformDataType.Int);
         Rlgl.DisableBackfaceCulling();
         try
         {
-            Rlgl.EnableShader(_shader.Id);
-
-            SetShaderValue(
-                _shader,
-                _cutOverlayPassLocation,
-                1,
-                ShaderUniformDataType.Int);
-            SetShaderValue(
-                _shader,
-                _cutPlaneHeightLocation,
-                heightMeters,
-                ShaderUniformDataType.Float);
-            SetShaderValue(
-                _shader,
-                _cutWorldSizeLocation,
-                new Vector2(
-                    field.Width * SparseVoxelField.VoxelSizeMeters,
-                    field.Depth * SparseVoxelField.VoxelSizeMeters),
-                ShaderUniformDataType.Vec2);
-            SetShaderValue(
-                _shader,
-                _cutColorLocation,
-                new Vector4(0.31f, 0.23f, 0.16f, 1f),
-                ShaderUniformDataType.Vec4);
-            SetShaderValue(
-                _shader,
-                _cutMaskSamplerLocation,
-                0,
-                ShaderUniformDataType.Int);
-
-            Matrix4x4 view = Rlgl.GetMatrixModelview();
-            Matrix4x4 projection = Rlgl.GetMatrixProjection();
-            SetShaderValueMatrix(
-                _shader,
-                _mvpLocation,
-                Raymath.MatrixMultiply(view, projection));
-            SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
-
-            Rlgl.ActiveTextureSlot(0);
-            Rlgl.EnableTexture(_cutMaskTexture.Id);
-
-            vertexArrayBound = Rlgl.EnableVertexArray(_cutPlaneMesh.VaoId);
-            if (!vertexArrayBound)
-                throw new InvalidOperationException("Could not bind the cut overlay vertex array.");
-
-            Rlgl.DrawVertexArrayElements(
-                0,
-                _cutPlaneMesh.TriangleCount * 3,
-                null);
+            foreach (Mesh mesh in _cutSurfaceMeshes)
+                DrawMesh(mesh, _material, Matrix4x4.Identity);
         }
         finally
         {
-            if (vertexArrayBound)
-                Rlgl.DisableVertexArray();
-
-            Rlgl.ActiveTextureSlot(0);
-            Rlgl.DisableTexture();
+            Rlgl.EnableBackfaceCulling();
             SetShaderValue(
                 _shader,
-                _cutOverlayPassLocation,
+                _cutSurfacePassLocation,
                 0,
                 ShaderUniformDataType.Int);
-            Rlgl.DisableShader();
-            Rlgl.EnableBackfaceCulling();
-            Rlgl.EnableDepthMask();
         }
+
+        return _cutSurfaceMeshes.Length;
+    }
+
+    private void TrimCompletedCutSurfaceTasks()
+    {
+        while (_cutSurfaceBuildTasks.TryPeek(out Task? task) && task.IsCompleted)
+            _cutSurfaceBuildTasks.TryDequeue(out _);
     }
 
     private void GetGpuVertexUsage(
