@@ -434,6 +434,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _cutMaskRequestedLayer = int.MinValue;
     private int _cutMaskReadyLayer = int.MinValue;
     private int _activeCutLayer = int.MinValue;
+    private int _cutOverlayUnavailableLayer = int.MinValue;
     private int _cutMaskDirty;
     private int _cutMaskWidth;
     private int _cutMaskDepth;
@@ -644,12 +645,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             RequestCutMaskBuild(field, stableCutLayer);
 
         ProcessCutMaskCompletions(field);
-        bool cutOverlayReady;
-        unsafe
+        bool cutMaskReady = _cutMaskTexture.Id != 0;
+        bool cutPlaneReady = _cutPlaneMesh.VaoId != 0;
+        bool cutMaterialReady;
+        unsafe { cutMaterialReady = _material.Maps != null; }
+
+        bool cutOverlayReady = cutMaskReady && cutPlaneReady && cutMaterialReady;
+        if (cutEnabled && _activeCutLayer >= 0 && !cutOverlayReady)
         {
-            cutOverlayReady = _cutMaskTexture.Id != 0 &&
-                _cutPlaneMesh.VaoId != 0 &&
-                _material.Maps != null;
+            if (_cutOverlayUnavailableLayer != _activeCutLayer)
+            {
+                _cutOverlayUnavailableLayer = _activeCutLayer;
+                _logger.Error(
+                    "CUT_OVERLAY_NOT_READY",
+                    $"layer={_activeCutLayer} mask={cutMaskReady} planeVao={_cutPlaneMesh.VaoId} materialMaps={cutMaterialReady}");
+            }
+        }
+        else
+        {
+            _cutOverlayUnavailableLayer = int.MinValue;
         }
 
         // Never clip the terrain unless the matching cap overlay can be drawn.
