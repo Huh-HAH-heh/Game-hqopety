@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Numerics;
+using System.Threading;
 
 namespace RimClone.Render.Raylib;
 
@@ -195,9 +196,11 @@ internal static class VoxelMeshDecimator
     public static VoxelMeshData[] Simplify(
         VoxelMeshData[] source,
         float maximumErrorMeters,
-        out VoxelMeshDecimationStats stats)
+        out VoxelMeshDecimationStats stats,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!float.IsFinite(maximumErrorMeters) || maximumErrorMeters <= 0f)
             throw new ArgumentOutOfRangeException(nameof(maximumErrorMeters));
 
@@ -231,7 +234,8 @@ internal static class VoxelMeshDecimator
                     out VoxelMeshData? optimized,
                     out int boundaryCount,
                     out int packetCollapses,
-                    out float packetError))
+                    out float packetError,
+                    cancellationToken))
             {
                 result[i] = optimized!;
                 mesh.ReturnCpuArrays();
@@ -282,7 +286,8 @@ internal static class VoxelMeshDecimator
         out VoxelMeshData? optimized,
         out int preservedBoundaryVertices,
         out int collapseCount,
-        out float maximumAcceptedError)
+        out float maximumAcceptedError,
+        CancellationToken cancellationToken)
     {
         optimized = null;
         preservedBoundaryVertices = 0;
@@ -353,6 +358,8 @@ internal static class VoxelMeshDecimator
             // Build exact triangle planes and per-vertex face lists.
             for (int face = 0; face < triangleCount; face++)
             {
+                if ((face & 1023) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 int offset = face * 3;
                 int a = triangles[offset];
                 int b = triangles[offset + 1];
@@ -395,6 +402,8 @@ internal static class VoxelMeshDecimator
 
             for (int face = 0; face < triangleCount; face++)
             {
+                if ((face & 1023) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 int offset = face * 3;
                 faceIds[faceCursor[triangles[offset]]++] = face;
                 faceIds[faceCursor[triangles[offset + 1]]++] = face;
@@ -406,6 +415,8 @@ internal static class VoxelMeshDecimator
             int edgeRefCount = 0;
             for (int face = 0; face < triangleCount; face++)
             {
+                if ((face & 1023) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 int offset = face * 3;
                 int a = triangles[offset];
                 int b = triangles[offset + 1];
@@ -420,6 +431,8 @@ internal static class VoxelMeshDecimator
             int cursor = 0;
             while (cursor < edgeRefCount)
             {
+                if ((edgeCount & 1023) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 EdgeRef first = edgeRefs[cursor];
                 int end = cursor + 1;
                 while (end < edgeRefCount &&
@@ -465,6 +478,8 @@ internal static class VoxelMeshDecimator
 
             for (int i = 0; i < edgeCount; i++)
             {
+                if ((i & 1023) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 EdgeInfo edge = edges[i];
                 neighbors[neighborCursor[edge.A]++] = edge.B;
                 neighbors[neighborCursor[edge.B]++] = edge.A;
@@ -478,6 +493,8 @@ internal static class VoxelMeshDecimator
             int stamp = 0;
             for (int i = 0; i < edgeCount; i++)
             {
+                if ((i & 1023) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 EdgeInfo edge = edges[i];
                 int a = edge.A;
                 int b = edge.B;
@@ -509,6 +526,7 @@ internal static class VoxelMeshDecimator
                         facePlaneOffsets,
                         triangleCount,
                         maximumErrorMeters,
+                        cancellationToken,
                         out Vector3 position,
                         out float error))
                     continue;
@@ -528,6 +546,8 @@ internal static class VoxelMeshDecimator
             // manifold neighbourhood and prevent neighbouring edits interacting.
             for (int i = 0; i < candidateCount; i++)
             {
+                if ((i & 1023) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 CollapseCandidate candidate = candidates[i];
                 int a = candidate.A;
                 int b = candidate.B;
@@ -563,6 +583,8 @@ internal static class VoxelMeshDecimator
 
             for (int i = 0; i < indexCount; i += 3)
             {
+                if ((i & 4095) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 int a = collapseTo[triangles[i]] >= 0
                     ? collapseTo[triangles[i]]
                     : triangles[i];
@@ -593,6 +615,8 @@ internal static class VoxelMeshDecimator
 
             for (int i = 0; i < vertexCount; i++)
             {
+                if ((i & 2047) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 int destination = remap[i];
                 if (destination < 0)
                     continue;
@@ -605,6 +629,8 @@ internal static class VoxelMeshDecimator
             int outputCursor = 0;
             for (int i = 0; i < indexCount; i += 3)
             {
+                if ((i & 4095) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
                 int a = collapseTo[triangles[i]] >= 0
                     ? collapseTo[triangles[i]]
                     : triangles[i];
@@ -716,6 +742,7 @@ internal static class VoxelMeshDecimator
         float[] facePlaneOffsets,
         int triangleCount,
         float maximumErrorMeters,
+        CancellationToken cancellationToken,
         out Vector3 bestPosition,
         out float bestError)
     {
@@ -751,6 +778,7 @@ internal static class VoxelMeshDecimator
                     facePlaneOffsets,
                     triangleCount,
                     maximumErrorMeters,
+                    cancellationToken,
                     out float error))
                 continue;
 
@@ -779,6 +807,7 @@ internal static class VoxelMeshDecimator
         float[] facePlaneOffsets,
         int triangleCount,
         float maximumErrorMeters,
+        CancellationToken cancellationToken,
         out float maximumError)
     {
         maximumError = 0f;
@@ -787,7 +816,7 @@ internal static class VoxelMeshDecimator
         if (!ValidateIncidentFaces(
                 a, b, position, positions, triangles,
                 faceOffsets, faceIds, faceNormals, facePlaneOffsets,
-                triangleCount, errorLimitSquared, ref maximumError))
+                triangleCount, errorLimitSquared, cancellationToken, ref maximumError))
             return false;
 
         if (!ValidateIncidentFaces(
@@ -811,10 +840,13 @@ internal static class VoxelMeshDecimator
         float[] facePlaneOffsets,
         int triangleCount,
         float errorLimitSquared,
+        CancellationToken cancellationToken,
         ref float maximumError)
     {
         for (int i = faceOffsets[vertex]; i < faceOffsets[vertex + 1]; i++)
         {
+            if ((i & 255) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
             int face = faceIds[i];
             if ((uint)face >= (uint)triangleCount)
                 return false;
