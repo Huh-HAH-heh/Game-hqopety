@@ -1717,6 +1717,35 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return draws;
     }
 
+    internal static void FillCutMask(
+        IVoxelFieldSource field,
+        int layer,
+        Span<byte> pixels,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        if ((uint)layer > (uint)field.Height)
+            throw new ArgumentOutOfRangeException(nameof(layer));
+
+        int required = checked(field.Width * field.Depth);
+        if (pixels.Length < required)
+            throw new ArgumentException("Cut mask destination is too small.", nameof(pixels));
+
+        int lowerY = layer - 1;
+        int upperY = layer;
+        for (int z = 0; z < field.Depth; z++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int row = z * field.Width;
+            for (int x = 0; x < field.Width; x++)
+            {
+                float density = (field.GetDensity(x, lowerY, z) +
+                    field.GetDensity(x, upperY, z)) * 0.5f;
+                pixels[row + x] = density > 0f ? (byte)255 : (byte)0;
+            }
+        }
+    }
+
     private void RequestCutMaskBuild(SparseVoxelField field, int layer)
     {
         if (layer < 0 || layer > field.Height)
@@ -1730,10 +1759,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _cutMaskRequestedLayer = layer;
         long generation = Interlocked.Increment(ref _cutMaskGeneration);
-        long fieldVersion = field.Version;
         int width = field.Width;
         int depth = field.Depth;
         IVoxelFieldSource snapshot = GetWorldBuildSnapshot(field);
+        long fieldVersion = field.Version;
         CancellationTokenSource cancellation = new();
         CancellationToken token = cancellation.Token;
         _cutMaskCancellation = cancellation;
@@ -1744,28 +1773,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             try
             {
                 pixels = ArrayPool<byte>.Shared.Rent(checked(width * depth));
-                int lowerY = layer - 1;
-                int upperY = layer;
+                FillCutMask(
+                    snapshot,
+                    layer,
+                    pixels.AsSpan(0, width * depth),
+                    token);
 
-                for (int z = 0; z < depth; z++)
-                {
-                    if (token.IsCancellationRequested ||
-                        generation != Volatile.Read(ref _cutMaskGeneration))
-                        return;
-
-                    int row = z * width;
-                    for (int x = 0; x < width; x++)
-                    {
-                        float density =
-                            (snapshot.GetDensity(x, lowerY, z) +
-                             snapshot.GetDensity(x, upperY, z)) * 0.5f;
-
-                        pixels[row + x] = density > 0f ? (byte)255 : (byte)0;
-                    }
-                }
-
-                if (token.IsCancellationRequested ||
-                    generation != Volatile.Read(ref _cutMaskGeneration))
+                if (generation != Volatile.Read(ref _cutMaskGeneration))
                     return;
 
                 _cutMaskCompletions.Enqueue(new CutMaskBuildResult(
