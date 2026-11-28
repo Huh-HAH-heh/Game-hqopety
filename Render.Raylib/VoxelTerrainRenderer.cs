@@ -2119,7 +2119,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _pendingCutSurfaceBuildMilliseconds = 0d;
     }
 
-    private int DrawCutSurfaceMeshes()
+    private unsafe int DrawCutSurfaceMeshes()
     {
         if (_cutSurfaceMeshes.Length == 0)
             return 0;
