@@ -9,14 +9,15 @@ internal static class Program
     private static int Main()
     {
         int failures = 0;
-        Console.WriteLine("=== RimClone signed-density Surface Nets tests ===");
+        Console.WriteLine("=== RimClone Surface Nets and density cut-section tests ===");
         Console.WriteLine($"Runtime: {Environment.Version} | CPU: {Environment.ProcessorCount}");
 
         Run("Chunk input captures a flat 67^3 density window", TestDensityCapture, ref failures);
         Run("Adjacent chunks sample the same shared halo plane", TestSharedHalo, ref failures);
         Run("Flat procedural density produces a continuous horizontal surface", TestFlatSurface, ref failures);
         Run("Cut plane does not modify or regenerate the terrain surface", TestCutSurface, ref failures);
-        Run("Cut occupancy mask fills solids and preserves tunnel openings", TestCutOccupancyMask, ref failures);
+        Run("Density-derived cut geometry fills solids and preserves tunnel openings", TestCutSurfaceGeometry, ref failures);
+        Run("Cut contour uses linear density interpolation", TestCutSurfaceInterpolation, ref failures);
         Run("Enclosed solid chunk exits without creating a surface", TestEnclosedSolid, ref failures);
         Run("Three-dimensional tunnel walls are meshed inside solid terrain", TestTunnelSurface, ref failures);
         Run("Empty chunks exit before Surface Nets", TestEmptyField, ref failures);
@@ -137,25 +138,110 @@ internal static class Program
         }
     }
 
-    private static (bool Passed, string Detail) TestCutOccupancyMask()
+    private static (bool Passed, string Detail) TestCutSurfaceGeometry()
     {
         const int cutLayer = 50;
         SyntheticDensityField field = new(
             256, 256, 256,
             surfaceHeight: 80,
             sectionTunnel: true);
-        byte[] pixels = new byte[field.Width * field.Depth];
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildCutSurfaceData(
+            field, cutLayer, new TerrainPalette(), step: 4);
 
-        VoxelTerrainRenderer.FillCutMask(field, cutLayer, pixels);
+        try
+        {
+            bool solidCovered = IsCutSurfaceCovered(meshes, 8.05f, 8.05f);
+            bool tunnelOpen = !IsCutSurfaceCovered(meshes, 9.45f, 9.45f);
+            bool upward = AllNormalsPointUp(meshes);
+            int triangles = CountTriangles(meshes);
 
-        byte solid = pixels[80 + 80 * field.Width];
-        byte tunnel = pixels[94 + 94 * field.Width];
-        bool solidIsPainted = solid == byte.MaxValue;
-        bool tunnelRemainsTransparent = tunnel == 0;
+            return (
+                solidCovered && tunnelOpen && upward && triangles > 0,
+                $"meshes={meshes.Length} triangles={triangles} " +
+                $"solidCovered={solidCovered} tunnelOpen={tunnelOpen} upward={upward}");
+        }
+        finally
+        {
+            ReturnMeshData(meshes);
+        }
+    }
 
-        return (
-            solidIsPainted && tunnelRemainsTransparent,
-            $"solidMask={solid} tunnelMask={tunnel} size={field.Width}x{field.Depth}");
+    private static (bool Passed, string Detail) TestCutSurfaceInterpolation()
+    {
+        LinearCutField field = new(128, 64, 128);
+        VoxelMeshData[] meshes = VoxelChunkMesher.BuildCutSurfaceData(
+            field, layer: 32, new TerrainPalette(), step: 4);
+
+        try
+        {
+            const float expectedX = 5.025f;
+            bool interpolated = false;
+            foreach (VoxelMeshData mesh in meshes)
+            foreach (Vector3 vertex in mesh.Vertices)
+            {
+                if (MathF.Abs(vertex.X - expectedX) <= 0.001f)
+                {
+                    interpolated = true;
+                    break;
+                }
+            }
+
+            return (
+                interpolated && CountTriangles(meshes) > 0,
+                $"expectedContourX={expectedX:0.000} interpolated={interpolated} " +
+                $"meshes={meshes.Length} triangles={CountTriangles(meshes)}");
+        }
+        finally
+        {
+            ReturnMeshData(meshes);
+        }
+    }
+
+    private static bool IsCutSurfaceCovered(
+        VoxelMeshData[] meshes,
+        float x,
+        float z)
+    {
+        foreach (VoxelMeshData mesh in meshes)
+        {
+            ReadOnlySpan<Vector3> vertices = mesh.Vertices;
+            ReadOnlySpan<ushort> indices = mesh.Indices;
+            for (int i = 0; i < indices.Length; i += 3)
+            {
+                int ia = indices[i] - mesh.IndexBase;
+                int ib = indices[i + 1] - mesh.IndexBase;
+                int ic = indices[i + 2] - mesh.IndexBase;
+                if ((uint)ia >= (uint)vertices.Length ||
+                    (uint)ib >= (uint)vertices.Length ||
+                    (uint)ic >= (uint)vertices.Length)
+                    continue;
+
+                if (PointInTriangleXZ(x, z,
+                    vertices[ia], vertices[ib], vertices[ic]))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool PointInTriangleXZ(
+        float x,
+        float z,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c)
+    {
+        static float Cross(float ax, float az, float bx, float bz, float px, float pz) =>
+            (bx - ax) * (pz - az) - (bz - az) * (px - ax);
+
+        float ab = Cross(a.X, a.Z, b.X, b.Z, x, z);
+        float bc = Cross(b.X, b.Z, c.X, c.Z, x, z);
+        float ca = Cross(c.X, c.Z, a.X, a.Z, x, z);
+        const float epsilon = 0.00001f;
+        bool negative = ab < -epsilon || bc < -epsilon || ca < -epsilon;
+        bool positive = ab > epsilon || bc > epsilon || ca > epsilon;
+        return !(negative && positive);
     }
 
     private static (bool Passed, string Detail) TestEnclosedSolid()
@@ -394,6 +480,33 @@ internal static class Program
     {
         foreach (VoxelMeshData mesh in meshes)
             mesh.ReturnCpuArrays();
+    }
+
+    private sealed class LinearCutField : IVoxelFieldSource
+    {
+        public int Width { get; }
+        public int Height { get; }
+        public int Depth { get; }
+
+        public LinearCutField(int width, int height, int depth)
+        {
+            Width = width;
+            Height = height;
+            Depth = depth;
+        }
+
+        public float GetDensity(int x, int y, int z)
+        {
+            if ((uint)x >= (uint)Width ||
+                (uint)y >= (uint)Height ||
+                (uint)z >= (uint)Depth)
+                return -1f;
+
+            return 50.25f - (x + 0.5f);
+        }
+
+        public ushort GetMaterialId(int x, int y, int z) =>
+            GetDensity(x, y, z) > 0f ? (ushort)1 : (ushort)0;
     }
 
     private sealed class SyntheticDensityField : IVoxelFieldSource
