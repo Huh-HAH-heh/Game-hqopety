@@ -425,6 +425,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _cutSurfaceRequestedPaletteVersion = int.MinValue;
     private int _activeCutLayer = int.MinValue;
     private int _cutSurfaceDirty = 1;
+    private long _cutSurfaceRetryFrame;
     private long _cutSurfaceRevision;
     private long _cutSurfaceGeneration;
     private CancellationTokenSource? _cutSurfaceCancellation;
@@ -577,6 +578,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ThrowIfDisposed();
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
         _paletteVersion++;
+        _cutSurfaceRetryFrame = 0;
         Interlocked.Increment(ref _cutSurfaceRevision);
         Interlocked.Exchange(ref _cutSurfaceDirty, 1);
         CancelPendingCutSurfaceBuild();
@@ -648,6 +650,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Interlocked.Exchange(ref _cutSurfaceDirty, 0);
         }
         else if (stableCutLayer >= 0 &&
+            _frame >= _cutSurfaceRetryFrame &&
             (_cutSurfaceRequestedLayer != stableCutLayer ||
              _cutSurfaceRequestedRevision != cutRevision ||
              _cutSurfaceRequestedPaletteVersion != _paletteVersion ||
@@ -1881,6 +1884,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private void CancelPendingCutSurfaceBuild()
     {
         Interlocked.Increment(ref _cutSurfaceGeneration);
+        _cutSurfaceRetryFrame = 0;
 
         if (_cutSurfaceCancellation != null)
         {
@@ -1938,9 +1942,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (result.Error != null)
             {
                 ReturnMeshData(result.Meshes);
+                _cutSurfaceRequestedLayer = int.MinValue;
+                _cutSurfaceRequestedRevision = long.MinValue;
+                _cutSurfaceRequestedPaletteVersion = int.MinValue;
+                Interlocked.Exchange(ref _cutSurfaceDirty, 1);
+                _cutSurfaceRetryFrame = _frame + 120;
                 _logger.Error(
                     "CUT_SURFACE_BUILD_FAILED",
-                    $"layer={result.Layer} generation={result.Generation} error={result.Error}");
+                    $"layer={result.Layer} generation={result.Generation} retryFrame={_cutSurfaceRetryFrame} error={result.Error}");
                 continue;
             }
 
@@ -2007,10 +2016,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 _totalGpuUnloads++;
             }
             _uploadingCutSurfaceMeshes.Clear();
+            _cutSurfaceRequestedLayer = int.MinValue;
+            _cutSurfaceRequestedRevision = long.MinValue;
+            _cutSurfaceRequestedPaletteVersion = int.MinValue;
+            Interlocked.Exchange(ref _cutSurfaceDirty, 1);
+            _cutSurfaceRetryFrame = _frame + 120;
 
             _logger.Error(
                 "CUT_SURFACE_GPU_UPLOAD_FAILED",
-                $"layer={_pendingCutSurfaceLayer} error={exception}");
+                $"layer={_pendingCutSurfaceLayer} retryFrame={_cutSurfaceRetryFrame} error={exception}");
         }
 
         return timer.Elapsed.TotalMilliseconds;
@@ -2048,6 +2062,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _activeCutLayer = _pendingCutSurfaceLayer;
         _cutSurfaceReadyRevision = _pendingCutSurfaceRevision;
         _cutSurfaceReadyPaletteVersion = _pendingCutSurfacePaletteVersion;
+        _cutSurfaceRetryFrame = 0;
         _cutSurfaceDrawnLayer = int.MinValue;
         RebuiltCutCaps++;
 
