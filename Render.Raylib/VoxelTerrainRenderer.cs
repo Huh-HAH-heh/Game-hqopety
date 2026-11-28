@@ -39,6 +39,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private const int CutCapSettleFrames = 8;
     private const int MaximumRenderStep = 64;
     private const int BaseLodStep = 16;
+    private const int MinimumDetailStep = 4;
     private const int MaximumAdaptiveNodes = 8192;
     private const int CacheEvictionScanBudget = 4096;
     private const int MaximumCachedChunks = 4096;
@@ -53,16 +54,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec3 vertexNormal;
         uniform mat4 mvp;
         uniform mat4 matModel;
+        uniform int uCutOverlayPass;
+        uniform float uCutPlaneHeight;
         out vec3 fragWorldPosition;
         out vec3 fragWorldNormal;
         out vec4 fragColor;
         void main()
         {
             vec4 worldPosition = matModel * vec4(vertexPosition, 1.0);
+            if (uCutOverlayPass != 0)
+                worldPosition.y = uCutPlaneHeight;
+
             fragWorldPosition = worldPosition.xyz;
             fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
             fragColor = vertexColor;
-            gl_Position = mvp * vec4(vertexPosition, 1.0);
+            gl_Position = mvp * worldPosition;
         }
         """;
 
@@ -404,6 +410,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _cutEnabledLocation;
     private readonly int _cutHeightLocation;
     private readonly int _cutOverlayPassLocation;
+    private readonly int _cutPlaneHeightLocation;
     private readonly int _cutWorldSizeLocation;
     private readonly int _cutColorLocation;
     private readonly int _sunDirectionLocation;
@@ -527,6 +534,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
         _cutOverlayPassLocation = GetShaderLocation(_shader, "uCutOverlayPass");
+        _cutPlaneHeightLocation = GetShaderLocation(_shader, "uCutPlaneHeight");
         _cutWorldSizeLocation = GetShaderLocation(_shader, "uCutWorldSize");
         _cutColorLocation = GetShaderLocation(_shader, "uCutColor");
         _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
@@ -540,6 +548,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_cutEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
             _cutOverlayPassLocation < 0 ||
+            _cutPlaneHeightLocation < 0 ||
             _cutWorldSizeLocation < 0 ||
             _cutColorLocation < 0 ||
             _sunDirectionLocation < 0 ||
@@ -565,7 +574,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _logger.Write(
             "RENDERER_START",
-            $"resolution=0.1m;lod=per-chunk;fallbackStep={FallbackLodStep};baseStep={BaseLodStep};detailSteps=8,4,2,1;gpuMesh=one-page-per-step;cameraCulling=false;chunkCells={ChunkCells};workers={workerCount};build=background-worker-pool;pendingLimit={MaximumPendingMeshJobs};mesher=surface-nets-density");
+            $"resolution=0.1m;lod=per-chunk;fallbackStep={FallbackLodStep};baseStep={BaseLodStep};detailSteps=8,4;minimumDetailStep=4;gpuMesh=one-page-per-step;cameraCulling=false;chunkCells={ChunkCells};workers={workerCount};build=background-worker-pool;pendingLimit={MaximumPendingMeshJobs};mesher=surface-nets-density");
         _logger.Write(RenderLogMode.ErrorsOnly, "VOXEL_RENDERER_READY", $"logPath=\"{_logger.LogPath}\" workers={workerCount} build=background");
     }
 
@@ -925,7 +934,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             Candidate node = _adaptiveNodeScratch[nodeIndex];
             ChunkKey key = node.Key;
-            if (key.Step <= 1)
+            if (key.Step <= MinimumDetailStep)
             {
                 if (key.Step < BaseLodStep) leaves.Add(node);
                 continue;
@@ -1940,6 +1949,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 ShaderUniformDataType.Int);
             SetShaderValue(
                 _shader,
+                _cutPlaneHeightLocation,
+                heightMeters,
+                ShaderUniformDataType.Float);
+            SetShaderValue(
+                _shader,
                 _cutWorldSizeLocation,
                 new Vector2(
                     field.Width * SparseVoxelField.VoxelSizeMeters,
@@ -1956,7 +1970,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             DrawMesh(
                 _cutPlaneMesh,
                 _material,
-                Raymath.MatrixTranslate(0f, heightMeters, 0f));
+                Matrix4x4.Identity);
         }
         finally
         {
@@ -2005,6 +2019,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
             {
                 if (key.Step != pageKey.Step || !entry.HasPendingSurface)
+                    continue;
+
+                // Another chunk can dirty this page while this region is blocked.
+                // Skip it until capacity changes; otherwise each page flush retries
+                // the same failed upload and spends the frame repeating the exception.
+                if (entry.GpuUploadRetryVersion == _gpuCapacityVersion ||
+                    _frame < entry.GpuUploadRetryFrame)
                     continue;
 
                 VoxelMeshData[] pending = entry.PendingSurface;
