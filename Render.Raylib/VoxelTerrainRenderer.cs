@@ -1711,6 +1711,238 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         return draws;
     }
 
+    private void RequestCutMaskBuild(SparseVoxelField field, int layer)
+    {
+        if (layer < 0 || layer > field.Height)
+            return;
+
+        if (_cutMaskCancellation != null)
+        {
+            try { _cutMaskCancellation.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+
+        _cutMaskRequestedLayer = layer;
+        long generation = Interlocked.Increment(ref _cutMaskGeneration);
+        long fieldVersion = field.Version;
+        int width = field.Width;
+        int depth = field.Depth;
+        IVoxelFieldSource snapshot = GetWorldBuildSnapshot(field);
+        CancellationTokenSource cancellation = new();
+        CancellationToken token = cancellation.Token;
+        _cutMaskCancellation = cancellation;
+
+        _ = Task.Run(() =>
+        {
+            byte[]? pixels = null;
+            try
+            {
+                pixels = ArrayPool<byte>.Shared.Rent(checked(width * depth));
+                int lowerY = layer - 1;
+                int upperY = layer;
+
+                for (int z = 0; z < depth; z++)
+                {
+                    if (token.IsCancellationRequested ||
+                        generation != Volatile.Read(ref _cutMaskGeneration))
+                        return;
+
+                    int row = z * width;
+                    for (int x = 0; x < width; x++)
+                    {
+                        float density =
+                            (snapshot.GetDensity(x, lowerY, z) +
+                             snapshot.GetDensity(x, upperY, z)) * 0.5f;
+
+                        pixels[row + x] = density > 0f ? (byte)255 : (byte)0;
+                    }
+                }
+
+                if (token.IsCancellationRequested ||
+                    generation != Volatile.Read(ref _cutMaskGeneration))
+                    return;
+
+                _cutMaskCompletions.Enqueue(new CutMaskBuildResult(
+                    generation, layer, width, depth, fieldVersion, pixels));
+                pixels = null;
+            }
+            catch (Exception exception) when (
+                exception is OperationCanceledException ||
+                exception is ObjectDisposedException)
+            {
+            }
+            catch (Exception exception)
+            {
+                _logger.Error(
+                    "CUT_MASK_BUILD_FAILED",
+                    $"layer={layer} generation={generation} error={exception}");
+            }
+            finally
+            {
+                if (pixels != null)
+                    ArrayPool<byte>.Shared.Return(pixels, clearArray: false);
+                cancellation.Dispose();
+            }
+        });
+    }
+
+    private unsafe void ProcessCutMaskCompletions(SparseVoxelField field)
+    {
+        while (_cutMaskCompletions.TryDequeue(out CutMaskBuildResult result))
+        {
+            if (result.Generation != Volatile.Read(ref _cutMaskGeneration) ||
+                result.Layer != _cutMaskRequestedLayer ||
+                result.FieldVersion != field.Version)
+            {
+                ArrayPool<byte>.Shared.Return(result.Pixels, clearArray: false);
+                if (result.FieldVersion != field.Version)
+                    Interlocked.Exchange(ref _cutMaskDirty, 1);
+                continue;
+            }
+
+            try
+            {
+                if (_cutMaskTexture.Id == 0 ||
+                    _cutMaskWidth != result.Width ||
+                    _cutMaskDepth != result.Depth)
+                {
+                    fixed (byte* pixels = result.Pixels)
+                    {
+                        Image image = new()
+                        {
+                            Data = pixels,
+                            Width = result.Width,
+                            Height = result.Depth,
+                            Mipmaps = 1,
+                            Format = PixelFormat.UncompressedGrayscale
+                        };
+                        Texture2D nextTexture = LoadTextureFromImage(image);
+                        if (nextTexture.Id == 0)
+                            throw new InvalidOperationException(
+                                "Could not upload voxel cut mask texture.");
+
+                        SetTextureFilter(nextTexture, TextureFilter.Bilinear);
+                        SetTextureWrap(nextTexture, TextureWrap.Clamp);
+
+                        if (_cutMaskTexture.Id != 0)
+                            UnloadTexture(_cutMaskTexture);
+                        _cutMaskTexture = nextTexture;
+                    }
+
+                    _cutMaskWidth = result.Width;
+                    _cutMaskDepth = result.Depth;
+                }
+                else
+                {
+                    fixed (byte* pixels = result.Pixels)
+                        UpdateTexture(_cutMaskTexture, pixels);
+                }
+
+                EnsureCutPlaneMesh(result.Width, result.Depth);
+                _cutMaskReadyLayer = result.Layer;
+                _activeCutLayer = result.Layer;
+
+                _logger.Write(
+                    RenderLogMode.FrameSummary,
+                    "CUT_MASK_READY",
+                    $"layer={result.Layer} size={result.Width}x{result.Depth} fieldVersion={result.FieldVersion}");
+            }
+            catch (Exception exception)
+            {
+                _logger.Error(
+                    "CUT_MASK_UPLOAD_FAILED",
+                    $"layer={result.Layer} generation={result.Generation} error={exception}");
+                Interlocked.Exchange(ref _cutMaskDirty, 1);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(result.Pixels, clearArray: false);
+            }
+        }
+    }
+
+    private void EnsureCutPlaneMesh(int width, int depth)
+    {
+        float worldWidth = width * SparseVoxelField.VoxelSizeMeters;
+        float worldDepth = depth * SparseVoxelField.VoxelSizeMeters;
+        if (_cutPlaneMesh.VaoId != 0 &&
+            _cutPlaneWorldWidth == worldWidth &&
+            _cutPlaneWorldDepth == worldDepth)
+            return;
+
+        if (_cutPlaneMesh.VaoId != 0)
+            UnloadMesh(_cutPlaneMesh);
+
+        Mesh mesh = new(4, 2);
+        mesh.AllocVertices();
+        mesh.AllocNormals();
+        mesh.AllocColors();
+        mesh.AllocIndices();
+
+        Span<Vector3> vertices = mesh.VerticesAs<Vector3>();
+        vertices[0] = new Vector3(0f, 0f, 0f);
+        vertices[1] = new Vector3(0f, 0f, worldDepth);
+        vertices[2] = new Vector3(worldWidth, 0f, worldDepth);
+        vertices[3] = new Vector3(worldWidth, 0f, 0f);
+
+        Span<Vector3> normals = mesh.NormalsAs<Vector3>();
+        normals.Fill(Vector3.UnitY);
+
+        Span<byte> colors = mesh.ColorsAs<byte>();
+        colors.Fill(255);
+
+        Span<ushort> indices = mesh.IndicesAs<ushort>();
+        indices[0] = 0;
+        indices[1] = 1;
+        indices[2] = 2;
+        indices[3] = 0;
+        indices[4] = 2;
+        indices[5] = 3;
+
+        UploadMesh(ref mesh, false);
+        _cutPlaneMesh = mesh;
+        _cutPlaneWorldWidth = worldWidth;
+        _cutPlaneWorldDepth = worldDepth;
+    }
+
+    private void DrawCutOverlay(SparseVoxelField field, float heightMeters)
+    {
+        if (_cutMaskTexture.Id == 0 || _cutPlaneMesh.VaoId == 0)
+            return;
+
+        SetShaderValueTexture(_shader, _cutMaskLocation, _cutMaskTexture);
+        SetShaderValue(
+            _shader,
+            _cutOverlayPassLocation,
+            1,
+            ShaderUniformDataType.Int);
+        SetShaderValue(
+            _shader,
+            _cutWorldSizeLocation,
+            new Vector2(
+                field.Width * SparseVoxelField.VoxelSizeMeters,
+                field.Depth * SparseVoxelField.VoxelSizeMeters),
+            ShaderUniformDataType.Vec2);
+        SetShaderValue(
+            _shader,
+            _cutColorLocation,
+            new Vector4(0.31f, 0.23f, 0.16f, 1f),
+            ShaderUniformDataType.Vec4);
+
+        SetLodDepthBias(0.001f);
+        DrawMesh(
+            _cutPlaneMesh,
+            _material,
+            Matrix4x4.CreateTranslation(0f, heightMeters, 0f));
+        SetLodDepthBias(0f);
+
+        SetShaderValue(
+            _shader,
+            _cutOverlayPassLocation,
+            0,
+            ShaderUniformDataType.Int);
+    }
+
     private void GetGpuVertexUsage(
         out long physicalVertices,
         out long liveVertices,
