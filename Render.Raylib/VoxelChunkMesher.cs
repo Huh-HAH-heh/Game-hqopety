@@ -245,7 +245,7 @@ internal readonly record struct VoxelRegionMeshRange(
 internal static class VoxelChunkMesher
 {
     internal const int MaximumVerticesPerMesh = 60_000;
-    internal const int MaximumIndicesPerMesh = 90_000;
+    internal const int MaximumIndicesPerMesh = 270_000;
 
 
     private sealed class MeshBatch : IDisposable
@@ -393,7 +393,13 @@ internal static class VoxelChunkMesher
                 i2 >= _globalToLocal.Length || i3 >= _globalToLocal.Length)
                 return;
 
-            if (_vertexCount + 4 > MaximumVerticesPerMesh ||
+            int requiredVertices = 0;
+            if (_globalToLocal[i0] < 0) requiredVertices++;
+            if (i1 != i0 && _globalToLocal[i1] < 0) requiredVertices++;
+            if (i2 != i0 && i2 != i1 && _globalToLocal[i2] < 0) requiredVertices++;
+            if (i3 != i0 && i3 != i1 && i3 != i2 && _globalToLocal[i3] < 0) requiredVertices++;
+
+            if (_vertexCount + requiredVertices > MaximumVerticesPerMesh ||
                 _indexCount + 6 > MaximumIndicesPerMesh)
                 Flush();
 
@@ -869,8 +875,16 @@ internal static class VoxelChunkMesher
     public static VoxelMeshData[] BuildSurfaceData(
         VoxelChunkBuildInput input,
         TerrainPalette palette,
+        CancellationToken cancellationToken = default) =>
+        BuildSurfaceData(input, palette, out _, cancellationToken);
+
+    public static VoxelMeshData[] BuildSurfaceData(
+        VoxelChunkBuildInput input,
+        TerrainPalette palette,
+        out VoxelMeshDecimationStats decimationStats,
         CancellationToken cancellationToken = default)
     {
+        decimationStats = default;
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(palette);
         if (!input.IsCaptured)
@@ -1058,7 +1072,11 @@ internal static class VoxelChunkMesher
             }
 
             batch.Flush();
-            return output.ToArray();
+            VoxelMeshData[] rawMeshes = output.ToArray();
+            return VoxelMeshDecimator.Simplify(
+                rawMeshes,
+                maximumErrorMeters: 0.02f,
+                out decimationStats);
         }
         catch
         {
