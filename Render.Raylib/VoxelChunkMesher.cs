@@ -592,12 +592,116 @@ internal static class VoxelChunkMesher
         return true;
     }
 
-    public static int CountTriangleVertices(IReadOnlyList<VoxelMeshData> sources)
+    public static int CountVertices(IReadOnlyList<VoxelMeshData> sources)
+    {
+        int count = 0;
+        for (int i = 0; i < sources.Count; i++)
+            count = checked(count + sources[i].VertexCount);
+        return count;
+    }
+
+    public static int CountIndices(IReadOnlyList<VoxelMeshData> sources)
     {
         int count = 0;
         for (int i = 0; i < sources.Count; i++)
             count = checked(count + sources[i].IndexCount);
         return count;
+    }
+
+    public static int CountTriangleVertices(IReadOnlyList<VoxelMeshData> sources) =>
+        CountIndices(sources);
+
+    public static unsafe void UpdateIndexedMesh(
+        ref Mesh mesh,
+        int vertexOffset,
+        int vertexCapacity,
+        int indexOffset,
+        int indexCapacity,
+        IReadOnlyList<VoxelMeshData> sources)
+    {
+        if (vertexOffset < 0 || vertexCapacity <= 0 ||
+            indexOffset < 0 || indexCapacity <= 0 ||
+            mesh.VaoId == 0 || mesh.VboId == null)
+            throw new ArgumentOutOfRangeException(nameof(vertexCapacity));
+
+        int vertexCount = CountVertices(sources);
+        int indexCount = CountIndices(sources);
+        if (vertexCount > vertexCapacity || indexCount > indexCapacity)
+            throw new ArgumentException("Indexed GPU region is too small.");
+
+        if (vertexCount == 0 || indexCount == 0)
+            return;
+
+        Vector3[] vertices = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+        Vector3[] normals = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+        byte[] colors = ArrayPool<byte>.Shared.Rent(checked(vertexCount * 4));
+        ushort[] indices = ArrayPool<ushort>.Shared.Rent(indexCount);
+
+        try
+        {
+            int vertexCursor = 0;
+            int indexCursor = 0;
+
+            for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
+            {
+                VoxelMeshData source = sources[sourceIndex];
+                ReadOnlySpan<Vector3> sourceVertices = source.Vertices;
+                ReadOnlySpan<Vector3> sourceNormals = source.Normals;
+                ReadOnlySpan<byte> sourceColors = source.Colors;
+                ReadOnlySpan<ushort> sourceIndices = source.Indices;
+
+                sourceVertices.CopyTo(vertices.AsSpan(vertexCursor));
+                sourceNormals.CopyTo(normals.AsSpan(vertexCursor));
+                sourceColors.CopyTo(colors.AsSpan(vertexCursor * 4));
+
+                int localBase = vertexOffset + vertexCursor;
+                for (int i = 0; i < sourceIndices.Length; i++)
+                {
+                    int localIndex = sourceIndices[i] - source.IndexBase;
+                    if ((uint)localIndex >= (uint)sourceVertices.Length)
+                        throw new InvalidOperationException(
+                            "Surface index is outside its source mesh.");
+
+                    int destinationIndex = localBase + localIndex;
+                    if ((uint)destinationIndex > ushort.MaxValue)
+                        throw new InvalidOperationException(
+                            "Indexed GPU page exceeds 16-bit vertex addressing.");
+
+                    indices[indexCursor + i] = (ushort)destinationIndex;
+                }
+
+                vertexCursor += source.VertexCount;
+                indexCursor += source.IndexCount;
+            }
+
+            fixed (Vector3* p = vertices)
+                UpdateMeshBuffer(
+                    mesh, Mesh.VboIdIndexVertices, p,
+                    vertexCount * sizeof(Vector3),
+                    vertexOffset * sizeof(Vector3));
+            fixed (Vector3* p = normals)
+                UpdateMeshBuffer(
+                    mesh, Mesh.VboIdIndexNormals, p,
+                    vertexCount * sizeof(Vector3),
+                    vertexOffset * sizeof(Vector3));
+            fixed (byte* p = colors)
+                UpdateMeshBuffer(
+                    mesh, Mesh.VboIdIndexColors, p,
+                    vertexCount * 4,
+                    vertexOffset * 4);
+            fixed (ushort* p = indices)
+                UpdateMeshBuffer(
+                    mesh, Mesh.VboIdIndexIndices, p,
+                    indexCount * sizeof(ushort),
+                    indexOffset * sizeof(ushort));
+        }
+        finally
+        {
+            ArrayPool<Vector3>.Shared.Return(vertices, clearArray: false);
+            ArrayPool<Vector3>.Shared.Return(normals, clearArray: false);
+            ArrayPool<byte>.Shared.Return(colors, clearArray: false);
+            ArrayPool<ushort>.Shared.Return(indices, clearArray: false);
+        }
     }
 
     public static int CopyTriangleSoup(
