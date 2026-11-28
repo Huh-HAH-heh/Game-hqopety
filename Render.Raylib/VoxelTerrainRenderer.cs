@@ -3087,6 +3087,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         entry.ReadyRequest = null;
         entry.CutUploadIndex = 0;
         entry.GpuUploadRetryFrame = 0;
+        entry.GpuUploadRetryPageVersion = long.MinValue;
         entry.GpuUploadRetryVersion = long.MinValue;
 
         foreach (Mesh mesh in entry.UploadingCutCap)
