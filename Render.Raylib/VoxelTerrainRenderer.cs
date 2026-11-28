@@ -53,10 +53,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec3 vertexNormal;
         uniform mat4 mvp;
         uniform mat4 matModel;
-        uniform vec3 uCameraPosition;
-        uniform vec3 uCameraForward;
-        uniform float uNearPlane;
-        uniform float uLodDepthBias;
         out vec3 fragWorldPosition;
         out vec3 fragWorldNormal;
         out vec4 fragColor;
@@ -66,14 +62,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             fragWorldPosition = worldPosition.xyz;
             fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
             fragColor = vertexColor;
-            vec4 clipPosition = mvp * vec4(vertexPosition, 1.0);
-            float viewDepth = max(
-                dot(worldPosition.xyz - uCameraPosition, uCameraForward),
-                uNearPlane);
-            float clipDepthBias =
-                (2.0 * uNearPlane * uLodDepthBias) / (viewDepth * viewDepth);
-            gl_Position = clipPosition;
-            gl_Position.z -= clipDepthBias * clipPosition.w;
+            gl_Position = mvp * vec4(vertexPosition, 1.0);
         }
         """;
 
@@ -83,7 +72,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec3 fragWorldNormal;
         in vec4 fragColor;
         uniform int uCutEnabled;
-        uniform int uCutHatchingEnabled;
         uniform float uCutHeight;
         uniform sampler2D uCutMask;
         uniform int uCutOverlayPass;
@@ -142,18 +130,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 fragColor.rgb * faceAO * lighting,
                 fragColor.a);
 
-            // The section hatch is anchored to world XZ, so it does not crawl
-            // when the camera moves or zooms.
-            if (uCutEnabled != 0 && uCutHatchingEnabled != 0 &&
-                abs(fragWorldPosition.y - uCutHeight) < 0.003 &&
-                abs(n.y) > 0.92)
-            {
-                float hatchCoordinate =
-                    (fragWorldPosition.x + fragWorldPosition.z) * 0.9;
-                float hatchDistance = abs(fract(hatchCoordinate) - 0.5);
-                float hatchLine = 1.0 - smoothstep(0.012, 0.028, hatchDistance);
-                finalColor.rgb *= mix(0.95, 1.025, hatchLine);
-            }
         }
         """;
 
@@ -427,7 +403,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Material _material;
     private readonly Shader _shader;
     private readonly int _cutEnabledLocation;
-    private readonly int _cutHatchingEnabledLocation;
     private readonly int _cutHeightLocation;
     private readonly int _cutMaskLocation;
     private readonly int _cutOverlayPassLocation;
@@ -438,10 +413,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _sunIntensityLocation;
     private readonly int _lodFadeLocation;
     private readonly int _lodRoleLocation;
-    private readonly int _lodDepthBiasLocation;
-    private readonly int _cameraPositionLocation;
-    private readonly int _cameraForwardLocation;
-    private readonly int _nearPlaneLocation;
     private readonly int _mvpLocation;
     private readonly int _modelLocation;
 
@@ -556,7 +527,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             throw new InvalidOperationException("The 3D voxel surface shader could not be created.");
 
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
-        _cutHatchingEnabledLocation = GetShaderLocation(_shader, "uCutHatchingEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
         _cutMaskLocation = GetShaderLocation(_shader, "uCutMask");
         _cutOverlayPassLocation = GetShaderLocation(_shader, "uCutOverlayPass");
@@ -567,15 +537,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
         _lodFadeLocation = GetShaderLocation(_shader, "uLodFade");
         _lodRoleLocation = GetShaderLocation(_shader, "uLodRole");
-        _lodDepthBiasLocation = GetShaderLocation(_shader, "uLodDepthBias");
-        _cameraPositionLocation = GetShaderLocation(_shader, "uCameraPosition");
-        _cameraForwardLocation = GetShaderLocation(_shader, "uCameraForward");
-        _nearPlaneLocation = GetShaderLocation(_shader, "uNearPlane");
         _mvpLocation = GetShaderLocation(_shader, "mvp");
         _modelLocation = GetShaderLocation(_shader, "matModel");
 
         if (_cutEnabledLocation < 0 ||
-            _cutHatchingEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
             _cutMaskLocation < 0 ||
             _cutOverlayPassLocation < 0 ||
@@ -586,10 +551,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _sunIntensityLocation < 0 ||
             _lodFadeLocation < 0 ||
             _lodRoleLocation < 0 ||
-            _lodDepthBiasLocation < 0 ||
-            _cameraPositionLocation < 0 ||
-            _cameraForwardLocation < 0 ||
-            _nearPlaneLocation < 0 ||
             _mvpLocation < 0 ||
             _modelLocation < 0)
         {
@@ -913,11 +874,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
 
         BeginMode3D(camera);
-        Vector3 cameraForward = camera.Target - camera.Position;
-        cameraForward = cameraForward.LengthSquared() > 1e-8f
-            ? Vector3.Normalize(cameraForward)
-            : -Vector3.UnitY;
-
         BeginShaderMode(_shader);
         Matrix4x4 view = Rlgl.GetMatrixModelview();
         Matrix4x4 projection = Rlgl.GetMatrixProjection();
@@ -926,13 +882,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _mvpLocation,
             Raymath.MatrixMultiply(view, projection));
         SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
-        SetLodDepthCamera(camera.Position, cameraForward, nearPlane);
         SetLighting();
         SetCutShader(activeCut, renderCutHeightMeters);
         SetLodShader(-1, 0f);
 
         int draws = DrawVisibleGpuRanges();
-        SetLodDepthBias(0f);
         EndShaderMode();
 
         if (activeCut)
@@ -1731,8 +1685,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     currentVao = vao;
                 }
 
-                SetLodDepthBias(GetLodDepthBias(first.Step));
-                int start = first.IndexOffset;
+                    int start = first.IndexOffset;
                 int count = first.IndexCount;
                 index++;
 
@@ -1756,8 +1709,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             if (vertexArrayBound)
                 Rlgl.DisableVertexArray();
-            SetLodDepthBias(0f);
-        }
+            }
 
         return draws;
     }
@@ -1980,12 +1932,10 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             new Vector4(0.31f, 0.23f, 0.16f, 1f),
             ShaderUniformDataType.Vec4);
 
-        SetLodDepthBias(0.001f);
         DrawMesh(
             _cutPlaneMesh,
             _material,
             Matrix4x4.CreateTranslation(0f, heightMeters, 0f));
-        SetLodDepthBias(0f);
 
         SetShaderValue(
             _shader,
@@ -3137,11 +3087,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             ShaderUniformDataType.Int);
         SetShaderValue(
             _shader,
-            _cutHatchingEnabledLocation,
-            _palette.ShowCutHatching ? 1 : 0,
-            ShaderUniformDataType.Int);
-        SetShaderValue(
-            _shader,
             _cutHeightLocation,
             height,
             ShaderUniformDataType.Float);
@@ -3155,32 +3100,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         SetShaderValue(
             _shader, _lodFadeLocation,
             fade, ShaderUniformDataType.Float);
-    }
-
-    private void SetLodDepthCamera(Vector3 position, Vector3 forward, float nearPlane)
-    {
-        SetShaderValue(
-            _shader, _cameraPositionLocation,
-            position, ShaderUniformDataType.Vec3);
-        SetShaderValue(
-            _shader, _cameraForwardLocation,
-            forward, ShaderUniformDataType.Vec3);
-        SetShaderValue(
-            _shader, _nearPlaneLocation,
-            nearPlane, ShaderUniformDataType.Float);
-    }
-
-    private void SetLodDepthBias(float offsetMeters)
-    {
-        SetShaderValue(
-            _shader, _lodDepthBiasLocation,
-            offsetMeters, ShaderUniformDataType.Float);
-    }
-
-    private static float GetLodDepthBias(int step)
-    {
-        float detailLevels = MathF.Log2(FallbackLodStep / (float)step);
-        return detailLevels / MathF.Log2(FallbackLodStep) * 0.05f;
     }
 
     private void DiscardLegacyCutCap(ChunkKey key, ChunkEntry entry)
