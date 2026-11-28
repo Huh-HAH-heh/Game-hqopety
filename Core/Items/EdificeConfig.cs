@@ -13,7 +13,7 @@ namespace Core.Items
     public class EdificeConfig
     {
         public ushort TypeId;
-        public string Name;
+        public string Name = string.Empty;
         public EdificeType Type;
         // характеристики каждой постройки 
         public float CoverEffectiveness;
