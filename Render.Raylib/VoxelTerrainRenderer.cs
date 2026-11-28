@@ -415,6 +415,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _cutPlaneHeightLocation;
     private readonly int _cutWorldSizeLocation;
     private readonly int _cutColorLocation;
+    private readonly int _cutMaskSamplerLocation;
     private readonly int _sunDirectionLocation;
     private readonly int _ambientLightLocation;
     private readonly int _sunIntensityLocation;
@@ -541,6 +542,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _cutPlaneHeightLocation = GetShaderLocation(_shader, "uCutPlaneHeight");
         _cutWorldSizeLocation = GetShaderLocation(_shader, "uCutWorldSize");
         _cutColorLocation = GetShaderLocation(_shader, "uCutColor");
+        _cutMaskSamplerLocation = GetShaderLocation(_shader, "texture0");
         _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
         _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
         _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
@@ -555,6 +557,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _cutPlaneHeightLocation < 0 ||
             _cutWorldSizeLocation < 0 ||
             _cutColorLocation < 0 ||
+            _cutMaskSamplerLocation < 0 ||
             _sunDirectionLocation < 0 ||
             _ambientLightLocation < 0 ||
             _sunIntensityLocation < 0 ||
@@ -649,9 +652,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ProcessCutMaskCompletions(field);
         bool cutMaskReady = _cutMaskTexture.Id != 0;
         bool cutPlaneReady = _cutPlaneMesh.VaoId != 0;
-        bool cutMaterialReady;
-        unsafe { cutMaterialReady = _material.Maps != null; }
-
+        bool cutMaterialReady = _shader.Id != 0;
         bool cutOverlayReady = cutMaskReady && cutPlaneReady && cutMaterialReady;
         if (cutEnabled && _activeCutLayer >= 0 && !cutOverlayReady)
         {
@@ -2000,17 +2001,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private unsafe void DrawCutOverlay(SparseVoxelField field, float heightMeters)
     {
-        if (_cutMaskTexture.Id == 0 || _cutPlaneMesh.VaoId == 0 ||
-            _material.Maps == null)
+        if (_cutMaskTexture.Id == 0 || _cutPlaneMesh.VaoId == 0)
             return;
 
-        int diffuseMap = (int)MaterialMapIndex.Albedo;
-        MaterialMap* maps = _material.Maps;
-        Texture2D previousTexture = maps[diffuseMap].Texture;
-        maps[diffuseMap].Texture = _cutMaskTexture;
-
+        bool vertexArrayBound = false;
+        Rlgl.DisableDepthMask();
+        Rlgl.DisableBackfaceCulling();
         try
         {
+            Rlgl.EnableShader(_shader.Id);
+
             SetShaderValue(
                 _shader,
                 _cutOverlayPassLocation,
@@ -2033,36 +2033,47 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 _cutColorLocation,
                 new Vector4(0.31f, 0.23f, 0.16f, 1f),
                 ShaderUniformDataType.Vec4);
+            SetShaderValue(
+                _shader,
+                _cutMaskSamplerLocation,
+                0,
+                ShaderUniformDataType.Int);
 
-            // DrawMesh binds the diffuse material map to texture unit zero.
-            maps[diffuseMap].Texture = _cutMaskTexture;
+            Matrix4x4 view = Rlgl.GetMatrixModelview();
+            Matrix4x4 projection = Rlgl.GetMatrixProjection();
+            SetShaderValueMatrix(
+                _shader,
+                _mvpLocation,
+                Raymath.MatrixMultiply(view, projection));
+            SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
 
-            // Keep depth testing active, but do not let this final overlay pass
-            // modify depth for later frame work. The quad is two-sided because
-            // the camera can inspect the section from either side.
-            Rlgl.DisableDepthMask();
-            Rlgl.DisableBackfaceCulling();
-            try
-            {
-                DrawMesh(
-                    _cutPlaneMesh,
-                    _material,
-                    Matrix4x4.Identity);
-            }
-            finally
-            {
-                Rlgl.EnableBackfaceCulling();
-                Rlgl.EnableDepthMask();
-            }
+            Rlgl.ActiveTextureSlot(0);
+            Rlgl.EnableTexture(_cutMaskTexture.Id);
+
+            vertexArrayBound = Rlgl.EnableVertexArray(_cutPlaneMesh.VaoId);
+            if (!vertexArrayBound)
+                throw new InvalidOperationException("Could not bind the cut overlay vertex array.");
+
+            Rlgl.DrawVertexArrayElements(
+                0,
+                _cutPlaneMesh.TriangleCount * 3,
+                null);
         }
         finally
         {
-            maps[diffuseMap].Texture = previousTexture;
+            if (vertexArrayBound)
+                Rlgl.DisableVertexArray();
+
+            Rlgl.ActiveTextureSlot(0);
+            Rlgl.DisableTexture();
             SetShaderValue(
                 _shader,
                 _cutOverlayPassLocation,
                 0,
                 ShaderUniformDataType.Int);
+            Rlgl.DisableShader();
+            Rlgl.EnableBackfaceCulling();
+            Rlgl.EnableDepthMask();
         }
     }
 
