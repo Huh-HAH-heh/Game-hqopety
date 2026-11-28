@@ -1479,16 +1479,18 @@ internal static class VoxelChunkMesher
 
         for (int i = 1; i + 1 < count; i++)
         {
-            Vector3 a = output[0].Position;
-            Vector3 b = output[i].Position;
-            Vector3 c = output[i + 1].Position;
-            if (Vector3.Cross(b - a, c - a).LengthSquared() <= 1e-10f)
+            Vector3 triangleA = output[0].Position;
+            Vector3 triangleB = output[i].Position;
+            Vector3 triangleC = output[i + 1].Position;
+            if (Vector3.Cross(
+                    triangleB - triangleA,
+                    triangleC - triangleA).LengthSquared() <= 1e-10f)
                 continue;
 
             batch.AddTriangle(
-                a,
-                b,
-                c,
+                triangleA,
+                triangleB,
+                triangleC,
                 Vector3.UnitY,
                 color,
                 frontFace: true);
