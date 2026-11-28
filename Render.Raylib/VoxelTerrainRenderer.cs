@@ -427,6 +427,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private long _cutSurfaceGeneration;
     private CancellationTokenSource? _cutSurfaceCancellation;
     private readonly ConcurrentQueue<CutSurfaceBuildResult> _cutSurfaceCompletions = new();
+    private readonly ConcurrentQueue<Task> _cutSurfaceBuildTasks = new();
     private VoxelMeshData[]? _pendingCutSurfaceData;
     private int _pendingCutSurfaceUploadIndex;
     private readonly List<Mesh> _uploadingCutSurfaceMeshes = new(8);
@@ -437,6 +438,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private double _pendingCutSurfaceBuildMilliseconds;
     private long _cutSurfaceReadyRevision = long.MinValue;
     private int _cutSurfaceReadyPaletteVersion = int.MinValue;
+    private int _cutSurfaceDrawnLayer = int.MinValue;
 
     private long _totalBuildRequests;
     private long _totalBuildStarted;
@@ -616,6 +618,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _minimumVisibleStep = BaseLodStep;
 
         CollectCompletedBuilds(field);
+        TrimCompletedCutSurfaceTasks();
 
         int cutLayer = cutEnabled
             ? Math.Clamp(
@@ -638,7 +641,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             RequestCutSurfaceBuild(field, stableCutLayer);
         }
 
-        ProcessCutSurfaceCompletions(field);
+        ProcessCutSurfaceCompletions();
 
         int frustumTests = 0;
         int macroFrustumTests = 0;
@@ -716,7 +719,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         RetryPendingGpuUploads();
         UploadDirtyGpuPages();
 
-        ProcessCutSurfaceCompletions(field);
+        ProcessCutSurfaceCompletions();
         double cutUploadBudget = Math.Max(
             0d, GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
         if (cutUploadBudget > 0d)
@@ -1898,7 +1901,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             ReturnMeshData(completion.Meshes);
     }
 
-    private void ProcessCutSurfaceCompletions(SparseVoxelField field)
+    private void ProcessCutSurfaceCompletions()
     {
         while (_cutSurfaceCompletions.TryDequeue(out CutSurfaceBuildResult result))
         {
@@ -2338,6 +2341,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (cutLayer != _requestedCutLayer)
         {
             bool firstCutRequest = _requestedCutLayer == int.MinValue;
+            if (_cutSurfaceRequestedLayer != cutLayer)
+                CancelPendingCutSurfaceBuild();
+
             _requestedCutLayer = cutLayer;
             _cutLayerStableFrames = firstCutRequest ? CutCapSettleFrames : 0;
             if (firstCutRequest)
@@ -3299,18 +3305,24 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _observedField = field;
         _observedField.Changed += OnVoxelFieldChanged;
-        Interlocked.Exchange(ref _cutMaskDirty, 1);
+        Interlocked.Increment(ref _cutSurfaceRevision);
+        Interlocked.Exchange(ref _cutSurfaceDirty, 1);
+        CancelPendingCutSurfaceBuild();
     }
 
     private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
     {
         int activeLayer = _activeCutLayer;
-        int requestedLayer = _cutMaskRequestedLayer;
+        int requestedLayer = _cutSurfaceRequestedLayer;
         if ((activeLayer >= 0 &&
              bounds.MinY <= activeLayer && bounds.MaxY > activeLayer - 1) ||
             (requestedLayer >= 0 &&
              bounds.MinY <= requestedLayer && bounds.MaxY > requestedLayer - 1))
-            Interlocked.Exchange(ref _cutMaskDirty, 1);
+        {
+            Interlocked.Increment(ref _cutSurfaceRevision);
+            Interlocked.Exchange(ref _cutSurfaceDirty, 1);
+            CancelPendingCutSurfaceBuild();
+        }
 
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
@@ -3495,26 +3507,28 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         if (_observedField != null) _observedField.Changed -= OnVoxelFieldChanged;
         _observedField = null;
 
-        Interlocked.Increment(ref _cutMaskGeneration);
-        if (_cutMaskCancellation != null)
+        CancelPendingCutSurfaceBuild();
+        Task[] cutBuilds = _cutSurfaceBuildTasks.ToArray();
+        if (cutBuilds.Length > 0)
         {
-            try { _cutMaskCancellation.Cancel(); }
-            catch (ObjectDisposedException) { }
-            _cutMaskCancellation = null;
+            try { Task.WhenAll(cutBuilds).GetAwaiter().GetResult(); }
+            catch (Exception exception)
+            {
+                _logger.Error("CUT_SURFACE_WORKER_STOP_FAILED", exception.ToString());
+            }
         }
-        while (_cutMaskCompletions.TryDequeue(out CutMaskBuildResult cutMask))
-            ArrayPool<byte>.Shared.Return(cutMask.Pixels, clearArray: false);
+        while (_cutSurfaceCompletions.TryDequeue(out CutSurfaceBuildResult completion))
+            ReturnMeshData(completion.Meshes);
+        while (_cutSurfaceBuildTasks.TryDequeue(out _)) { }
 
-        if (_cutMaskTexture.Id != 0)
+        foreach (Mesh mesh in _cutSurfaceMeshes)
         {
-            UnloadTexture(_cutMaskTexture);
-            _cutMaskTexture = default;
+            if (mesh.VaoId == 0)
+                continue;
+            UnloadMesh(mesh);
+            _totalGpuUnloads++;
         }
-        if (_cutPlaneMesh.VaoId != 0)
-        {
-            UnloadMesh(_cutPlaneMesh);
-            _cutPlaneMesh = default;
-        }
+        _cutSurfaceMeshes = Array.Empty<Mesh>();
 
         foreach (ChunkEntry entry in _chunks.Values)
         {
