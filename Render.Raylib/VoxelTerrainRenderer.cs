@@ -1593,21 +1593,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 : a.IndexOffset.CompareTo(b.IndexOffset);
         });
 
-        BeginShaderMode(_shader);
         bool vertexArrayBound = false;
         uint currentVao = 0;
         int draws = 0;
 
         try
         {
-            Matrix4x4 view = Rlgl.GetMatrixModelview();
-            Matrix4x4 projection = Rlgl.GetMatrixProjection();
-            SetShaderValueMatrix(
-                _shader,
-                _mvpLocation,
-                Raymath.MatrixMultiply(view, projection));
-            SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
-
             int index = 0;
             while (index < _visibleGpuRanges.Count)
             {
@@ -1652,7 +1643,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             if (vertexArrayBound)
                 Rlgl.DisableVertexArray();
             SetLodDepthBias(0f);
-            EndShaderMode();
         }
 
         return draws;
@@ -2090,17 +2080,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _inactiveLodChunkScratch.Clear();
     }
 
-    private void GetGpuVertexUsage(out long physicalVertices, out long liveVertices)
-    {
-        physicalVertices = 0;
-        liveVertices = 0;
-        foreach (GpuMeshPage page in _gpuPages.Values)
-        {
-            physicalVertices += page.AllocatedVertexCount;
-            liveVertices += page.ReservedVertexCount;
-        }
-    }
-
     private void ReleaseInactiveLodData()
     {
         _inactiveLodChunkScratch.Clear();
@@ -2183,19 +2162,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         GpuPageKey pageKey = GetGpuPageKey(key);
         if (_gpuPages.TryGetValue(pageKey, out GpuMeshPage? page))
         {
-            if (page.Regions.TryGetValue(key, out GpuMeshRegion region))
-            {
-                if (region.Capacity > 0 &&
-                    (uint)region.BufferIndex < (uint)page.Buffers.Count)
-                {
-                    ClearAndReleaseGpuRegion(page, region);
-                    GpuUploadsLastFrame++;
-                    _totalGpuUploads++;
-                }
-
-                page.Regions.Remove(key);
-                RecalculateGpuDrawCounts(page);
-            }
+            if (page.Regions.Remove(key, out GpuMeshRegion[]? regions))
+                ReleaseGpuRegions(page, regions);
 
             // A fully unused detail page must return its physical VBO allocation
             // to the global budget so another LOD can claim it.
