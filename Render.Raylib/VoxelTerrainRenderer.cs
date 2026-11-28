@@ -762,12 +762,17 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if ((_frame % 600) == 0)
         {
-            GetGpuVertexUsage(out long gpuPhysicalVertices, out long gpuLiveVertices);
+            GetGpuVertexUsage(
+                out long gpuPhysicalVertices,
+                out long gpuLiveVertices,
+                out long gpuPhysicalIndices,
+                out long gpuLiveIndices);
             string summary =
                 $"frame={_frame} base={BaseLodStep}:{baseReadyCount}/{_baseCandidateScratch.Count} " +
                 $"detail=1:{Step1ChunksLastFrame},2:{Step2ChunksLastFrame},4:{Step4ChunksLastFrame},8:{Step8ChunksLastFrame} " +
                 $"visible={_visible.Count} fallback64={coarseReadyCount}/{_coarseCandidateScratch.Count} " +
-                $"gpu={gpuLiveVertices / 1_000_000d:0.0}/{gpuPhysicalVertices / 1_000_000d:0.0}M " +
+                $"gpuV={gpuLiveVertices / 1_000_000d:0.0}/{gpuPhysicalVertices / 1_000_000d:0.0}M " +
+                $"gpuI={gpuLiveIndices / 1_000_000d:0.0}/{gpuPhysicalIndices / 1_000_000d:0.0}M " +
                 $"builds={_totalBuildCompleted}/{_totalBuildRequests} pending={_buildQueue.Count} " +
                 $"uploadFail={_totalGpuUploadFailures}";
             _logger.Write("FRAME_SUMMARY", summary);
@@ -777,8 +782,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         float renderCutHeightMeters = cutEnabled && stableCutLayer >= 0
             ? stableCutLayer * SparseVoxelField.VoxelSizeMeters
             : cutHeightMeters;
-        SetLighting();
-        SetCutShader(cutEnabled, renderCutHeightMeters);
 
         float worldRadius = 0.5f * MathF.Sqrt(
             field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
@@ -791,51 +794,54 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             nearPlane,
             MathF.Max(1000f, distanceToOrigin + worldRadius + 100f));
 
-        CollectVisiblePages(_visible, _visiblePages, _visiblePageKeys);
-        _visiblePages.Sort(static (a, b) => b.Key.Step.CompareTo(a.Key.Step));
+        _visibleGpuRanges.Clear();
+        bool drawCoarseFallback = coarseCoverageReady && !basePageReady;
+        if (drawCoarseFallback)
+        {
+            foreach ((Candidate candidate, ChunkEntry entry) in _coarseCandidateEntriesScratch)
+                AddVisibleGpuRanges(candidate.Key, entry);
+        }
 
-        _coarseVisiblePages.Clear();
-        GpuPageKey coarsePageKey = new(FallbackLodStep);
-        if (coarseCoverageReady && !basePageReady &&
-            _gpuPages.TryGetValue(coarsePageKey, out GpuMeshPage? coarsePage) &&
-            coarsePage.HasMesh && !coarsePage.Dirty)
-            _coarseVisiblePages.Add((coarsePageKey, coarsePage));
+        if (coarseCoverageReady || basePageReady)
+        {
+            foreach ((ChunkKey key, ChunkEntry entry) in _visible)
+            {
+                if (key.Step == FallbackLodStep ||
+                    (key.Step == BaseLodStep && !basePageReady))
+                    continue;
+                AddVisibleGpuRanges(key, entry);
+            }
+        }
 
         BeginMode3D(camera);
-        int draws = 0;
         Vector3 cameraForward = camera.Target - camera.Position;
         cameraForward = cameraForward.LengthSquared() > 1e-8f
             ? Vector3.Normalize(cameraForward)
             : -Vector3.UnitY;
+
+        BeginShaderMode(_shader);
+        Matrix4x4 view = Rlgl.GetMatrixModelview();
+        Matrix4x4 projection = Rlgl.GetMatrixProjection();
+        SetShaderValueMatrix(
+            _shader,
+            _mvpLocation,
+            Raymath.MatrixMultiply(view, projection));
+        SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
         SetLodDepthCamera(camera.Position, cameraForward, nearPlane);
+        SetLighting();
+        SetCutShader(cutEnabled, renderCutHeightMeters);
         SetLodShader(-1, 0f);
 
-        // Draw far-to-near. Coarse surfaces fill gaps while detailed pages win depth.
-        foreach ((GpuPageKey key, GpuMeshPage page) in _coarseVisiblePages)
-        {
-            SetLodDepthBias(GetLodDepthBias(key.Step));
-            draws += DrawGpuPage(page, _material);
-        }
-
-        foreach ((GpuPageKey key, GpuMeshPage page) in _visiblePages)
-        {
-            if ((!coarseCoverageReady && !basePageReady) ||
-                key.Step == FallbackLodStep ||
-                (key.Step == BaseLodStep && !basePageReady))
-                continue;
-
-            SetLodDepthBias(GetLodDepthBias(key.Step));
-            draws += DrawGpuPage(page, _material);
-        }
-
+        int draws = DrawVisibleGpuRanges();
         SetLodDepthBias(0f);
-        SetCutShader(cutEnabled, renderCutHeightMeters);
+        EndShaderMode();
+
         _dynamicFragments.Draw(_material);
         EndMode3D();
 
         DrawCallsLastFrame = draws;
         VisibleChunksLastFrame = _visible.Count +
-            (_coarseVisiblePages.Count > 0 ? _coarseCandidateScratch.Count : 0);
+            (drawCoarseFallback ? _coarseCandidateScratch.Count : 0);
 
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
             _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME",
