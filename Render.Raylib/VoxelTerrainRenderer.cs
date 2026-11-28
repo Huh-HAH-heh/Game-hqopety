@@ -964,7 +964,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     Raymath.MatrixMultiply(capView, capProjection));
                 SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
                 SetLighting();
-                SetCutShader(enabled: false, renderCutHeightMeters);
+                SetCutShader(false, renderCutHeightMeters);
                 SetLodShader(-1, 0f);
 
                 int capDraws = DrawCutSurfaceMeshes();
