@@ -224,7 +224,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         public Mesh[] CutCap = Array.Empty<Mesh>();
         public long BaseVersion = long.MinValue;
         public bool SurfaceDirty = true;
-        public bool CutDirty = true;
         public int PaletteVersion = int.MinValue;
         public int CutLayer = int.MinValue;
         public long LastSeenFrame;
@@ -1184,7 +1183,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         {
             bool ready = entry.Built &&
                 !entry.SurfaceDirty &&
-                !entry.CutDirty &&
                 !entry.HasPendingSurface &&
                 !entry.BuildQueued &&
                 entry.RunningBuild == null &&
@@ -2080,7 +2078,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry.PaletteVersion = entry.PendingSurfacePaletteVersion;
                     entry.CutLayer = entry.PendingSurfaceCutLayer;
                     entry.SurfaceDirty = false;
-                    entry.CutDirty = false;
                     entry.Built = true;
                     entry.GpuUploadRetryFrame = 0;
                     entry.GpuUploadRetryVersion = long.MinValue;
@@ -2163,16 +2160,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.BaseVersion != field.BaseVersion ||
                 entry.PaletteVersion != _paletteVersion;
 
-            if ((surfaceStale || entry.CutDirty) && !HasPendingWork(entry))
+            if (surfaceStale && !HasPendingWork(entry))
             {
                 RequestBuild(
                     field, key, entry,
                     buildSurface: true, buildCutCap: false,
                     cutLayer: int.MinValue);
             }
-
-            if (entry.CutCap.Length > 0)
-                ClearCutCap(key, entry);
 
             destination.Add((candidate, entry));
         }
@@ -2878,7 +2872,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 entry.PaletteVersion = request.PaletteVersion;
                 entry.SurfaceDirty = false;
                 entry.CutLayer = request.CutLayer;
-                entry.CutDirty = false;
                 DiscardLegacyCutCap(request.Key, entry);
                 uploadSurface = false;
                 _totalIdenticalSurfaceSkips++;
@@ -2901,7 +2894,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 ReturnMeshData(build.CutCap);
                 build = build with { CutCap = Array.Empty<VoxelMeshData>() };
 
-                entry.CutDirty = false;
                 uploadCutCap = false;
                 _totalIdenticalCutSkips++;
             }
@@ -2981,7 +2973,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     entry.UploadingCutCap.Clear();
                     SetCutCapGpuHash(queued.Key, result.CutCapHash, result.CutLayer);
                     entry.CutLayer = result.CutLayer;
-                    entry.CutDirty = false;
                     RebuiltCutCaps++;
                 }
 
@@ -3146,27 +3137,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             CutCapHash = 0UL,
             CutLayer = int.MinValue
         };
-    }
-
-    private void ClearCutCap(ChunkKey key, ChunkEntry entry)
-    {
-        foreach (Mesh mesh in entry.CutCap)
-        {
-            UnloadMesh(mesh);
-            _totalGpuUnloads++;
-        }
-
-        entry.CutCap = Array.Empty<Mesh>();
-        _gpuMeshHashCache.TryGetValue(key, out ChunkGpuHashes current);
-        _gpuMeshHashCache[key] = current with
-        {
-            HasCutCap = false,
-            CutCapHash = 0UL,
-            CutLayer = int.MinValue
-        };
-
-        entry.CutLayer = int.MinValue;
-        entry.CutDirty = true;
     }
 
     private void EnsureFieldSubscription(SparseVoxelField field)
