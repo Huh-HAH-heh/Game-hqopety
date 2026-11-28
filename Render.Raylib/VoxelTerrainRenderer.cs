@@ -293,7 +293,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int VertexCount,
         int TriangleCount,
         ulong SurfaceHash,
-        ulong CutCapHash);
+        ulong CutCapHash,
+        VoxelMeshDecimationStats Decimation);
 
     private readonly record struct BuildCompletion(
         BuildRequest Request,
@@ -993,14 +994,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private static int GetGpuRegionVertexCapacity(int vertexCount)
     {
         if (vertexCount <= 0) return 0;
-        int reserve = Math.Max(192, vertexCount / 8);
+        int reserve = Math.Max(64, vertexCount / 32);
         return Math.Min(GpuPageBufferVertices, checked(vertexCount + reserve));
     }
 
     private static int GetGpuRegionIndexCapacity(int indexCount)
     {
         if (indexCount <= 0) return 0;
-        int reserve = Math.Max(192, indexCount / 8);
+        int reserve = Math.Max(96, indexCount / 32);
         int capacity = Math.Min(
             GpuPageBufferIndices,
             checked(indexCount + reserve));
@@ -2058,7 +2059,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                         {
                             // Detail chunks may fall back to their parent while replacing
                             // storage. Keep base/fallback geometry until its replacement commits.
-                            bool preserveOldRegions = hadRegions && key.Step >= BaseLodStep;
+                            bool preserveOldRegions = hadRegions;
                             if (hadRegions && !preserveOldRegions)
                             {
                                 page.Regions.Remove(key);
@@ -2677,6 +2678,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 $"mode=worker chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={request.Key.Step} queuedMs={Stopwatch.GetElapsedTime(request.EnqueuedTimestamp, buildStarted).TotalMilliseconds:0.000}");
 
         VoxelMeshData[] surface = Array.Empty<VoxelMeshData>();
+        VoxelMeshDecimationStats decimationStats = default;
         VoxelChunkBuildInput? input = null;
         try
         {
@@ -2695,7 +2697,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             token.ThrowIfCancellationRequested();
             if (request.BuildSurface && input.HasPotentialSurface)
                 surface = VoxelChunkMesher.BuildSurfaceData(
-                    input, request.Palette, token);
+                    input, request.Palette, out decimationStats, token);
 
             token.ThrowIfCancellationRequested();
             int vertices = SumVertices(surface);
@@ -2707,7 +2709,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             VoxelMeshBuildResult result = new(
                 surface, Array.Empty<VoxelMeshData>(), hasSurface, false,
                 request.BuildSurface && !hasSurface, request.CutLayer,
-                buildMs, captureMs, vertices, triangles, surfaceHash, 0UL);
+                buildMs, captureMs, vertices, triangles, surfaceHash, 0UL,
+                decimationStats);
 
             surface = Array.Empty<VoxelMeshData>();
             _completedBuildQueue.Enqueue(new BuildCompletion(
@@ -2715,7 +2718,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             if (_logger.IsEnabled(RenderLogMode.Detailed))
                 _logger.Write(RenderLogMode.Detailed, "MESH_BUILD_COMPLETED",
-                    $"mode=worker chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={request.Key.Step} ms={buildMs:0.000} captureMs={captureMs:0.000} meshes={result.Surface.Length} vertices={vertices} triangles={triangles} hash={surfaceHash:X16}");
+                    $"mode=worker chunk=({request.Key.X},{request.Key.Y},{request.Key.Z}) step={request.Key.Step} " +
+                    $"ms={buildMs:0.000} captureMs={captureMs:0.000} submeshes={result.Surface.Length} " +
+                    $"originalVertices={decimationStats.OriginalVertices} optimizedVertices={decimationStats.OptimizedVertices} " +
+                    $"originalTriangles={decimationStats.OriginalTriangles} optimizedTriangles={decimationStats.OptimizedTriangles} " +
+                    $"originalIndices={decimationStats.OriginalIndices} optimizedIndices={decimationStats.OptimizedIndices} " +
+                    $"originalBytes={decimationStats.OriginalBytes} optimizedBytes={decimationStats.OptimizedBytes} " +
+                    $"decimationErrorMeters={decimationStats.MaximumErrorMeters:0.0000} " +
+                    $"preservedBoundaryVertices={decimationStats.PreservedBoundaryVertices} collapses={decimationStats.Collapses} " +
+                    $"vertices={vertices} triangles={triangles} hash={surfaceHash:X16}");
         }
         catch (OperationCanceledException)
         {
