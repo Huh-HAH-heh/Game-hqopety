@@ -921,6 +921,11 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int draws = DrawVisibleGpuRanges();
         EndShaderMode();
 
+        _dynamicFragments.Draw(_material);
+
+        // Draw the section last among 3D geometry so it can cover the terrain cut
+        // and any fragments behind it, while the depth test still hides it behind
+        // genuinely nearer geometry.
         if (activeCut)
         {
             DrawCutOverlay(field, renderCutHeightMeters);
@@ -937,7 +942,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             }
         }
 
-        _dynamicFragments.Draw(_material);
         EndMode3D();
 
         DrawCallsLastFrame = draws;
@@ -2032,10 +2036,24 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
             // DrawMesh binds the diffuse material map to texture unit zero.
             maps[diffuseMap].Texture = _cutMaskTexture;
-            DrawMesh(
-                _cutPlaneMesh,
-                _material,
-                Matrix4x4.Identity);
+
+            // Keep depth testing active, but do not let this final overlay pass
+            // modify depth for later frame work. The quad is two-sided because
+            // the camera can inspect the section from either side.
+            Rlgl.DisableDepthMask();
+            Rlgl.DisableBackfaceCulling();
+            try
+            {
+                DrawMesh(
+                    _cutPlaneMesh,
+                    _material,
+                    Matrix4x4.Identity);
+            }
+            finally
+            {
+                Rlgl.EnableBackfaceCulling();
+                Rlgl.EnableDepthMask();
+            }
         }
         finally
         {
