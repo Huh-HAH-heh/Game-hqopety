@@ -401,6 +401,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly HashSet<ChunkKey> _splitChunkKeys = new();
     private readonly HashSet<ChunkKey> _nextSplitChunkKeys = new();
     private readonly HashSet<ChunkKey> _visibleChunkKeys = new();
+    private readonly Dictionary<ChunkKey, int> _baseCandidateIndices = new(256);
+    private long[] _detailCoverageVolumes = new long[256];
+    private bool[] _detailCoverageReady = new bool[256];
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _candidateEntriesScratch = new();
     private readonly List<Candidate> _transitionCandidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _transitionEntriesScratch = new();
@@ -775,10 +778,57 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _visible.Clear();
         _visibleChunkKeys.Clear();
-        foreach ((Candidate candidate, ChunkEntry entry) in _baseCandidateEntriesScratch)
+        _baseCandidateIndices.Clear();
+
+        int baseCount = _baseCandidateEntriesScratch.Count;
+        if (_detailCoverageVolumes.Length < baseCount)
         {
+            int capacity = Math.Max(baseCount, _detailCoverageVolumes.Length * 2);
+            Array.Resize(ref _detailCoverageVolumes, capacity);
+            Array.Resize(ref _detailCoverageReady, capacity);
+        }
+
+        for (int i = 0; i < baseCount; i++)
+        {
+            ChunkKey parentKey = _baseCandidateEntriesScratch[i].Candidate.Key;
+            _baseCandidateIndices[parentKey] = i;
+            _detailCoverageVolumes[i] = 0;
+            _detailCoverageReady[i] = true;
+        }
+
+        // Adaptive candidates are non-overlapping leaves. A parent is replaced
+        // only after every unit of its volume is covered by current child meshes.
+        foreach ((Candidate candidate, ChunkEntry entry) in _candidateEntriesScratch)
+        {
+            ChunkKey key = candidate.Key;
+            if (key.Step >= BaseLodStep)
+                continue;
+
+            ChunkKey parentKey = GetBaseAncestor(key);
+            if (!_baseCandidateIndices.TryGetValue(parentKey, out int parentIndex))
+                continue;
+
+            _detailCoverageVolumes[parentIndex] += GetChunkVolume(field, key);
+            if (!IsCurrentMeshReady(entry, field) || !HasCachedSurface(key))
+                _detailCoverageReady[parentIndex] = false;
+        }
+
+        for (int i = 0; i < baseCount; i++)
+        {
+            (Candidate candidate, ChunkEntry entry) = _baseCandidateEntriesScratch[i];
+            long expectedVolume = GetChunkVolume(field, candidate.Key);
+            bool childrenReady = expectedVolume > 0 &&
+                _detailCoverageVolumes[i] == expectedVolume &&
+                _detailCoverageReady[i];
+
+            if (childrenReady)
+                continue;
+
+            // Keep the parent as the sole visible representation while any
+            // child is missing, stale, queued, or awaiting GPU upload.
             if (!entry.Built || !HasCachedSurface(candidate.Key))
                 continue;
+
             _visibleChunkKeys.Add(candidate.Key);
             AddVisible(candidate.Key, entry);
             _minimumVisibleStep = Math.Min(_minimumVisibleStep, candidate.Key.Step);
@@ -786,26 +836,16 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         foreach ((Candidate candidate, ChunkEntry entry) in _candidateEntriesScratch)
         {
-            if (!entry.Built || !HasCachedSurface(candidate.Key))
-                continue;
-            if (_visibleChunkKeys.Add(candidate.Key))
-            {
-                AddVisible(candidate.Key, entry);
-                _minimumVisibleStep = Math.Min(_minimumVisibleStep, candidate.Key.Step);
-            }
-        }
-
-        // Keep cached detail while it still occupies visible pixels. It remains
-        // over the base page during zoom-out and is reused when zooming back in.
-        foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
-        {
-            if (key.Step >= BaseLodStep || !entry.Built ||
-                !HasCachedSurface(key) || _visibleChunkKeys.Contains(key))
+            ChunkKey key = candidate.Key;
+            if (key.Step >= BaseLodStep ||
+                !_baseCandidateIndices.TryGetValue(GetBaseAncestor(key), out int parentIndex))
                 continue;
 
-            float distance = DistanceToChunkBounds(camera.Position, field, key);
-            float pixelsPerVoxel = GetPixelsPerVoxel(camera, viewportHeight, distance);
-            if (pixelsPerVoxel * key.Step < 0.22f)
+            long expectedVolume = GetChunkVolume(
+                field, _baseCandidateEntriesScratch[parentIndex].Candidate.Key);
+            if (_detailCoverageVolumes[parentIndex] != expectedVolume ||
+                !_detailCoverageReady[parentIndex] ||
+                !HasCachedSurface(key))
                 continue;
 
             _visibleChunkKeys.Add(key);
@@ -998,6 +1038,28 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             _splitChunkKeys.Add(key);
 
         leaves.Sort(static (a, b) => a.DistanceSquared.CompareTo(b.DistanceSquared));
+    }
+
+    private static ChunkKey GetBaseAncestor(ChunkKey key)
+    {
+        int scale = BaseLodStep / key.Step;
+        return new ChunkKey(
+            key.X / scale,
+            key.Y / scale,
+            key.Z / scale,
+            BaseLodStep);
+    }
+
+    private static long GetChunkVolume(SparseVoxelField field, ChunkKey key)
+    {
+        int span = ChunkCells * key.Step;
+        int originX = key.X * span;
+        int originY = key.Y * span;
+        int originZ = key.Z * span;
+        int sizeX = Math.Clamp(field.Width - originX, 0, span);
+        int sizeY = Math.Clamp(field.Height - originY, 0, span);
+        int sizeZ = Math.Clamp(field.Depth - originZ, 0, span);
+        return (long)sizeX * sizeY * sizeZ;
     }
 
     private static Candidate CreateCandidate(
