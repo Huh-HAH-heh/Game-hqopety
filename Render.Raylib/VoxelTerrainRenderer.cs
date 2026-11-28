@@ -24,9 +24,13 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     // are rented only by active workers, so the queue can cover the whole visible set.
     private const int MaximumPendingMeshJobs = 4096;
     private const int MaximumWorldSamplesPerAxis = 4096;
-    private const int MaximumWorldMeshVertices = 96_000_000;
-    private const int MaximumTotalGpuPageVertices = 176_000_000;
-    private const int GpuPageBufferVertices = 2_000_000;
+    // GPU pages keep indexed vertices. Each buffer stays within ushort addressing.
+    private const int MaximumWorldMeshVertices = 48_000_000;
+    private const int MaximumTotalGpuPageVertices = 64_000_000;
+    private const int MaximumWorldMeshIndices = 72_000_000;
+    private const int MaximumTotalGpuPageIndices = 96_000_000;
+    private const int GpuPageBufferVertices = VoxelChunkMesher.MaximumVerticesPerMesh;
+    private const int GpuPageBufferIndices = VoxelChunkMesher.MaximumIndicesPerMesh;
     private const int FallbackLodStep = MaximumRenderStep;
     // Use the available physical cores for density capture and Surface Nets builds.
     private static int WorkerCount => Math.Clamp(Environment.ProcessorCount / 2, 1, 6);
@@ -140,23 +144,38 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly record struct GpuPageKey(int Step);
     private readonly record struct GpuMeshRegion(
         int BufferIndex,
-        int Offset,
-        int Capacity,
-        int VertexCount);
+        int VertexOffset,
+        int VertexCapacity,
+        int IndexOffset,
+        int IndexCapacity,
+        int VertexCount,
+        int IndexCount);
     private readonly record struct GpuFreeRange(int Offset, int Capacity);
+    private readonly record struct GpuSourceGroup(
+        int FirstSource,
+        int SourceCount,
+        int VertexCount,
+        int IndexCount);
+    private readonly record struct GpuDrawRange(
+        GpuMeshBuffer Buffer,
+        int IndexOffset,
+        int IndexCount);
 
     private sealed class GpuMeshBuffer : IDisposable
     {
         public Mesh Mesh;
-        public readonly int Capacity;
-        public readonly List<GpuFreeRange> FreeRanges = new(4);
+        public readonly int VertexCapacity;
+        public readonly int IndexCapacity;
+        public readonly List<GpuFreeRange> FreeVertexRanges = new(4);
+        public readonly List<GpuFreeRange> FreeIndexRanges = new(4);
         public int ReservedVertexCount;
-        public int DrawVertexCount;
+        public int ReservedIndexCount;
 
-        public GpuMeshBuffer(Mesh mesh, int capacity)
+        public GpuMeshBuffer(Mesh mesh, int vertexCapacity, int indexCapacity)
         {
             Mesh = mesh;
-            Capacity = capacity;
+            VertexCapacity = vertexCapacity;
+            IndexCapacity = indexCapacity;
         }
 
         public void Dispose()
@@ -165,19 +184,22 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 UnloadMesh(Mesh);
             Mesh = default;
             ReservedVertexCount = 0;
-            DrawVertexCount = 0;
+            ReservedIndexCount = 0;
+            FreeVertexRanges.Clear();
+            FreeIndexRanges.Clear();
         }
     }
 
-    // One logical world page per LOD, split into append-only GPU buffers.
-    // New chunks append to free ranges; existing chunks update only their own
-    // VBO range. A new result never forces an unchanged chunk to be re-uploaded.
+    // A page owns compact indexed buffers. Regions retain their own vertex
+    // and index ranges, so visible regions can be drawn without expanding indices.
     private sealed class GpuMeshPage : IDisposable
     {
         public readonly List<GpuMeshBuffer> Buffers = new(4);
-        public readonly Dictionary<ChunkKey, GpuMeshRegion> Regions = new();
+        public readonly Dictionary<ChunkKey, GpuMeshRegion[]> Regions = new();
         public int ReservedVertexCount;
         public int AllocatedVertexCount;
+        public int ReservedIndexCount;
+        public int AllocatedIndexCount;
         public long CapacityVersion;
         public bool Dirty;
         public bool HasMesh => Buffers.Count > 0;
@@ -190,6 +212,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Regions.Clear();
             ReservedVertexCount = 0;
             AllocatedVertexCount = 0;
+            ReservedIndexCount = 0;
+            AllocatedIndexCount = 0;
             Dirty = false;
         }
     }
@@ -313,6 +337,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly List<(GpuPageKey Key, GpuMeshPage Page)> _transitionVisiblePages = new();
     private readonly HashSet<GpuPageKey> _visiblePageKeys = new();
     private readonly HashSet<GpuPageKey> _transitionVisiblePageKeys = new();
+    private readonly List<GpuDrawRange> _visibleGpuRanges = new(1024);
+    private readonly List<GpuSourceGroup> _gpuSourceGroupsScratch = new(16);
     private readonly List<ChunkKey> _inactiveLodChunkScratch = new();
     private readonly List<Candidate> _coarseCandidateScratch = new();
     private readonly List<(Candidate Candidate, ChunkEntry Entry)> _coarseCandidateEntriesScratch = new();
@@ -384,6 +410,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly int _cameraPositionLocation;
     private readonly int _cameraForwardLocation;
     private readonly int _nearPlaneLocation;
+    private readonly int _mvpLocation;
+    private readonly int _modelLocation;
 
     private TerrainPalette _palette;
     private SparseVoxelField? _observedField;
