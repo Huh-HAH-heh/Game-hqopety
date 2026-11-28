@@ -158,6 +158,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int IndexCount);
     private readonly record struct GpuDrawRange(
         GpuMeshBuffer Buffer,
+        int Step,
         int IndexOffset,
         int IndexCount);
 
