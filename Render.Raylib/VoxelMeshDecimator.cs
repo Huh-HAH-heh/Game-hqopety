@@ -375,6 +375,7 @@ internal static class VoxelMeshDecimator
             }
 
             int faceTotal = 0;
+            faceOffsets[0] = 0;
             for (int i = 0; i < vertexCount; i++)
             {
                 faceTotal += faceCounts[i];
