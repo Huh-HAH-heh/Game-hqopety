@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -658,16 +659,28 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         CollectCompletedBuilds(field);
 
         int cutLayer = cutEnabled
-            ? (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters)
+            ? Math.Clamp(
+                (int)MathF.Round(cutHeightMeters / SparseVoxelField.VoxelSizeMeters),
+                0, field.Height)
             : -1;
         UpdateStableCutLayer(cutEnabled, cutLayer);
         int stableCutLayer = cutEnabled &&
             _cutLayerStableFrames >= CutCapSettleFrames
                 ? _stableCutLayer
                 : -1;
-        int targetCutLayer = cutEnabled && stableCutLayer >= 0
-            ? stableCutLayer
-            : int.MinValue;
+
+        if (stableCutLayer >= 0 &&
+            (stableCutLayer != _cutMaskRequestedLayer ||
+             Interlocked.Exchange(ref _cutMaskDirty, 0) != 0))
+            RequestCutMaskBuild(field, stableCutLayer);
+
+        ProcessCutMaskCompletions(field);
+        bool activeCut = cutEnabled &&
+            _activeCutLayer >= 0 &&
+            _cutMaskTexture.Id != 0;
+        float activeCutHeightMeters = activeCut
+            ? _activeCutLayer * SparseVoxelField.VoxelSizeMeters
+            : 0f;
 
         int frustumTests = 0;
         int macroFrustumTests = 0;
@@ -828,9 +841,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
 
-        float renderCutHeightMeters = cutEnabled && stableCutLayer >= 0
-            ? stableCutLayer * SparseVoxelField.VoxelSizeMeters
-            : cutHeightMeters;
+        float renderCutHeightMeters = activeCutHeightMeters;
 
         float worldRadius = 0.5f * MathF.Sqrt(
             field.Width * field.Width * SparseVoxelField.VoxelSizeMeters * SparseVoxelField.VoxelSizeMeters +
@@ -878,12 +889,15 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
         SetLodDepthCamera(camera.Position, cameraForward, nearPlane);
         SetLighting();
-        SetCutShader(cutEnabled, renderCutHeightMeters);
+        SetCutShader(activeCut, renderCutHeightMeters);
         SetLodShader(-1, 0f);
 
         int draws = DrawVisibleGpuRanges();
         SetLodDepthBias(0f);
         EndShaderMode();
+
+        if (activeCut)
+            DrawCutOverlay(field, renderCutHeightMeters);
 
         _dynamicFragments.Draw(_material);
         EndMode3D();
