@@ -644,9 +644,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             RequestCutMaskBuild(field, stableCutLayer);
 
         ProcessCutMaskCompletions(field);
+        bool cutOverlayReady;
+        unsafe
+        {
+            cutOverlayReady = _cutMaskTexture.Id != 0 &&
+                _cutPlaneMesh.VaoId != 0 &&
+                _material.Maps != null;
+        }
+
+        // Never clip the terrain unless the matching cap overlay can be drawn.
+        // Otherwise a missing quad/material map turns a valid slice into a hollow cut.
         bool activeCut = cutEnabled &&
             _activeCutLayer >= 0 &&
-            _cutMaskTexture.Id != 0;
+            cutOverlayReady;
         float activeCutHeightMeters = activeCut
             ? _activeCutLayer * SparseVoxelField.VoxelSizeMeters
             : 0f;
