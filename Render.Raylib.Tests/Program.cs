@@ -155,9 +155,9 @@ internal static class Program
                 vertices[index] = new Vector3(x, 8f, z);
                 normals[index] = Vector3.UnitY;
                 int color = index * 4;
-                colors[color] = 112;
-                colors[color + 1] = 91;
-                colors[color + 2] = 68;
+                colors[color] = x < 8 ? (byte)112 : (byte)82;
+                colors[color + 1] = x < 8 ? (byte)91 : (byte)112;
+                colors[color + 2] = x < 8 ? (byte)68 : (byte)136;
                 colors[color + 3] = 255;
             }
 
@@ -273,6 +273,15 @@ internal static class Program
             points.Add(new Vector3(holeMax, 8f, coordinate));
             points.Add(new Vector3(coordinate, 8f, holeMin));
             points.Add(new Vector3(coordinate, 8f, holeMax));
+        }
+
+        // Both sides of the material transition remain fixed in place.
+        for (int z = 0; z < side; z++)
+        {
+            if (z > holeMin && z < holeMax)
+                continue;
+            points.Add(new Vector3(7f, 8f, z));
+            points.Add(new Vector3(8f, 8f, z));
         }
 
         return points.ToArray();
