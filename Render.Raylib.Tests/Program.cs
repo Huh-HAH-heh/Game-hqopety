@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Numerics;
 using System.Threading;
 using Core.Map;
@@ -23,6 +24,7 @@ internal static class Program
         Run("Empty chunks exit before Surface Nets", TestEmptyField, ref failures);
         Run("Density capture observes cancellation", TestCaptureCancellation, ref failures);
         Run("Surface normals are finite and normalized", TestNormalQuality, ref failures);
+        Run("QEM reduces planar geometry while preserving outer and hole boundaries", TestQemPreservesBoundariesAndHole, ref failures);
 
         Console.WriteLine();
         Console.WriteLine($"RESULT: {(failures == 0 ? "PASS" : "FAIL")} | failed={failures}");
@@ -109,6 +111,164 @@ internal static class Program
         {
             ReturnMeshData(meshes);
         }
+    }
+
+    private static (bool Passed, string Detail) TestQemPreservesBoundariesAndHole()
+    {
+        const int side = 17;
+        const int holeMin = 6;
+        const int holeMax = 10;
+
+        List<ushort> sourceIndices = new();
+        for (int z = 0; z < side - 1; z++)
+        for (int x = 0; x < side - 1; x++)
+        {
+            if (x >= holeMin && x < holeMax &&
+                z >= holeMin && z < holeMax)
+                continue;
+
+            ushort a = (ushort)(x + z * side);
+            ushort b = (ushort)(x + 1 + z * side);
+            ushort c = (ushort)(x + (z + 1) * side);
+            ushort d = (ushort)(x + 1 + (z + 1) * side);
+            sourceIndices.Add(a);
+            sourceIndices.Add(c);
+            sourceIndices.Add(b);
+            sourceIndices.Add(b);
+            sourceIndices.Add(c);
+            sourceIndices.Add(d);
+        }
+
+        int vertexCount = side * side;
+        Vector3[] vertices = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+        Vector3[] normals = ArrayPool<Vector3>.Shared.Rent(vertexCount);
+        byte[] colors = ArrayPool<byte>.Shared.Rent(vertexCount * 4);
+        ushort[] indices = ArrayPool<ushort>.Shared.Rent(sourceIndices.Count);
+
+        try
+        {
+            for (int z = 0; z < side; z++)
+            for (int x = 0; x < side; x++)
+            {
+                int index = x + z * side;
+                vertices[index] = new Vector3(x, 8f, z);
+                normals[index] = Vector3.UnitY;
+                int color = index * 4;
+                colors[color] = 112;
+                colors[color + 1] = 91;
+                colors[color + 2] = 68;
+                colors[color + 3] = 255;
+            }
+
+            sourceIndices.CopyTo(indices, 0);
+            VoxelMeshData original = new(
+                vertices, normals, colors, indices,
+                vertexCount, sourceIndices.Count);
+
+            Vector3[] boundaryPoints = BuildGridBoundaryPoints(
+                side, holeMin, holeMax);
+            int originalTriangles = original.TriangleCount;
+            VoxelMeshData[] optimized = VoxelMeshDecimator.Simplify(
+                new[] { original },
+                maximumErrorMeters: 0.02f,
+                out VoxelMeshDecimationStats stats);
+
+            try
+            {
+                bool reduced = stats.OptimizedTriangles < stats.OriginalTriangles &&
+                    stats.OptimizedIndices < stats.OriginalIndices;
+                bool holeOpen = !IsCutSurfaceCovered(
+                    optimized,
+                    holeMin + 0.5f,
+                    holeMin + 0.5f);
+                bool boundaryPreserved = true;
+                foreach (Vector3 point in boundaryPoints)
+                {
+                    if (HasVertexNear(optimized, point, 0.001f))
+                        continue;
+                    boundaryPreserved = false;
+                    break;
+                }
+
+                bool validIndices = true;
+                bool validNormals = true;
+                foreach (VoxelMeshData mesh in optimized)
+                {
+                    ReadOnlySpan<ushort> meshIndices = mesh.Indices;
+                    ReadOnlySpan<Vector3> meshNormals = mesh.Normals;
+                    for (int i = 0; i < meshIndices.Length; i++)
+                    {
+                        int local = meshIndices[i] - mesh.IndexBase;
+                        if ((uint)local >= (uint)mesh.VertexCount)
+                        {
+                            validIndices = false;
+                            break;
+                        }
+                    }
+
+                    foreach (Vector3 normal in meshNormals)
+                        if (!float.IsFinite(normal.X) ||
+                            !float.IsFinite(normal.Y) ||
+                            !float.IsFinite(normal.Z) ||
+                            MathF.Abs(normal.LengthSquared() - 1f) > 0.01f)
+                        {
+                            validNormals = false;
+                            break;
+                        }
+                }
+
+                bool errorBounded = stats.MaximumErrorMeters <= 0.02001f;
+                bool memoryReduced = stats.OptimizedBytes < stats.OriginalBytes;
+                bool passed = reduced && holeOpen && boundaryPreserved &&
+                    validIndices && validNormals && errorBounded && memoryReduced;
+
+                return (
+                    passed,
+                    $"vertices={stats.OriginalVertices}->{stats.OptimizedVertices} " +
+                    $"triangles={originalTriangles}->{stats.OptimizedTriangles} " +
+                    $"bytes={stats.OriginalBytes}->{stats.OptimizedBytes} " +
+                    $"collapses={stats.Collapses} error={stats.MaximumErrorMeters:0.0000}m " +
+                    $"boundary={stats.PreservedBoundaryVertices} holeOpen={holeOpen} " +
+                    $"boundaryPreserved={boundaryPreserved} indices={validIndices} normals={validNormals}");
+            }
+            finally
+            {
+                ReturnMeshData(optimized);
+            }
+        }
+        catch
+        {
+            ArrayPool<Vector3>.Shared.Return(vertices, clearArray: false);
+            ArrayPool<Vector3>.Shared.Return(normals, clearArray: false);
+            ArrayPool<byte>.Shared.Return(colors, clearArray: false);
+            ArrayPool<ushort>.Shared.Return(indices, clearArray: false);
+            throw;
+        }
+    }
+
+    private static Vector3[] BuildGridBoundaryPoints(
+        int side,
+        int holeMin,
+        int holeMax)
+    {
+        List<Vector3> points = new();
+        for (int coordinate = 0; coordinate < side; coordinate++)
+        {
+            points.Add(new Vector3(coordinate, 8f, 0f));
+            points.Add(new Vector3(coordinate, 8f, side - 1));
+            points.Add(new Vector3(0f, 8f, coordinate));
+            points.Add(new Vector3(side - 1, 8f, coordinate));
+        }
+
+        for (int coordinate = holeMin; coordinate <= holeMax; coordinate++)
+        {
+            points.Add(new Vector3(holeMin, 8f, coordinate));
+            points.Add(new Vector3(holeMax, 8f, coordinate));
+            points.Add(new Vector3(coordinate, 8f, holeMin));
+            points.Add(new Vector3(coordinate, 8f, holeMax));
+        }
+
+        return points.ToArray();
     }
 
     private static (bool Passed, string Detail) TestCutSurface()
