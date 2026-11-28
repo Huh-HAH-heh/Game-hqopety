@@ -54,17 +54,12 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec3 vertexNormal;
         uniform mat4 mvp;
         uniform mat4 matModel;
-        uniform int uCutOverlayPass;
-        uniform float uCutPlaneHeight;
         out vec3 fragWorldPosition;
         out vec3 fragWorldNormal;
         out vec4 fragColor;
         void main()
         {
             vec4 worldPosition = matModel * vec4(vertexPosition, 1.0);
-            if (uCutOverlayPass != 0)
-                worldPosition.y = uCutPlaneHeight;
-
             fragWorldPosition = worldPosition.xyz;
             fragWorldNormal = normalize(mat3(matModel) * vertexNormal);
             fragColor = vertexColor;
@@ -79,28 +74,30 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         in vec4 fragColor;
         uniform int uCutEnabled;
         uniform float uCutHeight;
-        uniform sampler2D texture0;
-        uniform int uCutOverlayPass;
-        uniform vec2 uCutWorldSize;
-        uniform vec4 uCutColor;
+        uniform int uCutSurfacePass;
         uniform vec3 uSunDirection;
         uniform float uAmbientLight;
         uniform float uSunIntensity;
         uniform float uLodFade;
         uniform int uLodRole;
-        
+
         out vec4 finalColor;
         void main()
         {
-            if (uCutOverlayPass != 0)
-            {
-                vec2 uv = fragWorldPosition.xz / uCutWorldSize;
-                if (any(lessThan(uv, vec2(0.0))) ||
-                    any(greaterThan(uv, vec2(1.0))) ||
-                    texture(texture0, uv).r < 0.5)
-                    discard;
+            vec3 n = normalize(fragWorldNormal);
+            float diffuse = max(dot(n, normalize(uSunDirection)), 0.0);
+            float lighting = max(
+                uAmbientLight + diffuse * uSunIntensity,
+                0.05);
 
-                finalColor = uCutColor;
+            if (uCutSurfacePass != 0)
+            {
+                // Fixed in world coordinates: the hatch does not swim with the camera.
+                float hatch = mod(
+                    floor((fragWorldPosition.x + fragWorldPosition.z) * 1.5),
+                    2.0);
+                float shade = mix(1.0, 0.91, hatch);
+                finalColor = vec4(fragColor.rgb * lighting * shade, fragColor.a);
                 return;
             }
 
@@ -117,9 +114,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                     discard;
             }
 
-            vec3 n = normalize(fragWorldNormal);
             float faceAO = 0.85;
-
             if (n.y > 0.5)
                 faceAO = 1.0;
             else if (n.y < -0.5)
@@ -127,15 +122,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             else if (abs(n.z) > 0.5)
                 faceAO = 0.75;
 
-            float diffuse = max(dot(n, normalize(uSunDirection)), 0.0);
-            float lighting = max(
-                uAmbientLight + diffuse * uSunIntensity,
-                0.05);
-
             finalColor = vec4(
                 fragColor.rgb * faceAO * lighting,
                 fragColor.a);
-
         }
         """;
 
@@ -160,14 +149,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int Step,
         int IndexOffset,
         int IndexCount);
-    private readonly record struct CutMaskBuildResult(
+    private readonly record struct CutSurfaceBuildResult(
         long Generation,
         int Layer,
-        int Width,
-        int Depth,
-        long FieldVersion,
-        int SolidPixels,
-        byte[] Pixels);
+        long Revision,
+        int PaletteVersion,
+        VoxelMeshData[] Meshes,
+        double BuildMilliseconds,
+        Exception? Error);
 
     private sealed class GpuMeshBuffer : IDisposable
     {
@@ -411,11 +400,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private readonly Shader _shader;
     private readonly int _cutEnabledLocation;
     private readonly int _cutHeightLocation;
-    private readonly int _cutOverlayPassLocation;
-    private readonly int _cutPlaneHeightLocation;
-    private readonly int _cutWorldSizeLocation;
-    private readonly int _cutColorLocation;
-    private readonly int _cutMaskSamplerLocation;
+    private readonly int _cutSurfacePassLocation;
     private readonly int _sunDirectionLocation;
     private readonly int _ambientLightLocation;
     private readonly int _sunIntensityLocation;
@@ -433,21 +418,25 @@ internal sealed class VoxelTerrainRenderer : IDisposable
     private int _requestedCutLayer = int.MinValue;
     private int _stableCutLayer = int.MinValue;
     private int _cutLayerStableFrames;
-    private int _cutMaskRequestedLayer = int.MinValue;
-    private int _cutMaskReadyLayer = int.MinValue;
+    private int _cutSurfaceRequestedLayer = int.MinValue;
+    private long _cutSurfaceRequestedRevision = long.MinValue;
+    private int _cutSurfaceRequestedPaletteVersion = int.MinValue;
     private int _activeCutLayer = int.MinValue;
-    private int _cutOverlayUnavailableLayer = int.MinValue;
-    private int _cutOverlayDrawnLayer = int.MinValue;
-    private int _cutMaskDirty;
-    private int _cutMaskWidth;
-    private int _cutMaskDepth;
-    private long _cutMaskGeneration;
-    private CancellationTokenSource? _cutMaskCancellation;
-    private readonly ConcurrentQueue<CutMaskBuildResult> _cutMaskCompletions = new();
-    private Texture2D _cutMaskTexture;
-    private Mesh _cutPlaneMesh;
-    private float _cutPlaneWorldWidth;
-    private float _cutPlaneWorldDepth;
+    private int _cutSurfaceDirty = 1;
+    private long _cutSurfaceRevision;
+    private long _cutSurfaceGeneration;
+    private CancellationTokenSource? _cutSurfaceCancellation;
+    private readonly ConcurrentQueue<CutSurfaceBuildResult> _cutSurfaceCompletions = new();
+    private VoxelMeshData[]? _pendingCutSurfaceData;
+    private int _pendingCutSurfaceUploadIndex;
+    private readonly List<Mesh> _uploadingCutSurfaceMeshes = new(8);
+    private Mesh[] _cutSurfaceMeshes = Array.Empty<Mesh>();
+    private int _pendingCutSurfaceLayer = int.MinValue;
+    private long _pendingCutSurfaceRevision = long.MinValue;
+    private int _pendingCutSurfacePaletteVersion = int.MinValue;
+    private double _pendingCutSurfaceBuildMilliseconds;
+    private long _cutSurfaceReadyRevision = long.MinValue;
+    private int _cutSurfaceReadyPaletteVersion = int.MinValue;
 
     private long _totalBuildRequests;
     private long _totalBuildStarted;
@@ -538,11 +527,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _cutEnabledLocation = GetShaderLocation(_shader, "uCutEnabled");
         _cutHeightLocation = GetShaderLocation(_shader, "uCutHeight");
-        _cutOverlayPassLocation = GetShaderLocation(_shader, "uCutOverlayPass");
-        _cutPlaneHeightLocation = GetShaderLocation(_shader, "uCutPlaneHeight");
-        _cutWorldSizeLocation = GetShaderLocation(_shader, "uCutWorldSize");
-        _cutColorLocation = GetShaderLocation(_shader, "uCutColor");
-        _cutMaskSamplerLocation = GetShaderLocation(_shader, "texture0");
+        _cutSurfacePassLocation = GetShaderLocation(_shader, "uCutSurfacePass");
         _sunDirectionLocation = GetShaderLocation(_shader, "uSunDirection");
         _ambientLightLocation = GetShaderLocation(_shader, "uAmbientLight");
         _sunIntensityLocation = GetShaderLocation(_shader, "uSunIntensity");
@@ -553,11 +538,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         if (_cutEnabledLocation < 0 ||
             _cutHeightLocation < 0 ||
-            _cutOverlayPassLocation < 0 ||
-            _cutPlaneHeightLocation < 0 ||
-            _cutWorldSizeLocation < 0 ||
-            _cutColorLocation < 0 ||
-            _cutMaskSamplerLocation < 0 ||
+            _cutSurfacePassLocation < 0 ||
             _sunDirectionLocation < 0 ||
             _ambientLightLocation < 0 ||
             _sunIntensityLocation < 0 ||
@@ -590,6 +571,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ThrowIfDisposed();
         _palette = palette ?? throw new ArgumentNullException(nameof(palette));
         _paletteVersion++;
+        Interlocked.Increment(ref _cutSurfaceRevision);
+        Interlocked.Exchange(ref _cutSurfaceDirty, 1);
+        CancelPendingCutSurfaceBuild();
 
         foreach (ChunkEntry entry in _chunks.Values)
         {
