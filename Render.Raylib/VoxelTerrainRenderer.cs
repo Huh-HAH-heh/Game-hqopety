@@ -13,9 +13,9 @@ using static Raylib_cs.Raylib;
 namespace RimClone.Render.Raylib;
 
 /// <summary>
-/// Signed-density volumetric renderer. Screen-space LOD changes the sampling
-/// interval while preserving the full-resolution editable density field.
-/// All chunks in one frame share the same step, keeping seams watertight.
+/// Signed-density volumetric renderer. Temporary acceptance mode builds the
+/// complete field at one fixed sampling step and reuses indexed GPU pages.
+/// Cutaway and adaptive LOD are bypassed until full-world coverage is verified.
 /// </summary>
 internal sealed class VoxelTerrainRenderer : IDisposable
 {
