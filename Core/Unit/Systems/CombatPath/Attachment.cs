@@ -1,6 +1,6 @@
 ﻿public abstract class Attachment
 {
-    public string Name;
+    public string Name = string.Empty;
     public abstract float ApplyRangeModifier(float currentRange);
     public abstract float ApplyAccuracyModifier(float currentAccuracy);
 }
