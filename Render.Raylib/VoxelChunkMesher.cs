@@ -1076,7 +1076,8 @@ internal static class VoxelChunkMesher
             return VoxelMeshDecimator.Simplify(
                 rawMeshes,
                 maximumErrorMeters: 0.02f,
-                out decimationStats);
+                out decimationStats,
+                cancellationToken);
         }
         catch
         {
