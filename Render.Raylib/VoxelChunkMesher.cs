@@ -1162,7 +1162,7 @@ internal static class VoxelChunkMesher
                     {
                         int runStart = x;
                         int runStartSampleX = GetCutSampleCoordinate(
-                            runStart, step, field.Width);
+                            runStart - 1, step, field.Width);
                         int firstNextSampleX = GetCutSampleCoordinate(
                             x, step, field.Width);
                         byte materialId = GetCutMaterial(
@@ -1187,9 +1187,9 @@ internal static class VoxelChunkMesher
 
                             byte nextMaterial = GetCutMaterial(
                                 field,
-                                GetCutSampleCoordinate(x, step, field.Width),
+                                GetCutSampleCoordinate(x - 1, step, field.Width),
                                 sampleZ0,
-                                GetCutSampleCoordinate(x + 1, step, field.Width),
+                                GetCutSampleCoordinate(x, step, field.Width),
                                 sampleZ1,
                                 lowerY,
                                 upperY,
@@ -1227,6 +1227,7 @@ internal static class VoxelChunkMesher
                             palette,
                             lowerY,
                             upperY,
+                            step,
                             GetCutSampleCoordinate(x - 1, step, field.Width),
                             GetCutSampleCoordinate(x, step, field.Width),
                             sampleZ0,
@@ -1378,6 +1379,7 @@ internal static class VoxelChunkMesher
         TerrainPalette palette,
         int lowerY,
         int upperY,
+        int step,
         int sampleX0,
         int sampleX1,
         int sampleZ0,
