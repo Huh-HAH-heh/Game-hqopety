@@ -290,7 +290,7 @@ internal static class VoxelMeshDecimator
         byte[] colors = ArrayPool<byte>.Shared.Rent(checked(vertexCount * 4));
         int[] triangles = ArrayPool<int>.Shared.Rent(indexCount);
         Vector3[] faceNormals = ArrayPool<Vector3>.Shared.Rent(triangleCount);
-        float[] faceOffsets = ArrayPool<float>.Shared.Rent(triangleCount);
+        float[] facePlaneOffsets = ArrayPool<float>.Shared.Rent(triangleCount);
         EdgeRef[] edgeRefs = ArrayPool<EdgeRef>.Shared.Rent(indexCount);
         EdgeInfo[] edges = ArrayPool<EdgeInfo>.Shared.Rent(indexCount);
         int[] degree = ArrayPool<int>.Shared.Rent(vertexCount);
@@ -359,14 +359,14 @@ internal static class VoxelMeshDecimator
                 if (lengthSquared <= MinimumAreaSquared)
                 {
                     faceNormals[face] = Vector3.Zero;
-                    faceOffsets[face] = 0f;
+                    facePlaneOffsets[face] = 0f;
                     continue;
                 }
 
                 Vector3 normal = cross / MathF.Sqrt(lengthSquared);
                 float planeOffset = -Vector3.Dot(normal, positions[a]);
                 faceNormals[face] = normal;
-                faceOffsets[face] = planeOffset;
+                facePlaneOffsets[face] = planeOffset;
 
                 double weight = Math.Sqrt(lengthSquared) * 0.5d;
                 quadrics[a].AddPlane(normal, planeOffset, weight);
@@ -375,7 +375,6 @@ internal static class VoxelMeshDecimator
             }
 
             int faceTotal = 0;
-            faceOffsets[0] = 0f;
             for (int i = 0; i < vertexCount; i++)
             {
                 faceTotal += faceCounts[i];
@@ -496,10 +495,7 @@ internal static class VoxelMeshDecimator
                         faceOffsets,
                         faceIds,
                         faceNormals,
-                        faceOffsets: faceOffsets,
-                        faceOffsetsData: faceOffsets,
-                        facePlaneOffsets: faceOffsets,
-                        planeOffsets: faceOffsets,
+                        facePlaneOffsets,
                         triangleCount,
                         maximumErrorMeters,
                         out Vector3 position,
@@ -641,7 +637,7 @@ internal static class VoxelMeshDecimator
             ArrayPool<byte>.Shared.Return(colors, clearArray: false);
             ArrayPool<int>.Shared.Return(triangles, clearArray: false);
             ArrayPool<Vector3>.Shared.Return(faceNormals, clearArray: false);
-            ArrayPool<float>.Shared.Return(faceOffsets, clearArray: false);
+            ArrayPool<float>.Shared.Return(facePlaneOffsets, clearArray: false);
             ArrayPool<EdgeRef>.Shared.Return(edgeRefs, clearArray: false);
             ArrayPool<EdgeInfo>.Shared.Return(edges, clearArray: false);
             ArrayPool<int>.Shared.Return(degree, clearArray: false);
