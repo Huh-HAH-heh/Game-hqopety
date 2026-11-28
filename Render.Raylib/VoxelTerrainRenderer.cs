@@ -740,6 +740,7 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         int coarseReadyCount = 0;
         bool coarseCoverageReady = !basePageReady && HasCompleteCachedLod(
             _coarseCandidateEntriesScratch, field, FallbackLodStep, out coarseReadyCount);
+        bool drawCoarseFallback = coarseCoverageReady && !basePageReady;
 
         _visible.Clear();
         _visibleChunkKeys.Clear();
@@ -890,7 +891,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             MathF.Max(1000f, distanceToOrigin + worldRadius + 100f));
 
         _visibleGpuRanges.Clear();
-        bool drawCoarseFallback = coarseCoverageReady && !basePageReady;
         if (drawCoarseFallback)
         {
             foreach ((Candidate candidate, ChunkEntry entry) in _coarseCandidateEntriesScratch)
