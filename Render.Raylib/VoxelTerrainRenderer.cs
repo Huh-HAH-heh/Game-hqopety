@@ -707,12 +707,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 out long gpuLiveVertices,
                 out long gpuPhysicalIndices,
                 out long gpuLiveIndices);
+            GetGpuFreeRangeSummary(
+                out long freeVertices,
+                out long largestFreeVertexRange,
+                out int vertexFreeRanges,
+                out long freeIndices,
+                out long largestFreeIndexRange,
+                out int indexFreeRanges);
             string summary =
                 $"mode=fixed step={FixedRenderStep} candidates={_candidateScratch.Count} " +
                 $"cached={_chunks.Count} pending={_buildQueue.Count} " +
-                $"gpuV={gpuLiveVertices / 1_000_000d:0.0}/{gpuPhysicalVertices / 1_000_000d:0.0}M " +
-                $"gpuI={gpuLiveIndices / 1_000_000d:0.0}/{gpuPhysicalIndices / 1_000_000d:0.0}M " +
-                $"builds={_totalBuildCompleted}/{_totalBuildRequests} uploadFail={_totalGpuUploadFailures}";
+                $"gpuVReserved={gpuLiveVertices / 1_000_000d:0.0}/{gpuPhysicalVertices / 1_000_000d:0.0}M " +
+                $"gpuVFree={freeVertices / 1_000_000d:0.0}M largest={largestFreeVertexRange / 1_000_000d:0.000}M ranges={vertexFreeRanges} " +
+                $"gpuIReserved={gpuLiveIndices / 1_000_000d:0.0}/{gpuPhysicalIndices / 1_000_000d:0.0}M " +
+                $"gpuIFree={freeIndices / 1_000_000d:0.0}M largest={largestFreeIndexRange / 1_000_000d:0.000}M ranges={indexFreeRanges} " +
+                $"builds={_totalBuildCompleted}/{_totalBuildRequests} uploads={_totalGpuUploads} unloads={_totalGpuUnloads} uploadFail={_totalGpuUploadFailures}";
             _logger.Write("FRAME_SUMMARY", summary);
             Console.WriteLine($"[TERRAIN][PERF] {summary}");
         }
@@ -766,13 +775,26 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         VisibleChunksLastFrame = drawableChunks;
 
         if (_logger.IsEnabled(RenderLogMode.FrameSummary))
+        {
+            GetGpuVertexUsage(
+                out long physicalVertices,
+                out long reservedVertices,
+                out long physicalIndices,
+                out long reservedIndices);
+            GetGpuGeometryUsage(
+                out long actualVertices,
+                out long actualIndices);
             _logger.Write(RenderLogMode.FrameSummary, "VOXEL_FRAME",
                 $"elapsedMs={Stopwatch.GetElapsedTime(frameStarted).TotalMilliseconds:0.000} " +
                 $"mode=fixed step={FixedRenderStep} " +
                 $"candidates={_candidateScratch.Count} visible={VisibleChunksLastFrame} " +
                 $"draws={DrawCallsLastFrame} cache={_chunks.Count} " +
-                $"rebuilt={RebuiltChunks} uploads={GpuUploadsLastFrame} buildQueue={PendingMeshJobs} " +
+                $"rebuilt={RebuiltChunks} uploadsFrame={GpuUploadsLastFrame} buildQueue={PendingMeshJobs} " +
+                $"gpuVertices={actualVertices}/{reservedVertices}/{physicalVertices} " +
+                $"gpuIndices={actualIndices}/{reservedIndices}/{physicalIndices} " +
+                $"uploads={_totalGpuUploads} unloads={_totalGpuUnloads} " +
                 $"captureMs={CpuCaptureMillisecondsLastFrame:0.00} gpuMs={GpuUploadMillisecondsLastFrame:0.00}");
+        }
     }
 
     private void CollectAdaptiveCandidates(
@@ -1972,6 +1994,72 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             liveVertices += page.ReservedVertexCount;
             physicalIndices += page.AllocatedIndexCount;
             liveIndices += page.ReservedIndexCount;
+        }
+    }
+
+    private void GetGpuGeometryUsage(
+        out long actualVertices,
+        out long actualIndices)
+    {
+        actualVertices = 0;
+        actualIndices = 0;
+        foreach (GpuMeshPage page in _gpuPages.Values)
+        foreach (GpuMeshRegion[] regions in page.Regions.Values)
+        foreach (GpuMeshRegion region in regions)
+        {
+            actualVertices += region.VertexCount;
+            actualIndices += region.IndexCount;
+        }
+    }
+
+    private void GetGpuFreeRangeSummary(
+        out long freeVertices,
+        out long largestFreeVertexRange,
+        out int vertexFreeRangeCount,
+        out long freeIndices,
+        out long largestFreeIndexRange,
+        out int indexFreeRangeCount)
+    {
+        freeVertices = 0;
+        largestFreeVertexRange = 0;
+        vertexFreeRangeCount = 0;
+        freeIndices = 0;
+        largestFreeIndexRange = 0;
+        indexFreeRangeCount = 0;
+
+        foreach (GpuMeshPage page in _gpuPages.Values)
+        foreach (GpuMeshBuffer buffer in page.Buffers)
+        {
+            int vertexTail = buffer.VertexCapacity - buffer.ReservedVertexCount;
+            int indexTail = buffer.IndexCapacity - buffer.ReservedIndexCount;
+
+            if (vertexTail > 0)
+            {
+                freeVertices += vertexTail;
+                largestFreeVertexRange = Math.Max(largestFreeVertexRange, vertexTail);
+                vertexFreeRangeCount++;
+            }
+
+            if (indexTail > 0)
+            {
+                freeIndices += indexTail;
+                largestFreeIndexRange = Math.Max(largestFreeIndexRange, indexTail);
+                indexFreeRangeCount++;
+            }
+
+            foreach (GpuFreeRange range in buffer.FreeVertexRanges)
+            {
+                freeVertices += range.Capacity;
+                largestFreeVertexRange = Math.Max(largestFreeVertexRange, range.Capacity);
+                vertexFreeRangeCount++;
+            }
+
+            foreach (GpuFreeRange range in buffer.FreeIndexRanges)
+            {
+                freeIndices += range.Capacity;
+                largestFreeIndexRange = Math.Max(largestFreeIndexRange, range.Capacity);
+                indexFreeRangeCount++;
+            }
         }
     }
 
