@@ -49,7 +49,7 @@ public enum UnitWeaponSlot : byte
 
     public abstract class ItemConfig
     {
-        public string Name;
+        public string Name = string.Empty;
         public float Weight; // Масса предмета (пойдет в DynamicMass)
         public byte WorldColorR = 155;
         public byte WorldColorG = 160;
