@@ -31,20 +31,22 @@ The voxel field, 3D mesher, sphere/capsule/box/ramp CSG, plane flattening, paint
 | Flatten / plane | Plane projection with smooth radial falloff in the same signed-density field | Met in source |
 | Ramp | Additive and subtractive sloped triangular-prism CSG brushes with material assignment | Met in source |
 | Camera editing | Camera raycast into the same density field; F3 tool cycle and mouse application | Met in source |
-| Horizontal cutaway | Shader clips the existing outer mesh; a separate cap mesh is extracted from the same density field. Full solid runs are merged, contour cells are clipped/interpolated, and air cells remain open. XZ step is 4 voxels (0.4 m); Y level remains 0.1 m. | CPU tests pass for solid coverage, tunnel opening and linear contour interpolation; target-GPU visuals and sub-0.4 m features remain pending |
+| Horizontal cutaway | Temporarily disabled in the renderer acceptance path. Shader clipping is forced off; cut-cap build, upload and draw are not scheduled. Previous cap implementation remains dormant for later rework. | Intentionally disabled while validating full-field rendering |
 | Local mesh rebuild | Field bounds dirty only intersecting cached 3D chunks and sampling neighbours | Met in source |
-| Distance LOD | Adaptive density sampling uses a Step=64 fallback, Step=16 base and Step=8/4 detail; minimum detail step is 4 | Selection/building exists, but adjacent chunks at different steps have no transition mesh. Mixed-LOD boundaries can show T-junctions/cracks; acceptance is failed until transition stitching is implemented |
+| Distance LOD | Temporarily disabled. Every chunk across the complete field bounds is built at fixed Step=4 (0.4 m sample interval), independent of camera distance. Camera distance only prioritizes build order; it does not cull chunks. | Fixed-step source path committed; compile, runtime coverage and target-GPU performance still require verification |
 | Multi-level navigation | `VoxelNavigationSystem` samples multiple upward surfaces in edited regions and runs local 0.5 m A* on `(X,Y,floor)` nodes; portal-linked routes cross adjacent 128 m regions and local edits invalidate only affected routes | Partially met: portal corridor selection tries two Manhattan orders, not a global portal-graph optimum |
 | Physics/collision from voxels | Movement in edited regions queries SDF support surfaces and a vertical capsule against the same 3D field; unsupported pawns integrate gravity and land on voxel floors | Partially met: pawn-pawn contact remains the horizontal crowd solver; no rigid-body/rolling terrain debris |
 | Save/load of edited chunks | Compressed versioned chunk serializer plus atomic world-file save/load; Raylib viewer autosaves edits and restores them at startup | Met for the Raylib terrain viewer; campaign/world seed migration still needs integration |
 | Undo/redo and edit history | Bounded 16-step / 64 MiB chunk-snapshot history; F7 undo and F8 redo in the Raylib editor | Met for in-session edit operations; history is intentionally not persisted between launches |
 | Measured performance | Sparse storage and per-frame build budgets exist; no target-PC benchmark has been run | Unverified |
 
-## Known visual defect: mixed-LOD boundaries
+## Temporary full-field acceptance mode
 
-The current adaptive selector can display Step=4 or Step=8 child chunks beside Step=16 parent chunks. The Surface Nets builder emits ordinary same-step cell faces only; it does not generate a transition strip between two different sampling lattices. Shared-halo tests verify identical density values for neighbouring chunks at the **same** step, but do not prove watertight geometry between different steps.
+The renderer currently uses one fixed Step=4 sampling interval (0.4 m) for every chunk in the field. Adaptive subdivision, Step=16/64 fallback selection, parent/child replacement and LOD fading are bypassed. The candidate collector enumerates the complete field bounds; camera distance only sorts build priority. The fixed-step chunks are packed into indexed GPU pages and reused through the existing mesh hash/cache path.
 
-The visible seams are therefore an architectural LOD-stitching defect, not a camera-frustum or GPU-page upload problem. The correct fix is transition geometry at every coarse/fine boundary (Transvoxel-style transition cells or an equivalent Surface Nets seam builder). Do not hide the defect by claiming that same-step halo tests validate mixed-LOD seams.
+Cutaway is also bypassed: the cut uniform is always disabled, and no cap build, upload or draw is requested. The cut implementation remains in the source but is dormant.
+
+This is a diagnostic mode to establish stable full-map coverage before reintroducing optional features. Step=4 is the current finest configured whole-world mode, not the native 0.1 m voxel interval. Do not describe it as full native voxel resolution. LOD must not be re-enabled until mixed-step transition geometry is implemented and visually accepted. Cutaway must be reintroduced separately without rebuilding or re-uploading the outer terrain mesh.
 
 ## Architecture
 
@@ -64,7 +66,7 @@ The signed-distance value is not the material's physical mass density. Physical 
 
 `Render.Raylib/VoxelChunkMesher.cs` extracts the outer isosurface from the signed-density field using Surface Nets and computes normals from density gradients. LOD changes the sampling interval, not the source field.
 
-`Render.Raylib/VoxelTerrainRenderer.cs` keeps the outer surface in indexed GPU pages keyed by LOD step. Horizontal clipping is a shader uniform and does not invalidate those pages. The cap is a separate density-derived mesh: full solid runs are greedily merged into rectangles, mixed contour cells are clipped at density zero with linear edge interpolation, and saddle cells use a consistent asymptotic decision. The cap is built from an immutable field snapshot on a cancellable worker, versioned independently from the outer surface, uploaded within the existing GPU budget and swapped only after all packets are ready. Moving the cut does not rebuild or upload the outer terrain.
+`Render.Raylib/VoxelTerrainRenderer.cs` currently bypasses both cutaway and adaptive LOD. It enumerates the full field at a fixed Step=4, prioritizes nearby chunks for background construction without camera-culling other chunks, and packs indexed chunk regions into reusable GPU pages. Mesh hashes and the existing cache prevent unchanged terrain from being uploaded again. The former cut-cap and adaptive-LOD implementation remains dormant while full-field rendering is validated.
 
 ### Editing
 
