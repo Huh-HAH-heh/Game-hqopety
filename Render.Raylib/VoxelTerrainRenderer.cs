@@ -621,7 +621,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         foreach (ChunkEntry entry in _chunks.Values)
         {
             entry.SurfaceDirty = true;
-            entry.CutDirty = true;
             entry.RequestRevision++;
             entry.FailedRevision = int.MinValue;
             InvalidatePendingBuild(entry);
@@ -3234,10 +3233,19 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
         _observedField = field;
         _observedField.Changed += OnVoxelFieldChanged;
+        Interlocked.Exchange(ref _cutMaskDirty, 1);
     }
 
     private void OnVoxelFieldChanged(SparseVoxelField.VoxelBounds bounds)
     {
+        int activeLayer = _activeCutLayer;
+        int requestedLayer = _cutMaskRequestedLayer;
+        if ((activeLayer >= 0 &&
+             bounds.MinY <= activeLayer && bounds.MaxY > activeLayer - 1) ||
+            (requestedLayer >= 0 &&
+             bounds.MinY <= requestedLayer && bounds.MaxY > requestedLayer - 1))
+            Interlocked.Exchange(ref _cutMaskDirty, 1);
+
         foreach ((ChunkKey key, ChunkEntry entry) in _chunks)
         {
             int chunkSpan = ChunkCells * key.Step;
@@ -3248,20 +3256,14 @@ internal sealed class VoxelTerrainRenderer : IDisposable
             int lastX = (key.X + 1) * chunkSpan + halo;
             int lastY = (key.Y + 1) * chunkSpan + halo;
             int lastZ = (key.Z + 1) * chunkSpan + halo;
-            bool intersectsX = Intersects(firstX, lastX, bounds.MinX, bounds.MaxX);
-            bool intersectsY = Intersects(firstY, lastY, bounds.MinY, bounds.MaxY);
-            bool intersectsZ = Intersects(firstZ, lastZ, bounds.MinZ, bounds.MaxZ);
-            bool surfaceChanged = intersectsX && intersectsY && intersectsZ;
-            bool cutChanged = false;
-            if (entry.CutLayer != int.MinValue && intersectsX && intersectsZ)
-            {
-                int cutSample = entry.CutLayer - 1;
-                cutChanged = bounds.MinY <= cutSample + halo && bounds.MaxY > cutSample - halo;
-            }
-            if (!surfaceChanged && !cutChanged)
+            bool surfaceChanged =
+                Intersects(firstX, lastX, bounds.MinX, bounds.MaxX) &&
+                Intersects(firstY, lastY, bounds.MinY, bounds.MaxY) &&
+                Intersects(firstZ, lastZ, bounds.MinZ, bounds.MaxZ);
+            if (!surfaceChanged)
                 continue;
-            if (surfaceChanged) entry.SurfaceDirty = true;
-            if (cutChanged) entry.CutDirty = true;
+
+            entry.SurfaceDirty = true;
             entry.RequestRevision++;
             entry.FailedRevision = int.MinValue;
             InvalidatePendingBuild(entry);
