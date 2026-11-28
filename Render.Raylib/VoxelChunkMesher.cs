@@ -617,15 +617,25 @@ internal static class VoxelChunkMesher
         int vertexCapacity,
         int indexOffset,
         int indexCapacity,
-        IReadOnlyList<VoxelMeshData> sources)
+        VoxelMeshData[] sources,
+        int firstSource,
+        int sourceCount)
     {
         if (vertexOffset < 0 || vertexCapacity <= 0 ||
             indexOffset < 0 || indexCapacity <= 0 ||
+            firstSource < 0 || sourceCount < 0 ||
+            firstSource + sourceCount > sources.Length ||
             mesh.VaoId == 0 || mesh.VboId == null)
             throw new ArgumentOutOfRangeException(nameof(vertexCapacity));
 
-        int vertexCount = CountVertices(sources);
-        int indexCount = CountIndices(sources);
+        int vertexCount = 0;
+        int indexCount = 0;
+        for (int i = firstSource, end = firstSource + sourceCount; i < end; i++)
+        {
+            vertexCount = checked(vertexCount + sources[i].VertexCount);
+            indexCount = checked(indexCount + sources[i].IndexCount);
+        }
+
         if (vertexCount > vertexCapacity || indexCount > indexCapacity)
             throw new ArgumentException("Indexed GPU region is too small.");
 
@@ -642,7 +652,8 @@ internal static class VoxelChunkMesher
             int vertexCursor = 0;
             int indexCursor = 0;
 
-            for (int sourceIndex = 0; sourceIndex < sources.Count; sourceIndex++)
+            for (int sourceIndex = firstSource, end = firstSource + sourceCount;
+                 sourceIndex < end; sourceIndex++)
             {
                 VoxelMeshData source = sources[sourceIndex];
                 ReadOnlySpan<Vector3> sourceVertices = source.Vertices;
