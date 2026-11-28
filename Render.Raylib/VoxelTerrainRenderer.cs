@@ -1041,19 +1041,29 @@ internal sealed class VoxelTerrainRenderer : IDisposable
 
     private static GpuPageKey GetGpuPageKey(ChunkKey key) => new(key.Step);
 
-    private static int GetGpuRegionCapacity(int vertexCount)
+    private static int GetGpuRegionVertexCapacity(int vertexCount)
     {
         if (vertexCount <= 0) return 0;
         int reserve = Math.Max(192, vertexCount / 8);
-        return checked(((vertexCount + reserve + 2) / 3) * 3);
+        return Math.Min(GpuPageBufferVertices, checked(vertexCount + reserve));
+    }
+
+    private static int GetGpuRegionIndexCapacity(int indexCount)
+    {
+        if (indexCount <= 0) return 0;
+        int reserve = Math.Max(192, indexCount / 8);
+        int capacity = Math.Min(
+            GpuPageBufferIndices,
+            checked(indexCount + reserve));
+        return checked(((capacity + 2) / 3) * 3);
     }
 
     private bool HasCachedSurface(ChunkKey key)
     {
         GpuPageKey pageKey = GetGpuPageKey(key);
         return _gpuPages.TryGetValue(pageKey, out GpuMeshPage? page) &&
-            page.Regions.TryGetValue(key, out GpuMeshRegion region) &&
-            region.VertexCount > 0;
+            page.Regions.TryGetValue(key, out GpuMeshRegion[]? regions) &&
+            regions.Length > 0;
     }
 
     private static int ExpectedChunkCount(SparseVoxelField field, int step)
@@ -1127,23 +1137,6 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _dirtyGpuPageKeys.Add(pageKey);
     }
 
-    private void CollectVisiblePages(
-        List<(ChunkKey Key, ChunkEntry Entry)> chunks,
-        List<(GpuPageKey Key, GpuMeshPage Page)> pages,
-        HashSet<GpuPageKey> keys)
-    {
-        pages.Clear();
-        keys.Clear();
-        foreach ((ChunkKey chunkKey, ChunkEntry _) in chunks)
-        {
-            GpuPageKey key = GetGpuPageKey(chunkKey);
-            if (!_gpuPages.TryGetValue(key, out GpuMeshPage? page) ||
-                !page.HasMesh || page.Dirty || !keys.Add(key))
-                continue;
-            pages.Add((key, page));
-        }
-    }
-
     private void QueueSurfacePageUpdate(
         ChunkKey key,
         ChunkEntry entry,
@@ -1162,19 +1155,21 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         MarkGpuPageDirty(key);
     }
 
-    private static GpuMeshBuffer CreateGpuBuffer(int capacity)
+    private static GpuMeshBuffer CreateGpuBuffer(int vertexCapacity, int indexCapacity)
     {
-        Mesh mesh = new(capacity, capacity / 3);
+        Mesh mesh = new(vertexCapacity, indexCapacity / 3);
         try
         {
             mesh.AllocVertices();
             mesh.AllocNormals();
             mesh.AllocColors();
+            mesh.AllocIndices();
             mesh.VerticesAs<Vector3>().Clear();
             mesh.NormalsAs<Vector3>().Clear();
             mesh.ColorsAs<byte>().Clear();
+            mesh.IndicesAs<ushort>().Clear();
             UploadMesh(ref mesh, false);
-            return new GpuMeshBuffer(mesh, capacity);
+            return new GpuMeshBuffer(mesh, vertexCapacity, indexCapacity);
         }
         catch
         {
@@ -1183,219 +1178,498 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         }
     }
 
-    private GpuMeshRegion AppendGpuRegion(
-        GpuMeshPage page,
-        VoxelMeshData[] data,
-        int vertexCount)
+    private static int GetGpuBufferCapacity(
+        int required,
+        int available,
+        int minimum,
+        bool indices)
     {
-        int capacity = GetGpuRegionCapacity(vertexCount);
-        if (capacity <= 0)
-            return default;
+        if (required <= 0 || available < required)
+            return 0;
 
-        if ((long)page.ReservedVertexCount + capacity > MaximumWorldMeshVertices)
-            throw new InvalidOperationException(
-                $"LOD page exceeds {MaximumWorldMeshVertices:N0} active vertices.");
+        int capacity = Math.Min(available, minimum);
+        while (capacity < required)
+            capacity = capacity <= available / 2 ? capacity * 2 : available;
 
-        int bestBuffer = -1;
-        int bestRange = -1;
+        if (indices)
+            capacity = Math.Min(available, checked(((capacity + 2) / 3) * 3));
+
+        return capacity >= required ? capacity : 0;
+    }
+
+    private static bool CanReserveRange(
+        List<GpuFreeRange> freeRanges,
+        int reservedCount,
+        int totalCapacity,
+        int required)
+    {
+        if (required <= 0) return false;
+        if (reservedCount <= totalCapacity - required)
+            return true;
+
+        for (int i = 0; i < freeRanges.Count; i++)
+            if (freeRanges[i].Capacity >= required)
+                return true;
+
+        return false;
+    }
+
+    private static int ReserveRange(
+        List<GpuFreeRange> freeRanges,
+        ref int reservedCount,
+        int required)
+    {
+        int bestIndex = -1;
         int bestCapacity = int.MaxValue;
-        for (int bufferIndex = 0; bufferIndex < page.Buffers.Count; bufferIndex++)
+        for (int i = 0; i < freeRanges.Count; i++)
         {
-            List<GpuFreeRange> freeRanges = page.Buffers[bufferIndex].FreeRanges;
-            for (int rangeIndex = 0; rangeIndex < freeRanges.Count; rangeIndex++)
+            int capacity = freeRanges[i].Capacity;
+            if (capacity >= required && capacity < bestCapacity)
             {
-                int available = freeRanges[rangeIndex].Capacity;
-                if (available >= capacity && available < bestCapacity)
-                {
-                    bestBuffer = bufferIndex;
-                    bestRange = rangeIndex;
-                    bestCapacity = available;
-                }
+                bestIndex = i;
+                bestCapacity = capacity;
             }
         }
 
-        if (bestBuffer >= 0)
+        if (bestIndex >= 0)
         {
-            GpuMeshBuffer buffer = page.Buffers[bestBuffer];
-            GpuFreeRange free = buffer.FreeRanges[bestRange];
-            int offset = free.Offset;
-            if (free.Capacity == capacity)
-                buffer.FreeRanges.RemoveAt(bestRange);
+            GpuFreeRange range = freeRanges[bestIndex];
+            int offset = range.Offset;
+            if (range.Capacity == required)
+                freeRanges.RemoveAt(bestIndex);
             else
-                buffer.FreeRanges[bestRange] = new GpuFreeRange(
-                    free.Offset + capacity, free.Capacity - capacity);
-
-            page.ReservedVertexCount += capacity;
-            return WriteGpuRegion(page, buffer, bestBuffer, offset, capacity, vertexCount, data);
+                freeRanges[bestIndex] = new GpuFreeRange(
+                    range.Offset + required,
+                    range.Capacity - required);
+            return offset;
         }
+
+        int tail = reservedCount;
+        reservedCount = checked(reservedCount + required);
+        return tail;
+    }
+
+    private static void ReleaseRange(
+        List<GpuFreeRange> freeRanges,
+        ref int reservedCount,
+        int offset,
+        int capacity)
+    {
+        if (capacity <= 0) return;
+
+        int insert = 0;
+        while (insert < freeRanges.Count && freeRanges[insert].Offset < offset)
+            insert++;
+
+        if (insert > 0)
+        {
+            GpuFreeRange left = freeRanges[insert - 1];
+            if (left.Offset + left.Capacity == offset)
+            {
+                offset = left.Offset;
+                capacity += left.Capacity;
+                freeRanges.RemoveAt(--insert);
+            }
+        }
+
+        if (insert < freeRanges.Count)
+        {
+            GpuFreeRange right = freeRanges[insert];
+            if (offset + capacity == right.Offset)
+            {
+                capacity += right.Capacity;
+                freeRanges.RemoveAt(insert);
+            }
+        }
+
+        freeRanges.Insert(insert, new GpuFreeRange(offset, capacity));
+
+        while (freeRanges.Count > 0)
+        {
+            int lastIndex = freeRanges.Count - 1;
+            GpuFreeRange last = freeRanges[lastIndex];
+            if (last.Offset + last.Capacity != reservedCount)
+                break;
+            reservedCount = last.Offset;
+            freeRanges.RemoveAt(lastIndex);
+        }
+    }
+
+    private GpuMeshRegion AllocateGpuRegion(
+        GpuMeshPage page,
+        int vertexCapacity,
+        int indexCapacity,
+        int vertexCount,
+        int indexCount)
+    {
+        if (vertexCapacity <= 0 || indexCapacity <= 0 ||
+            vertexCapacity > GpuPageBufferVertices ||
+            indexCapacity > GpuPageBufferIndices)
+            throw new InvalidOperationException("Indexed mesh region exceeds GPU buffer limits.");
+
+        if ((long)page.ReservedVertexCount + vertexCapacity > MaximumWorldMeshVertices ||
+            (long)page.ReservedIndexCount + indexCapacity > MaximumWorldMeshIndices)
+            throw new InvalidOperationException(
+                $"LOD page exceeds indexed geometry budget ({MaximumWorldMeshVertices:N0} vertices).");
 
         for (int bufferIndex = 0; bufferIndex < page.Buffers.Count; bufferIndex++)
         {
             GpuMeshBuffer buffer = page.Buffers[bufferIndex];
-            if (buffer.ReservedVertexCount + capacity > buffer.Capacity)
+            if (!CanReserveRange(
+                    buffer.FreeVertexRanges,
+                    buffer.ReservedVertexCount,
+                    buffer.VertexCapacity,
+                    vertexCapacity) ||
+                !CanReserveRange(
+                    buffer.FreeIndexRanges,
+                    buffer.ReservedIndexCount,
+                    buffer.IndexCapacity,
+                    indexCapacity))
                 continue;
 
-            int offset = buffer.ReservedVertexCount;
-            buffer.ReservedVertexCount += capacity;
-            page.ReservedVertexCount += capacity;
-            return WriteGpuRegion(page, buffer, bufferIndex, offset, capacity, vertexCount, data);
+            int vertexOffset = ReserveRange(
+                buffer.FreeVertexRanges,
+                ref buffer.ReservedVertexCount,
+                vertexCapacity);
+            int indexOffset = ReserveRange(
+                buffer.FreeIndexRanges,
+                ref buffer.ReservedIndexCount,
+                indexCapacity);
+
+            page.ReservedVertexCount += vertexCapacity;
+            page.ReservedIndexCount += indexCapacity;
+            return new GpuMeshRegion(
+                bufferIndex,
+                vertexOffset,
+                vertexCapacity,
+                indexOffset,
+                indexCapacity,
+                vertexCount,
+                indexCount);
         }
 
-        int remaining = MaximumWorldMeshVertices - page.AllocatedVertexCount;
-        GetGpuVertexUsage(out long totalPhysicalVertices, out _);
-        int globalRemaining = (int)Math.Max(0L, MaximumTotalGpuPageVertices - totalPhysicalVertices);
-        int bufferCapacity = Math.Min(
-            Math.Min(Math.Max(GpuPageBufferVertices, capacity), remaining),
-            globalRemaining);
-        if (bufferCapacity < capacity)
+        int pageVertexAvailable = MaximumWorldMeshVertices - page.AllocatedVertexCount;
+        int pageIndexAvailable = MaximumWorldMeshIndices - page.AllocatedIndexCount;
+        GetGpuVertexUsage(
+            out long totalPhysicalVertices,
+            out _,
+            out long totalPhysicalIndices,
+            out _);
+        int globalVertexAvailable = (int)Math.Clamp(
+            MaximumTotalGpuPageVertices - totalPhysicalVertices,
+            0L, int.MaxValue);
+        int globalIndexAvailable = (int)Math.Clamp(
+            MaximumTotalGpuPageIndices - totalPhysicalIndices,
+            0L, int.MaxValue);
+
+        int vertexBufferCapacity = GetGpuBufferCapacity(
+            vertexCapacity,
+            Math.Min(GpuPageBufferVertices,
+                Math.Min(pageVertexAvailable, globalVertexAvailable)),
+            4096,
+            indices: false);
+        int indexBufferCapacity = GetGpuBufferCapacity(
+            indexCapacity,
+            Math.Min(GpuPageBufferIndices,
+                Math.Min(pageIndexAvailable, globalIndexAvailable)),
+            6144,
+            indices: true);
+
+        if (vertexBufferCapacity < vertexCapacity ||
+            indexBufferCapacity < indexCapacity)
+        {
+            bool pageLimited = pageVertexAvailable < vertexCapacity ||
+                pageIndexAvailable < indexCapacity;
             throw new InvalidOperationException(
-                remaining < capacity
+                pageLimited
                     ? "No reusable GPU page range or physical capacity remains."
                     : "No global GPU page capacity remains.");
+        }
 
-        GpuMeshBuffer nextBuffer = CreateGpuBuffer(bufferCapacity);
+        GpuMeshBuffer nextBuffer = CreateGpuBuffer(
+            vertexBufferCapacity,
+            indexBufferCapacity);
         page.Buffers.Add(nextBuffer);
-        page.AllocatedVertexCount += bufferCapacity;
+        page.AllocatedVertexCount += vertexBufferCapacity;
+        page.AllocatedIndexCount += indexBufferCapacity;
         page.CapacityVersion++;
-        nextBuffer.ReservedVertexCount = capacity;
-        page.ReservedVertexCount += capacity;
+        _gpuCapacityVersion++;
+
+        nextBuffer.ReservedVertexCount = vertexCapacity;
+        nextBuffer.ReservedIndexCount = indexCapacity;
+        page.ReservedVertexCount += vertexCapacity;
+        page.ReservedIndexCount += indexCapacity;
         GpuUploadsLastFrame++;
         _totalGpuUploads++;
-        return WriteGpuRegion(
-            page, nextBuffer, page.Buffers.Count - 1, 0, capacity, vertexCount, data);
+
+        return new GpuMeshRegion(
+            page.Buffers.Count - 1,
+            0,
+            vertexCapacity,
+            0,
+            indexCapacity,
+            vertexCount,
+            indexCount);
     }
 
-    private GpuMeshRegion WriteGpuRegion(
+    private void BuildGpuSourceGroups(VoxelMeshData[] data)
+    {
+        _gpuSourceGroupsScratch.Clear();
+
+        int firstSource = -1;
+        int sourceCount = 0;
+        int vertexCount = 0;
+        int indexCount = 0;
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            VoxelMeshData source = data[i];
+            if (source.VertexCount <= 0 || source.IndexCount <= 0)
+                continue;
+
+            if (source.VertexCount > GpuPageBufferVertices ||
+                source.IndexCount > GpuPageBufferIndices)
+                throw new InvalidOperationException(
+                    "Surface packet exceeds indexed GPU page limits.");
+
+            if (sourceCount > 0 &&
+                (vertexCount + source.VertexCount > GpuPageBufferVertices ||
+                 indexCount + source.IndexCount > GpuPageBufferIndices))
+            {
+                _gpuSourceGroupsScratch.Add(new GpuSourceGroup(
+                    firstSource, sourceCount, vertexCount, indexCount));
+                firstSource = -1;
+                sourceCount = 0;
+                vertexCount = 0;
+                indexCount = 0;
+            }
+
+            if (sourceCount == 0)
+                firstSource = i;
+
+            sourceCount++;
+            vertexCount += source.VertexCount;
+            indexCount += source.IndexCount;
+        }
+
+        if (sourceCount > 0)
+            _gpuSourceGroupsScratch.Add(new GpuSourceGroup(
+                firstSource, sourceCount, vertexCount, indexCount));
+    }
+
+    private bool CanUpdateGpuRegions(
+        GpuMeshRegion[] regions,
+        List<GpuSourceGroup> groups)
+    {
+        if (regions.Length != groups.Count)
+            return false;
+
+        for (int i = 0; i < groups.Count; i++)
+        {
+            GpuSourceGroup group = groups[i];
+            GpuMeshRegion region = regions[i];
+            if (group.VertexCount > region.VertexCapacity ||
+                group.IndexCount > region.IndexCapacity)
+                return false;
+        }
+
+        return true;
+    }
+
+    private GpuMeshRegion[] AppendGpuRegions(
         GpuMeshPage page,
-        GpuMeshBuffer buffer,
-        int bufferIndex,
-        int offset,
-        int capacity,
-        int vertexCount,
         VoxelMeshData[] data)
     {
-        GpuMeshRegion region = new(bufferIndex, offset, capacity, vertexCount);
+        List<GpuSourceGroup> groups = _gpuSourceGroupsScratch;
+        GpuMeshRegion[] regions = new GpuMeshRegion[groups.Count];
+        int allocatedCount = 0;
+
         try
         {
-            VoxelChunkMesher.UpdateTriangleSoup(ref buffer.Mesh, offset, capacity, data);
-            return region;
+            for (int i = 0; i < groups.Count; i++)
+            {
+                GpuSourceGroup group = groups[i];
+                int vertexCapacity = GetGpuRegionVertexCapacity(group.VertexCount);
+                int indexCapacity = GetGpuRegionIndexCapacity(group.IndexCount);
+                GpuMeshRegion region = AllocateGpuRegion(
+                    page,
+                    vertexCapacity,
+                    indexCapacity,
+                    group.VertexCount,
+                    group.IndexCount);
+                regions[i] = region;
+                allocatedCount++;
+
+                GpuMeshBuffer buffer = page.Buffers[region.BufferIndex];
+                VoxelChunkMesher.UpdateIndexedMesh(
+                    ref buffer.Mesh,
+                    region.VertexOffset,
+                    region.VertexCapacity,
+                    region.IndexOffset,
+                    region.IndexCapacity,
+                    data,
+                    group.FirstSource,
+                    group.SourceCount);
+            }
+
+            return regions;
         }
         catch
         {
-            try
-            {
-                VoxelChunkMesher.UpdateTriangleSoup(
-                    ref buffer.Mesh, offset, capacity, Array.Empty<VoxelMeshData>());
-            }
-            catch
-            {
-                // Keep an uncleared range reserved so stale vertices can never be reused.
-                throw;
-            }
-            ReleaseGpuRegion(page, region);
+            for (int i = allocatedCount - 1; i >= 0; i--)
+                ReleaseGpuRegion(page, regions[i]);
             throw;
         }
     }
 
     private void ReleaseGpuRegion(GpuMeshPage page, GpuMeshRegion region)
     {
-        if (region.Capacity <= 0 ||
+        if (region.VertexCapacity <= 0 ||
             (uint)region.BufferIndex >= (uint)page.Buffers.Count)
             return;
 
         GpuMeshBuffer buffer = page.Buffers[region.BufferIndex];
-        List<GpuFreeRange> ranges = buffer.FreeRanges;
-        int offset = region.Offset;
-        int capacity = region.Capacity;
-        int insert = 0;
-        while (insert < ranges.Count && ranges[insert].Offset < offset)
-            insert++;
+        ReleaseRange(
+            buffer.FreeVertexRanges,
+            ref buffer.ReservedVertexCount,
+            region.VertexOffset,
+            region.VertexCapacity);
+        ReleaseRange(
+            buffer.FreeIndexRanges,
+            ref buffer.ReservedIndexCount,
+            region.IndexOffset,
+            region.IndexCapacity);
 
-        if (insert > 0)
-        {
-            GpuFreeRange left = ranges[insert - 1];
-            if (left.Offset + left.Capacity == offset)
-            {
-                offset = left.Offset;
-                capacity += left.Capacity;
-                ranges.RemoveAt(--insert);
-            }
-        }
-
-        if (insert < ranges.Count)
-        {
-            GpuFreeRange right = ranges[insert];
-            if (offset + capacity == right.Offset)
-            {
-                capacity += right.Capacity;
-                ranges.RemoveAt(insert);
-            }
-        }
-
-        ranges.Insert(insert, new GpuFreeRange(offset, capacity));
-        page.ReservedVertexCount -= region.Capacity;
+        page.ReservedVertexCount -= region.VertexCapacity;
+        page.ReservedIndexCount -= region.IndexCapacity;
         page.CapacityVersion++;
         _gpuCapacityVersion++;
-
-        while (ranges.Count > 0)
-        {
-            int lastIndex = ranges.Count - 1;
-            GpuFreeRange last = ranges[lastIndex];
-            if (last.Offset + last.Capacity != buffer.ReservedVertexCount)
-                break;
-            buffer.ReservedVertexCount = last.Offset;
-            ranges.RemoveAt(lastIndex);
-        }
     }
 
-    private void ClearAndReleaseGpuRegion(GpuMeshPage page, GpuMeshRegion region)
+    private void ReleaseGpuRegions(GpuMeshPage page, GpuMeshRegion[] regions)
     {
-        if (region.Capacity <= 0 ||
-            (uint)region.BufferIndex >= (uint)page.Buffers.Count)
+        for (int i = 0; i < regions.Length; i++)
+            ReleaseGpuRegion(page, regions[i]);
+    }
+
+    private void AddVisibleGpuRanges(ChunkKey key, ChunkEntry entry)
+    {
+        if (!entry.Built ||
+            !_gpuPages.TryGetValue(GetGpuPageKey(key), out GpuMeshPage? page) ||
+            page.Dirty ||
+            !page.Regions.TryGetValue(key, out GpuMeshRegion[]? regions))
             return;
 
-        VoxelChunkMesher.UpdateTriangleSoup(
-            ref page.Buffers[region.BufferIndex].Mesh,
-            region.Offset,
-            region.Capacity,
-            Array.Empty<VoxelMeshData>());
-        ReleaseGpuRegion(page, region);
-    }
-
-    private static void RecalculateGpuDrawCounts(GpuMeshPage page)
-    {
-        foreach (GpuMeshBuffer buffer in page.Buffers)
-            buffer.DrawVertexCount = 0;
-
-        foreach (GpuMeshRegion region in page.Regions.Values)
+        foreach (GpuMeshRegion region in regions)
         {
-            if (region.VertexCount <= 0 ||
+            if (region.IndexCount <= 0 ||
                 (uint)region.BufferIndex >= (uint)page.Buffers.Count)
                 continue;
 
-            GpuMeshBuffer buffer = page.Buffers[region.BufferIndex];
-            buffer.DrawVertexCount = Math.Max(
-                buffer.DrawVertexCount,
-                region.Offset + region.VertexCount);
+            _visibleGpuRanges.Add(new GpuDrawRange(
+                page.Buffers[region.BufferIndex],
+                key.Step,
+                region.IndexOffset,
+                region.IndexCount));
         }
     }
 
-    private static int DrawGpuPage(GpuMeshPage page, Material material)
+    private unsafe int DrawVisibleGpuRanges()
     {
-        int draws = 0;
-        foreach (GpuMeshBuffer buffer in page.Buffers)
-        {
-            if (buffer.DrawVertexCount <= 0)
-                continue;
+        if (_visibleGpuRanges.Count == 0)
+            return 0;
 
-            Mesh drawMesh = buffer.Mesh;
-            drawMesh.VertexCount = buffer.DrawVertexCount;
-            drawMesh.TriangleCount = buffer.DrawVertexCount / 3;
-            DrawMesh(drawMesh, material, Matrix4x4.Identity);
-            draws++;
+        _visibleGpuRanges.Sort(static (a, b) =>
+        {
+            int bufferOrder = a.Buffer.Mesh.VaoId.CompareTo(b.Buffer.Mesh.VaoId);
+            return bufferOrder != 0
+                ? bufferOrder
+                : a.IndexOffset.CompareTo(b.IndexOffset);
+        });
+
+        BeginShaderMode(_shader);
+        bool vertexArrayBound = false;
+        uint currentVao = 0;
+        int draws = 0;
+
+        try
+        {
+            Matrix4x4 view = Rlgl.GetMatrixModelview();
+            Matrix4x4 projection = Rlgl.GetMatrixProjection();
+            SetShaderValueMatrix(
+                _shader,
+                _mvpLocation,
+                Raymath.MatrixMultiply(view, projection));
+            SetShaderValueMatrix(_shader, _modelLocation, Matrix4x4.Identity);
+
+            int index = 0;
+            while (index < _visibleGpuRanges.Count)
+            {
+                GpuDrawRange first = _visibleGpuRanges[index];
+                uint vao = first.Buffer.Mesh.VaoId;
+                if (!vertexArrayBound || currentVao != vao)
+                {
+                    if (vertexArrayBound)
+                        Rlgl.DisableVertexArray();
+
+                    if (!Rlgl.EnableVertexArray(vao))
+                        throw new InvalidOperationException(
+                            $"Could not bind indexed terrain VAO {vao}.");
+
+                    vertexArrayBound = true;
+                    currentVao = vao;
+                }
+
+                SetLodDepthBias(GetLodDepthBias(first.Step));
+                int start = first.IndexOffset;
+                int count = first.IndexCount;
+                index++;
+
+                while (index < _visibleGpuRanges.Count)
+                {
+                    GpuDrawRange next = _visibleGpuRanges[index];
+                    if (next.Buffer.Mesh.VaoId != vao ||
+                        next.Step != first.Step ||
+                        next.IndexOffset != start + count)
+                        break;
+
+                    count += next.IndexCount;
+                    index++;
+                }
+
+                Rlgl.DrawVertexArrayElements(start, count, null);
+                draws++;
+            }
+        }
+        finally
+        {
+            if (vertexArrayBound)
+                Rlgl.DisableVertexArray();
+            SetLodDepthBias(0f);
+            EndShaderMode();
         }
 
         return draws;
+    }
+
+    private void GetGpuVertexUsage(
+        out long physicalVertices,
+        out long liveVertices,
+        out long physicalIndices,
+        out long liveIndices)
+    {
+        physicalVertices = 0;
+        liveVertices = 0;
+        physicalIndices = 0;
+        liveIndices = 0;
+
+        foreach (GpuMeshPage page in _gpuPages.Values)
+        {
+            physicalVertices += page.AllocatedVertexCount;
+            liveVertices += page.ReservedVertexCount;
+            physicalIndices += page.AllocatedIndexCount;
+            liveIndices += page.ReservedIndexCount;
+        }
     }
 
     private void UploadDirtyGpuPages()
