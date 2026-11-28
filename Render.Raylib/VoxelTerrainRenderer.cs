@@ -636,7 +636,18 @@ internal sealed class VoxelTerrainRenderer : IDisposable
                 : -1;
 
         long cutRevision = Interlocked.Read(ref _cutSurfaceRevision);
-        if (stableCutLayer >= 0 &&
+        bool cachedCutSurfaceCurrent = stableCutLayer >= 0 &&
+            stableCutLayer == _activeCutLayer &&
+            _cutSurfaceReadyRevision == cutRevision &&
+            _cutSurfaceReadyPaletteVersion == _paletteVersion;
+        if (cachedCutSurfaceCurrent)
+        {
+            _cutSurfaceRequestedLayer = stableCutLayer;
+            _cutSurfaceRequestedRevision = cutRevision;
+            _cutSurfaceRequestedPaletteVersion = _paletteVersion;
+            Interlocked.Exchange(ref _cutSurfaceDirty, 0);
+        }
+        else if (stableCutLayer >= 0 &&
             (_cutSurfaceRequestedLayer != stableCutLayer ||
              _cutSurfaceRequestedRevision != cutRevision ||
              _cutSurfaceRequestedPaletteVersion != _paletteVersion ||
@@ -726,9 +737,8 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         ProcessCutSurfaceCompletions();
         double cutUploadBudget = Math.Max(
             0d, GpuUploadBudgetMilliseconds - GpuUploadMillisecondsLastFrame);
-        if (cutUploadBudget > 0d)
-            GpuUploadMillisecondsLastFrame +=
-                UploadPendingCutSurfaceMeshes(cutUploadBudget);
+        GpuUploadMillisecondsLastFrame +=
+            UploadPendingCutSurfaceMeshes(cutUploadBudget);
 
         bool baseCoverageReady = HasCompleteCachedLod(
             _baseCandidateEntriesScratch, field, BaseLodStep, out int baseReadyCount);
@@ -1890,6 +1900,9 @@ internal sealed class VoxelTerrainRenderer : IDisposable
         _pendingCutSurfaceRevision = long.MinValue;
         _pendingCutSurfacePaletteVersion = int.MinValue;
         _pendingCutSurfaceBuildMilliseconds = 0d;
+        _cutSurfaceRequestedLayer = int.MinValue;
+        _cutSurfaceRequestedRevision = long.MinValue;
+        _cutSurfaceRequestedPaletteVersion = int.MinValue;
 
         foreach (Mesh mesh in _uploadingCutSurfaceMeshes)
         {
