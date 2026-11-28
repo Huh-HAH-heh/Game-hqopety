@@ -229,17 +229,6 @@ public static class RaylibTerrainViewer
                         terrain = TerrainRenderSnapshot.Create(
                             worldMap,
                             menu.Settings.TerrainMode);
-                        if (cutawayMode)
-                        {
-                            int currentCutLayer = Math.Clamp(
-                                (int)MathF.Round(
-                                    menu.Settings.CutawayHeightMeters /
-                                    (WorldMap.LayerHeightUnits * 0.1f)),
-                                0,
-                                worldMap.LayerCount - 1);
-                            terrain.SetCutawayLayer(currentCutLayer);
-                        }
-
                         renderer = new RaylibTerrainRenderer(
                             terrain,
                             menu.Settings.Palette,
